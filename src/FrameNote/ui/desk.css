@@ -17,13 +17,18 @@ main{grid-template-columns:clamp(170px,18vw,236px) minmax(0,1fr) clamp(220px,24v
 #captureFields{border:0;padding:0;margin:2px 0;min-width:0;display:grid;gap:14px}
 #captureFields label{display:grid;gap:5px;font-size:13px;line-height:17px;min-width:0}
  #captureFields select{line-height:19px;width:100%;min-width:0;padding:5px 2px}
-#captureFields meter{width:100%;height:6px}
+.mixer,.strips{display:grid;gap:6px;min-width:0}.mixer{border-top:1px solid var(--edge);padding-top:10px}.strips:empty{display:none}.mixerHeading,.channelHead,.channelAdjust,.meterScale{display:flex;align-items:center;gap:6px}.mixerHeading{justify-content:space-between}.mixerHeading h3{margin:0;font-size:14px}.mixerHeading span,.meterScale{color:var(--muted);font-size:10px}
+.channelStrip{min-width:0;padding:6px 8px;border:1px solid var(--border);border-radius:5px;background:var(--chrome)}.channelHead strong{flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:12px;font-weight:500}.channelStrip button{display:grid;place-items:center;padding:2px;width:24px;height:24px}.channelStrip svg{width:16px;height:16px;fill:currentColor}.channelStrip .removeChannel{width:20px;height:20px;background:transparent;border-color:transparent;color:var(--muted)}.channelAdjust{margin:3px 0 6px}.channelAdjust input{min-width:0;flex:1;margin:0;height:20px}.gainValue,.meterScale{font-family:var(--mono);font-variant-numeric:tabular-nums}.gainValue{font-size:11px;text-align:right;min-width:41px}.muteChannel[aria-pressed=true],.channelStrip.offline strong{color:var(--danger)}
+.channelMeter{position:relative;height:6px;overflow:hidden;border-radius:2px;background:linear-gradient(to right,#41a878 0% 80%,#dba647 80% 95%,#d75a59 95%)}.channelMeter i{display:block;position:absolute;inset:0;background:var(--canvas);transform-origin:right}.meterScale{position:relative;display:block;height:12px;line-height:12px}.meterScale span{position:absolute}.meterScale span:nth-child(2){left:40%;transform:translateX(-50%)}.meterScale span:nth-child(3){left:80%;transform:translateX(-50%)}.meterScale span:last-child{right:0}
 #captureFields .cursor{display:flex;align-items:center}
 .capturePair{display:grid;grid-template-columns:1fr 1fr;gap:8px}
 #refreshSources,#pickRegion{justify-self:start;padding:4px 9px}
 #regionControls{display:grid;gap:5px}
 #regionSize{letter-spacing:normal}
 #sendReaper{width:35px;height:34px;display:grid;place-items:center;padding:6px;color:var(--ink)}
+.iconAction{position:relative;width:35px;height:34px;flex:none;display:inline-grid;place-items:center;padding:0}
+.iconAction svg{display:block;fill:currentColor;pointer-events:none}
+.actionName{position:absolute;width:1px;height:1px;padding:0;overflow:hidden;clip-path:inset(50%);white-space:nowrap}
 #transport{flex-wrap:wrap;align-content:center;gap:5px}
 @media(max-width:1000px){#transport{padding:0 6px}#transport button{padding:4px}aside{padding:10px}#viewer{grid-template-rows:minmax(0,1fr) auto auto}}
 .noteNumber{display:inline-block;color:var(--ink);background:var(--accent);border-radius:3px;padding:1px 5px;margin-right:4px;font-variant-numeric:tabular-nums}
@@ -81,6 +86,7 @@ select{appearance:none;background-image:var(--chevron);background-repeat:no-repe
 #captureFields select{padding-right:19px}
 #zoom{width:40px;height:23px;padding-right:16px}
 kbd{font-family:var(--ui);display:inline-block;width:.5em;line-height:11px;text-align:center}
+#welcome{padding-block-start:19px}
 #stage:has(#welcome:not([hidden])){color:var(--ink)}
 #stage:has(#welcome[hidden]){background:#101113}
 #del:not(:disabled){color:var(--danger)}

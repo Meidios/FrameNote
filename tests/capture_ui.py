@@ -23,12 +23,17 @@ try:
                 dlg=Desktop(backend="win32").window(process=proc.pid,class_name="#32770");dlg.wait("ready",timeout=10)
                 return dlg
             def save_to(dest):
-                dlg=dialog();edit=dlg.child_window(class_name="Edit",found_index=0);edit.wait("ready");time.sleep(.35);edit.set_edit_text(str(dest));dlg.child_window(control_id=1).click_input()
+                from pywinauto.keyboard import send_keys
+                dlg=dialog();dlg.set_focus()
+                edit=dlg.child_window(class_name="Edit",control_id=1001);edit.wait("ready")
+                edit.click_input();send_keys("^a");edit.set_edit_text(str(dest.resolve()));send_keys("{ENTER}")
+                dlg.wait_not("visible",timeout=8)
             for attempt,gif in enumerate([False,False,True]):
                 page.locator("#mode").select_option("window")
                 page.locator("#refreshSources").click()
                 page.locator("#source").select_option(label="FrameNote QC target")
-                page.locator("#output").select_option("")
+                while page.locator("#outputStrips .removeChannel").count():
+                    page.locator("#outputStrips .removeChannel").first.click()
                 button=page.locator("#recordGif" if gif else "#record")
                 button.click()
                 wait(page,"recording!==null")

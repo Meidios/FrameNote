@@ -35,6 +35,7 @@ public sealed partial class Desk
     UpdateSettings prefs=null!;
     Mutex? session,installGuard;
     MenuItem autoItem=null!;
+    bool reviewCanOpen;
     bool updating,startedUpdates;
     static void Browse(string url)=>Process.Start(new ProcessStartInfo(url){UseShellExecute=true})?.Dispose();
     static void Releases()=>Browse(Updates.Home+"/releases");
@@ -44,6 +45,13 @@ public sealed partial class Desk
         session=new Mutex(false,@"Local\FrameNote.Startup."+key,out bool first);
         if(File.Exists(Path.Combine(AppContext.BaseDirectory,"unins000.exe")))installGuard=new Mutex(false,@"Local\FrameNote.Installed");
         var bar=new Menu();
+        var file=new MenuItem{Header="文件(_F)"};bar.Items.Add(file);
+        var open=new MenuItem{Header="打开文件…(_O)"};
+        bool CanOpen()=>!pending && !configuring && (native?.IsVisible==true ? native.OpenButton.IsEnabled : reviewCanOpen);
+        file.SubmenuOpened+=(_,_)=>open.IsEnabled=CanOpen();
+        open.Click+=async (_,_)=>{if(CanOpen())await PickVideo();};
+        file.Items.Add(open);
+        var exit=new MenuItem{Header="退出(_X)"};exit.Click+=(_,_)=>Close();file.Items.Add(exit);
         var menu=new MenuItem{Header="帮助(_H)"};bar.Items.Add(menu);
         MenuItem Item(string label,Action action){var item=new MenuItem{Header=label};item.Click+=(_,_)=>action();menu.Items.Add(item);return item;}
         Item("使用帮助",()=>Simple("使用帮助","FrameNote 视频审阅","打开或拖入视频，定位需要反馈的画面。按 M 添加点批注；按 I 和 O 标记区间，再填写反馈。Ctrl+Enter 保存批注。\n\n点「导出审阅包」把原片和批注一起交付。收件人双击 .framenote 即可重新审阅；点 REAPER 图标可发送至当前工程。\n\n在 VLC 播放界面点「进入批注」即可逐帧审阅。"));

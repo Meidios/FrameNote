@@ -12,8 +12,18 @@ class Check
 {
     [STAThread] static int Main(string[] args)
     {
+        if(args is ["--mixer-tones",var first,var second]){
+            using var devices=new MMDeviceEnumerator();
+            using var a=devices.GetDevice(first);using var b=devices.GetDevice(second);
+            using var left=new WasapiOut(a,AudioClientShareMode.Shared,true,50);
+            using var right=new WasapiOut(b,AudioClientShareMode.Shared,true,50);
+            static IWaveProvider Tone(double hz)=>new NAudio.Wave.SampleProviders.SignalGenerator(48000,2){
+                Frequency=hz,Gain=.05,Type=NAudio.Wave.SampleProviders.SignalGeneratorType.Sin}.ToWaveProvider();
+            left.Init(Tone(619));right.Init(Tone(1423));left.Play();right.Play();
+            Console.WriteLine("ready");Console.ReadLine();return 0;
+        }
         if(args.Length>=4 && args[0]=="--check-mux"){
-            CaptureSession.Mux(args[1],args[2],double.Parse(args[3],System.Globalization.CultureInfo.InvariantCulture),args.Skip(4)).GetAwaiter().GetResult();return 0;
+            CaptureSession.Mux(args[1],args[2],double.Parse(args[3],System.Globalization.CultureInfo.InvariantCulture),args.Skip(4).Select(p=>(p,0))).GetAwaiter().GetResult();return 0;
         }
         var app=new Application();
         var video=new MediaElement{LoadedBehavior=MediaState.Manual,UnloadedBehavior=MediaState.Manual,Stretch=Stretch.Fill,IsMuted=true};
@@ -29,8 +39,8 @@ class Check
                 foreach(var fps in args.Contains("--60-only")?new[]{60}:new[]{30,60}){
                     var file=Path.GetFullPath(Path.Combine(args[1],$"capture-{fps}.mp4"));var src=new WindowRecordingSource(new WindowInteropHelper(window).Handle){IsCursorCaptureEnabled=false};
                     var outputs=Recorder.GetSystemAudioLoopbackDevices();var system=(args.Contains("--virtual-cable") ? outputs.FirstOrDefault(x=>x.FriendlyName.StartsWith("CABLE Input")) : null)??outputs.FirstOrDefault(x=>x.IsDefaultDevice);
-                    var audio=new List<AudioSourceBase>();
-                    if(args.Contains("--system-audio") && system!=null)audio.Add(system);
+                    var audio=new List<CaptureInput>();
+                    if(args.Contains("--system-audio") && system!=null)audio.Add(new(system.DeviceName,true));
                     using var devices=new MMDeviceEnumerator();
                     using var endpoint=system==null?null:devices.GetDevice(system.DeviceName);
                     using var probe=endpoint==null?null:new EndpointProbe(endpoint.ID,Path.Combine(args[1],$"endpoint-{fps}.csv"));

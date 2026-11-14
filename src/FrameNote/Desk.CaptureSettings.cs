@@ -10,11 +10,12 @@ namespace FrameNote;
 
 public sealed partial class Desk
 {
-    sealed record CaptureSettings(string Mode,string Source,int Fps,bool High,string Output,string Mic,bool Cursor);
+    sealed record MixerChannel(string Id,int GainDb,bool Muted);
+    sealed record CaptureSettings(string Mode,string Source,int Fps,bool High,MixerChannel[] Outputs,MixerChannel? Mic,bool Cursor);
     readonly DispatcherTimer meters=new(){Interval=TimeSpan.FromMilliseconds(160)};
     MMDeviceEnumerator? endpoints;
-    MMDevice? outMeter,micMeter;
-    string outputId="",micId="",regionDevice="";
+    readonly Dictionary<string,MMDevice> meterDevices=[];
+    string regionDevice="";
     ScreenRect? area;
     Int32Rect regionMonitor;
     void Catalog(){
@@ -25,19 +26,20 @@ public sealed partial class Desk
             outputs=Recorder.GetSystemAudioLoopbackDevices().Select(d=>new{id=d.DeviceName,name=d.FriendlyName,preferred=d.IsDefaultDevice}),
             inputs=Recorder.GetSystemAudioCaptureDevices().Select(d=>new{id=d.DeviceName,name=d.FriendlyName})});
     }
-    void MeterSources(string output,string mic){
-        MMDevice? Device(string id){
-            if(id=="")return null;
-            try{return (endpoints??=new()).GetDevice(id);}catch(System.Runtime.InteropServices.COMException){return null;}
+    void MeterSources(string[] ids){
+        var selected=ids.ToHashSet(StringComparer.Ordinal);
+        foreach(var id in meterDevices.Keys.Where(id=>!selected.Contains(id)).ToArray()){
+            meterDevices[id].Dispose();meterDevices.Remove(id);
         }
-        if(output!=outputId){outMeter?.Dispose();outMeter=Device(output);outputId=output;}
-        if(mic!=micId){micMeter?.Dispose();micMeter=Device(mic);micId=mic;}
-        if(outMeter!=null||micMeter!=null)meters.Start();else meters.Stop();
+        foreach(var id in selected.Where(id=>!meterDevices.ContainsKey(id))){
+            try{meterDevices[id]=(endpoints??=new()).GetDevice(id);}catch(System.Runtime.InteropServices.COMException){}
+        }
+        if(meterDevices.Count>0)meters.Start();else meters.Stop();
     }
     void InitMeters(){
         static float Peak(MMDevice? device){try{return device?.AudioMeterInformation.MasterPeakValue??0;}catch(System.Runtime.InteropServices.COMException){return 0;}}
-        meters.Tick+=(_,_)=>Send(new{type="meters",output=Peak(outMeter),mic=Peak(micMeter)});
-        Closed+=(_,_)=>{meters.Stop();outMeter?.Dispose();micMeter?.Dispose();endpoints?.Dispose();ClearOutline();};
+        meters.Tick+=(_,_)=>Send(new{type="meters",levels=meterDevices.ToDictionary(p=>p.Key,p=>Peak(p.Value))});
+        Closed+=(_,_)=>{meters.Stop();foreach(var device in meterDevices.Values)device.Dispose();endpoints?.Dispose();ClearOutline();};
     }
     void ResetRegion(){ClearOutline();area=null;regionDevice="";}
     void PickRegion(string device){
@@ -70,9 +72,18 @@ public sealed partial class Desk
             }else if(s.Mode!="display")throw new InvalidDataException("采集范围无效。");
             source=display;
         }
-        List<AudioSourceBase> audio=[];
-        if(!gif && s.Output!="")audio.Add(Recorder.GetSystemAudioLoopbackDevices().FirstOrDefault(d=>d.DeviceName==s.Output)??throw new InvalidOperationException("系统声设备已断开。"));
-        if(!gif && s.Mic!="")audio.Add(Recorder.GetSystemAudioCaptureDevices().FirstOrDefault(d=>d.DeviceName==s.Mic)??throw new InvalidOperationException("麦克风已断开。"));
+        List<CaptureInput> audio=[];
+        if(!gif){
+            var outputs=Recorder.GetSystemAudioLoopbackDevices().Select(d=>d.DeviceName).ToHashSet();
+            foreach(var channel in s.Outputs){
+                if(!outputs.Remove(channel.Id))throw new InvalidOperationException("输出设备已断开或重复，请刷新采集来源。");
+                audio.Add(new(channel.Id,true,channel.GainDb,channel.Muted));
+            }
+            if(s.Mic is {} mic){
+                if(!Recorder.GetSystemAudioCaptureDevices().Any(d=>d.DeviceName==mic.Id))throw new InvalidOperationException("麦克风已断开，请刷新采集来源。");
+                audio.Add(new(mic.Id,false,mic.GainDb,mic.Muted));
+            }
+        }
         return new CaptureSession(source,audio,s.Fps,s.High);
     }
 }

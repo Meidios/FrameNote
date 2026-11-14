@@ -16,7 +16,7 @@
 
 | 任务 | 在 FrameNote 中怎么做 |
 |---|---|
-| 录屏与 GIF | 选择显示器、窗口或框选区域。系统声和麦克风可分别选择；停止录制视频后直接进入审阅。临时录屏要在换片或退出前导出审阅包。GIF 最长 30 秒，无音频。 |
+| 录屏与 GIF | 选择显示器、窗口或框选区域。在横向混音器中添加多个系统输出和一个可选麦克风；录制前按路调节增益、静音，成片为立体声混音；停止录制视频后直接进入审阅。临时录屏要在换片或退出前导出审阅包。GIF 最长 30 秒，无音频。 |
 | 图片批注 | 空界面按 Ctrl+V 打开剪贴板图片；已有视频时，同一快捷键会添加图片批注。可缩放、平移，按原图分辨率复制或导出带批注 PNG；动图导出静态首帧。 |
 | 播放与兼容 | 兼容的视频可直接逐帧审阅。其他编码可用内置 VLC 播放原片，进入批注时按需生成临时预览；导出审阅包仍保留原始媒体。 |
 | 发送到 REAPER | 首次点击 REAPER 图标选择 Lua 脚本目录。打开目标工程，选择轨道并放置编辑光标，再发送：点批注变成 Marker，区间变成 Region。 |
@@ -44,7 +44,7 @@ Pin feedback such as “this impact lands late” to the frame where it happens.
 
 | Task | How it works |
 |---|---|
-| Screen capture and GIF | Record a display, window or selected region. Choose system audio and microphone separately. Stopping a video opens it for review; export the temporary recording before switching files or quitting. GIFs are silent and limited to 30 seconds. |
+| Screen capture and GIF | Record a display, window or selected region. Add multiple Windows outputs and an optional microphone in the horizontal mixer. Set gain and mute per source before recording one stereo mix. Stopping a video opens it for review; export the temporary recording before switching files or quitting. GIFs are silent and limited to 30 seconds. |
 | Image annotation | Paste into an empty desk to open a clipboard image; paste while reviewing a video to attach a picture note. Zoom or pan without changing the dimensions of an exported PNG. Animated images export as a still of the first frame. |
 | Playback compatibility | Compatible media opens directly in frame review. Other codecs can play in the built-in VLC player; entering review creates a temporary preview if needed. Packages keep the original media. |
 | REAPER handoff | On first use, choose a folder for the Lua action. In REAPER, select a track and place the edit cursor in the target project, then send from FrameNote. Points become markers and ranges become regions. |

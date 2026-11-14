@@ -1,5 +1,6 @@
 using System.IO;
 using System.Windows;
+using System.Windows.Interop;
 using System.Diagnostics;
 using System.Security.Cryptography;
 using System.Text;
@@ -36,6 +37,12 @@ public sealed partial class Desk : Window
     public Desk(string? initial) {
         Title="FrameNote · 视频审阅"; Width=1230; Height=800; MinWidth=840; MinHeight=560;
         DeskTheme.Window(this); WindowStartupLocation=WindowStartupLocation.CenterScreen;
+        // Only the WPF host surface uses software rendering. WebView2 and VLC
+        // own separate child HWNDs and keep their normal video rendering paths.
+        SourceInitialized+=(_,_)=>{
+            var target=HwndSource.FromHwnd(new WindowInteropHelper(this).Handle)?.CompositionTarget;
+            if(target!=null)target.RenderMode=RenderMode.SoftwareOnly;
+        };
         scratch=Path.Combine(Path.GetTempPath(),"FrameNote",Guid.NewGuid().ToString("N"));
         InitCapture();
         surfaces.Children.Add(web); InitHelp(); AllowDrop=true;
@@ -118,8 +125,9 @@ public sealed partial class Desk : Window
     async Task Message(string raw){
         try{
             using var msg=JsonDocument.Parse(raw);var p=msg.RootElement; var op=p.GetProperty("type").GetString();
+            if(op=="canOpen"){reviewCanOpen=p.GetProperty("value").GetBoolean();return;}
             if(op=="catalog"){Catalog();return;}
-            if(op=="meterSources"){MeterSources(p.GetProperty("output").GetString()!,p.GetProperty("mic").GetString()!);return;}
+            if(op=="meterSources"){MeterSources(p.GetProperty("ids").Deserialize<string[]>()!);return;}
             if(op=="storePicture"){
                 var request=p.GetProperty("request").GetGuid();
                 try{

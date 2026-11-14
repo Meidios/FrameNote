@@ -4,6 +4,28 @@
 
 Versions are listed newest first. Earlier entries summarize the offline release history shipped with the app; they do not imply that each version had a public GitHub installer.
 
+## 0.5.0
+
+**中文：** 录屏可以同时采集多个 Windows 输出设备和一个麦克风。横向混音器为每路显示电平，支持录制前分别调节增益和静音。成片保留一条混合立体声音轨。
+
+**English:** Record multiple Windows output devices and an optional microphone together. Each horizontal mixer strip has a peak meter, gain and mute. Set the mix before recording; the MP4 contains one stereo mix.
+
+欢迎页现在只显示一个大号 **FRAMENOTE** 标题，提示和打开按钮的位置不变。
+
+The welcome screen now has a single **FRAMENOTE** heading. The hint and Open button stay in place.
+
+## 0.4.4
+
+**中文：** 顶部和播放栏的十项操作改为图标，保留中文悬停提示和键盘操作，并区分播放／暂停、录制／停止状态。
+
+**English:** Ten capture, file and playback actions now use icons with Chinese tooltips and accessible names. Play/pause and record/stop reflect the current action.
+
+## 0.4.3
+
+**中文：** 调整主窗口原生控件的渲染方式，处理深色菜单和音量栏出现白带的问题；保留原有视频渲染路径。新增「文件 → 打开文件…／退出」。
+
+**English:** Adjusted rendering of the main window's native controls to address a white band across the dark menu and volume bar. Video rendering is unchanged. Added Open File and Exit to the new File menu.
+
 ## 0.4.2
 
 **中文：** 窗口标题栏、帮助菜单、更新记录、网页工作区和 VLC 播放控件统一跟随 Windows 深浅主题。重新绘制按钮、下拉框、滚动条、音量和时间线滑杆；随包提供 Noto Sans SC 与 Cascadia Mono。工作区布局、快捷键和审阅包格式保持不变。
