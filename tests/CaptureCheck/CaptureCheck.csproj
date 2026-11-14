@@ -1,0 +1,3 @@
+<Project Sdk="Microsoft.NET.Sdk">
+<PropertyGroup><OutputType>Exe</OutputType><UseWPF>true</UseWPF><TargetFramework>net8.0-windows</TargetFramework><Platform>x64</Platform><PlatformTarget>x64</PlatformTarget><Nullable>enable</Nullable><ImplicitUsings>enable</ImplicitUsings></PropertyGroup>
+<ItemGroup><ProjectReference Include="../../src/FrameNote/FrameNote.csproj"/><PackageReference Include="ScreenRecorderLib" Version="7.0.1"/></ItemGroup></Project>

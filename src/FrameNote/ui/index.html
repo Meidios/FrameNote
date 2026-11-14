@@ -1,0 +1,27 @@
+<!doctype html>
+<html lang="zh-CN"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; font-src https://fonts.framenote.invalid; style-src 'self' 'unsafe-inline'; media-src file:; img-src 'self' file: data: https://export.framenote.invalid; connect-src https://export.framenote.invalid">
+<title>FrameNote</title><link rel="stylesheet" href="desk.css">
+<header><b>FrameNote</b><span class="muted" id="modeLabel">视频审阅</span><div class="spacer"></div><button id="record" title="Ctrl+Alt+F9" disabled>录制视频</button><button id="recordGif" disabled title="最长 30 秒">录制 GIF</button><button id="open">打开文件</button><button id="sendReaper" aria-label="发送到 REAPER" title="发送到 REAPER"><svg aria-hidden="true" viewBox="43 41 170 174" width="21" height="21" fill="currentColor"><path fill-rule="evenodd" d="M50.455 102.855c0 25.177 39.647 105.629 77.265 105.629h.001c37.619 0 77.397-76.894 77.397-108.531 0-20.003-18.606-52.373-77.62-52.373-59.013 0-77.043 35.758-77.043 55.275zm50.039 5.634C86.402 93.277 77.656 77.857 77.656 77.857s14.41-7.175 23.824-9.091c.802-.163 1.62-.338 2.458-.516 8.997-1.916 20.189-4.298 36.328 1.496 33.579 12.056 47.896 34.606 47.896 34.606s-21.609-17.401-45.404-20.895c-13.707-2.013-39.203 6.152-39.203 6.152s8.862 9.38 16.075 23.114c1.137 2.165 2.245 4.147 3.306 6.045 5.668 10.137 9.974 17.838 9.974 37.93 0 14.659-11.08 36.443-11.08 36.443s6.223-28.383 1.204-50.825c-3.627-16.223-6.425-18.719-13.02-24.603-2.528-2.255-5.615-5.008-9.52-9.224z"/></svg></button><button class="accent" id="save" disabled>导出审阅包</button></header>
+<main><aside id="capturePanel" aria-label="录制设置"><h2>录制设置</h2><fieldset id="captureFields">
+<label>采集范围<select id="mode"><option value="display">显示器</option><option value="window">窗口</option><option value="region">显示器内框选区域</option></select></label>
+<label>采集来源<select id="source"></select></label><button id="refreshSources">刷新来源</button>
+<div id="regionControls" hidden><button id="pickRegion">框选区域</button><small id="regionSize"></small></div>
+<div class="capturePair"><label>帧率<select id="fps"><option value="30">30 fps</option><option value="60">60 fps</option></select></label><label>压缩品质<select id="quality"><option value="balanced">均衡</option><option value="high">高画质</option></select></label></div>
+<label>系统声<select id="output"></select><meter id="outLevel" aria-label="系统声音量" max="1" value="0"></meter></label>
+<label>麦克风<select id="mic"></select><meter id="micLevel" aria-label="麦克风音量" max="1" value="0"></meter></label>
+<label class="cursor"><input type="checkbox" id="cursor" checked> 显示鼠标</label>
+</fieldset></aside><section id="viewer"><div id="stage" tabindex="-1"><video id="video" preload="auto"></video><img hidden draggable="false" id="openedImage" alt="打开的图片"><svg id="overlay" aria-label="画面批注"><g id="ink"></g></svg>
+<div id="welcome"><small>FRAMENOTE</small><h1>视频审阅</h1><p>打开视频进行批注，或按 Ctrl+V 查看剪贴板图片。</p><button id="start">打开图片、视频或审阅包</button></div></div>
+<div id="transport"><button id="play">播放</button><button id="vlc" title="使用内置 VLC 播放原片">VLC 播放</button><button id="prev">上一帧</button><button id="next">下一帧</button><button id="copyFrame" title="将当前画面复制为图片">复制当前帧</button><button id="saveFrame" title="将当前画面另存为 PNG">另存当前帧…</button><time id="clock">00:00.000</time><div class="spacer"></div><label>时间线 <select id="zoom"><option value="1">1×</option><option value="2">2×</option><option value="4">4×</option><option value="8">8×</option></select></label></div>
+<div id="scroll"><div id="timeline"><div id="marks" role="group" aria-label="时间线批注"><div id="markLanes"></div></div><input aria-label="视频位置" id="seek" type="range" min="0" value="0" step="1"></div></div>
+</section><aside><div class="sideTitle"><h2>审阅批注</h2><span id="count">0</span></div>
+<div class="bar"><button id="startPicture" title="选择图片或按 Ctrl+V 粘贴">图片批注</button><button id="point"><span id="pointLabel">点批注</span> <kbd>M</kbd></button><button id="inBtn">起点 <kbd>I</kbd></button><button id="outBtn">终点 <kbd>O</kbd></button></div>
+<div id="rangeHint"></div><div id="list"></div>
+<form id="editor" hidden><strong id="editTitle"></strong><div id="colors" role="group" aria-label="批注颜色"></div><textarea id="body" maxlength="4000" rows="3" placeholder="写下需要调整的地方…" aria-label="批注文字"></textarea>
+<div class="bar"><button type="button" id="arrow">箭头</button><button type="button" id="box">框选</button><button type="button" id="addPicture">添加图片</button><input hidden type="file" id="pictureFile" accept="image/png,image/jpeg,image/webp,image/bmp"><button type="button" id="removePicture" hidden>移除图片</button><button type="button" id="clear">清除图形</button></div><div class="bar"><button class="accent" type="submit">保存批注</button><button type="button" id="cancel">取消</button></div></form>
+<div class="bar imageExport"><button id="copyImage">复制批注图</button><button id="saveImage">另存为 PNG…</button></div>
+<div class="bar actions"><button id="edit">编辑</button><button id="del">删除</button><button id="undo">撤销</button><button id="loop">循环区间</button><button id="gif">导出 GIF</button></div></aside></main>
+<footer><span id="status" role="status">就绪</span><span id="imageHelp"></span><span id="help">空格 播放　← → 逐帧　↑ ↓ 跳转批注</span></footer>
+<script src="vendor/linkifyjs/linkify.min.js"></script><script src="pictures.js"></script><script src="desk.js"></script><script src="image-export.js"></script><script src="image-view.js"></script><script src="capture.js"></script></html>
+
