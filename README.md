@@ -23,6 +23,8 @@
 | 播放与兼容 | 兼容的视频可直接逐帧审阅。其他编码可用内置 VLC 播放原片，进入批注时按需生成临时预览；导出审阅包仍保留原始媒体。 |
 | 发送到 REAPER | 首次点击 REAPER 图标选择 Lua 脚本目录。打开目标工程，选择轨道并放置编辑光标，再发送：点批注变成 Marker，区间变成 Region。 |
 
+在原片播放器中，使用底部走带逐帧定位、复制当前帧或另存 PNG。图片查看器的画布直接位于菜单下方；按 **Ctrl+O** 打开文件，按 **Ctrl+S** 导出审阅包。
+
 ### 从源码构建
 
 在 Windows x64 安装支持 .NET 8 的 SDK、Windows Desktop 运行时、WebView2 和 x64 Visual C++ 运行库；将 FFmpeg 和 FFprobe 放在 PATH 或程序旁的 `tools` 目录。安装版用户不需要手动配置这些开发依赖。
@@ -52,6 +54,8 @@ Recording settings and the mixer are on the left; the annotation list and editor
 | Image annotation | Paste into an empty desk to open a clipboard image; paste while reviewing a video to attach a picture note. Zoom or pan without changing the dimensions of an exported PNG. Animated images export as a still of the first frame. |
 | Playback compatibility | Compatible media opens directly in frame review. Other codecs can play in the built-in VLC player; entering review creates a temporary preview if needed. Packages keep the original media. |
 | REAPER handoff | On first use, choose a folder for the Lua action. In REAPER, select a track and place the edit cursor in the target project, then send from FrameNote. Points become markers and ranges become regions. |
+
+In the original-media player, use the bottom transport to step by frame, copy the current frame, or save it as PNG. In the image viewer, the canvas starts directly below the menus. Use **Ctrl+O** to open a file and **Ctrl+S** to export a review package.
 
 ### Build from source
 

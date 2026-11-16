@@ -27,7 +27,7 @@ with sync_playwright() as pw:
         at(page,7)
         page.locator("#vlc").click()
         btn("ReviewButton").wait("visible",timeout=12)
-        until(lambda:"00:00:0" in window.child_window(auto_id="Clock").window_text())
+        until(lambda:" / " in window.child_window(auto_id="Clock").window_text())
         btn("ReviewButton").invoke()
         btn("ReviewButton").wait_not("visible",timeout=12)
         wait(page,"!busy && ready && !reviewProxy && !v.seeking")
@@ -36,7 +36,7 @@ with sync_playwright() as pw:
         page.locator("#open").click(no_wait_after=True);file_dialog(proc,mkv)
         btn("ReviewButton").wait("visible",timeout=12)
         until(lambda:"变帧率" in window.child_window(auto_id="Caption").window_text())
-        until(lambda:window.child_window(auto_id="Clock").window_text().split(" / ")[0]!="00:00:00")
+        until(lambda:window.child_window(auto_id="Clock").window_text().split(" / ")[0] not in ("","00:00.000"))
         picture=window.wrapper_object().capture_as_image()
         w,h=picture.size;picture=picture.crop((w//4,h//4,w*3//4,h*3//4))
         assert max(ImageStat.Stat(picture).stddev)>20,"VLC output remained blank"

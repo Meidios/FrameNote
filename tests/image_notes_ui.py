@@ -15,11 +15,11 @@ def dialog(proc,path):
     d=Desktop(backend="win32").window(process=proc.pid,class_name="#32770")
     d.wait("ready",timeout=10);d.child_window(class_name="Edit",found_index=0).set_edit_text(str(path));d.child_window(control_id=1).click()
 def save(page,proc,path):
-    page.locator("#save").click(no_wait_after=True);dialog(proc,path)
+    page.keyboard.press("Control+s");dialog(proc,path)
     wait(page,"!busy && $('status').textContent.includes('已保存：')")
 def vol(proc):
     w=Desktop(backend="uia").window(process=proc.pid,title_re=".*FrameNote$",found_index=0)
-    return w.child_window(title="播放音量",control_type="Slider").exists(timeout=.4)
+    return w.child_window(title="播放音量",control_type="Slider",framework_id="WPF").exists(timeout=.4)
 def mark(p,kind,msg):
     p.locator("#point").click();p.locator("#body").fill(msg);p.locator("#"+kind).click()
     r=p.locator("#overlay").bounding_box();x,y,w,h=[r[k] for k in ('x','y','width','height')]
@@ -42,7 +42,7 @@ with sync_playwright() as pw:
         p.keyboard.press("ArrowLeft");wait(p,"doc.notes[0]?.text==='检查边缘' && !busy")
         pack=work/"file.framenote";save(p,proc,pack)
         with zipfile.ZipFile(pack) as z:assert z.read("media/source.tif")==source.read_bytes()
-        p.locator("#open").click(no_wait_after=True);dialog(proc,fixtures/"capture-60.mp4");wait(p,"ready && !imageDoc()");assert vol(proc)
+        p.keyboard.press("Control+o");dialog(proc,fixtures/"capture-60.mp4");wait(p,"ready && !imageDoc()");assert vol(proc) and p.locator("header").is_visible()
         print("PASS TIFF draft, drawing after zoom, pan registration, original TIFF package and native volume",flush=True)
     finally:stop(proc)
     proc,p=launch(pw,None,"typeof imageDoc==='function'")

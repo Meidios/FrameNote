@@ -18,7 +18,8 @@ with sync_playwright() as pw:
     proc,page=launch(pw,folder/"图1.png","document.querySelector('#openedImage')?.naturalWidth===640")
     try:
         r=rect(page);x=round(r["x"]+.65*r["width"]);y=round(r["y"]+.45*r["height"])
-        around=point(r,x,y);chrome=page.locator("header").bounding_box();dpr=page.evaluate("devicePixelRatio")
+        assert page.locator("header").is_hidden() and page.locator("main").bounding_box()["y"]==0
+        around=point(r,x,y);chrome=page.locator("footer").bounding_box();dpr=page.evaluate("devicePixelRatio")
         page.mouse.move(x,y);page.mouse.wheel(0,-480)
         wait(page,"w=>$('openedImage').getBoundingClientRect().width>w*1.98",r["width"])
         big=rect(page);actual=point(big,x,y)
@@ -29,7 +30,7 @@ with sync_playwright() as pw:
         page.mouse.wheel(0,240)
         wait(page,"w=>$('openedImage').getBoundingClientRect().width<w*.8",big["width"])
         assert max(abs(a-b) for a,b in zip(point(moved,x,y),point(rect(page),x,y)))<.0001
-        assert chrome==page.locator("header").bounding_box() and page.evaluate("devicePixelRatio")==dpr
+        assert chrome==page.locator("footer").bounding_box() and page.evaluate("devicePixelRatio")==dpr
         for key,name in [("Right","图2.tif"),("Right","图10.GIF"),("Right","已是最后一张"),("Left","图2.tif"),("Left","图1.png"),("Left","已是第一张")]:
             page.keyboard.press("Arrow"+key)
             wait(page,"s=>!busy && $('status').textContent.includes(s)",name)
@@ -38,6 +39,7 @@ with sync_playwright() as pw:
     finally:stop(proc)
     proc,page=launch(pw,fixtures/"capture-60.mp4")
     try:
+        assert page.locator("header").is_visible()
         page.evaluate("v.pause();seekUs(frames[8])");wait(page,"stamp()===frames[8]")
         page.keyboard.press("ArrowRight");wait(page,"stamp()===frames[9]")
         page.keyboard.press("ArrowLeft");wait(page,"stamp()===frames[8]")

@@ -17,10 +17,11 @@ public sealed partial class Desk
             beforeFullscreen=(WindowState,WindowStyle,ResizeMode,CurrentWindowSize());
             menuStrip.Visibility=Visibility.Collapsed;
             WindowState=WindowState.Normal;WindowStyle=WindowStyle.None;ResizeMode=ResizeMode.NoResize;WindowState=WindowState.Maximized;
-            Send(new{type="previewFullscreen",on=true});
+            if(native?.IsVisible==true)native.SetFullscreen(true);else Send(new{type="previewFullscreen",on=true});
         }else if(!on && beforeFullscreen is {} old){
             WindowState=WindowState.Normal;WindowStyle=old.Style;ResizeMode=old.Resize;WindowState=old.State;
-            menuStrip.Visibility=Visibility.Visible;beforeFullscreen=null;Send(new{type="previewFullscreen",on=false});
+            menuStrip.Visibility=Visibility.Visible;beforeFullscreen=null;
+            if(native?.IsVisible==true)native.SetFullscreen(false);else Send(new{type="previewFullscreen",on=false});
         }
     }
     Probe.Info? playbackInfo;
@@ -32,9 +33,16 @@ public sealed partial class Desk
         if(fd.ShowDialog(this)==true)await Work(()=>Open(fd.FileName));
     }
     void ShowPlayer(long us){
-        if(media==null || doc==null)return;
+        if(media==null || doc==null || playbackInfo==null)return;
         if(native==null){
-            native=new NativePlayer();
+            native=new NativePlayer(scratch);
+            PreviewKeyDown+=(_,e)=>{
+                if(e.Key==System.Windows.Input.Key.Escape && beforeFullscreen!=null && native.IsVisible){
+                    e.Handled=true;SetPreviewFullscreen(false);
+                }
+            };
+            native.VolumeRequested+=value=>masterVolume.Value=value;
+            native.FullscreenRequested+=on=>SetPreviewFullscreen(on);
             native.OpenRequested+=async()=>await PickVideo();
             native.ReviewRequested+=async()=>await Work(()=>EnterReview());
             native.CancelRequested+=()=>preparing?.Cancel();
@@ -43,18 +51,20 @@ public sealed partial class Desk
         web.Visibility=Visibility.Hidden;
         native.Visibility=Visibility.Visible;
         native.Preparing(false,"");
-        native.SetVolume(volume);native.Start(media,doc.FileName,us/1000);
+        audioPanel.Visibility=Visibility.Collapsed;
+        native.SetVolume(volume);native.Start(media,doc.FileName,us/1000,playbackInfo);
     }
     async Task EnterReview(long? initialUs=null){
         if(media==null || doc==null || native==null)return;
-        var position=initialUs??native.TimeMs*1000;
+        var position=initialUs??native.TimeUs;
         native.Pause();
         using var cancel=new CancellationTokenSource();preparing=cancel;
         native.Preparing(true,needsPreview?"正在生成临时审阅预览，可取消并继续播放。":"正在打开逐帧审阅…");
         try{
             if(!deskLoaded || needsPreview && preview==null)await LoadReview(position,cancel.Token,playOnLoad:initialUs!=null);
             else Send(new{type="resumeReview",us=position});
-            native.Stop();native.Visibility=Visibility.Collapsed;web.Visibility=Visibility.Visible;web.Focus();
+            SetPreviewFullscreen(false);
+            native.Stop();native.Visibility=Visibility.Collapsed;audioPanel.Visibility=Visibility.Visible;web.Visibility=Visibility.Visible;web.Focus();
         }catch(OperationCanceledException){native.Preparing(false,"已取消，可继续播放。");}
         catch(Exception e){native.Preparing(false,"无法进入批注："+e.Message);native.ToolTip=e.Message;}
         finally{preparing=null;if(native.Visibility==Visibility.Collapsed)native.Preparing(false,"");}

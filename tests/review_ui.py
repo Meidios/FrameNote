@@ -31,7 +31,7 @@ def launch(pw,path,condition="typeof ready!=='undefined' && ready"):
         ctx=b.contexts[0]
         while not ctx.pages and time.monotonic()<until:time.sleep(.2)
         page=ctx.pages[0]
-
+        page.wait_for_url("**/ui/index.html",wait_until="domcontentloaded",timeout=30000)
         wait(page,condition,timeout=30000)
         return proc,page
     except: proc.kill();raise

@@ -4,6 +4,18 @@
 
 Versions are listed newest first. Earlier entries summarize the offline release history shipped with the app; they do not imply that each version had a public GitHub installer.
 
+## 0.6.1
+
+**中文**
+
+- 原片播放器的底部走带新增前后逐帧、毫秒时间码、复制当前帧、另存 PNG、静音、音量和全屏。变帧率视频按原片帧时间戳定位，逐帧时复制和保存的是画面上显示的那一帧。移除了顶部重复的音量条、文件名后的 VLC 字样和常驻提示。
+- 图片查看器移除了「FrameNote · 图片审阅」工具栏，画布和批注列表直接从「文件／帮助」菜单下方开始。仍可用 Ctrl+O 打开文件，用 Ctrl+S 导出审阅包。视频审阅的顶部工具栏保持不变。
+
+**English**
+
+- The original-media player now has previous/next frame controls, millisecond timecodes, copy frame, save as PNG, mute, volume, and fullscreen on its bottom transport. Frame stepping follows the source timestamps, including for variable-frame-rate video; copying or saving a stepped frame uses the displayed pixels. The duplicate volume slider, VLC label, and persistent hint have been removed.
+- The image viewer now places the canvas and annotations directly below the File and Help menus. Ctrl+O still opens files and Ctrl+S exports a review package. The video review toolbar is unchanged.
+
 ## 0.6.0
 
 **中文**

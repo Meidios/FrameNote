@@ -118,6 +118,8 @@ rect.inkHit{pointer-events:all}
 body.busy.snapshot main{opacity:1}
 body.snapshot .pictureHandle,body.snapshot #ink rect[pointer-events="none"]{visibility:hidden}
 #openedImage{position:absolute;inset:0;width:100%;height:100%;object-fit:contain}
+body.imageView{grid-template-rows:minmax(0,1fr) 34px}
+body.imageView>header{display:none}
 body.imageView main{grid-template-columns:minmax(0,1fr) clamp(220px,24vw,340px)}
 body.imageView #viewer{grid-template-rows:minmax(0,1fr)}
 body.imageView :is(#capturePanel,#transport,#timelineTools,#trackDesk,#video,#help,#sendReaper,#startPicture,#inBtn,#outBtn,#rangeHint,#loop,#gif){display:none}
