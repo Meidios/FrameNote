@@ -4,6 +4,12 @@
 
 Versions are listed newest first. Earlier entries summarize the offline release history shipped with the app; they do not imply that each version had a public GitHub installer.
 
+## 0.5.1
+
+**中文：** 修复某些视频撑高预览区的问题。录屏和视频现在随窗口等比缩放，整幅画面、播放栏和时间线可同时看见。
+
+**English:** Video previews now fit the available window without pushing playback controls or the timeline below the viewport.
+
 ## 0.5.0
 
 **中文：** 录屏可以同时采集多个 Windows 输出设备和一个麦克风。横向混音器为每路显示电平，支持录制前分别调节增益和静音。成片保留一条混合立体声音轨。
