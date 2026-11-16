@@ -37,6 +37,9 @@ try:
                 button=page.locator("#recordGif" if gif else "#record")
                 button.click()
                 wait(page,"recording!==null")
+                assert button.is_enabled() and button.get_attribute("title").startswith("停止录制")
+                assert page.locator("#record" if gif else "#recordGif").is_disabled()
+                assert all(page.locator(s).is_disabled() for s in ("#mode","#fps","#cursor","#mic"))
                 assert not Desktop(backend="win32").window(process=proc.pid,class_name="#32770").exists(timeout=.1)
                 dest=work/"record.gif"
                 old_id=page.evaluate("doc.id")

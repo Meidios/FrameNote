@@ -37,6 +37,7 @@ public sealed partial class Desk : Window
     public Desk(string? initial) {
         Title="FrameNote · 视频审阅"; Width=1230; Height=800; MinWidth=840; MinHeight=560;
         DeskTheme.Window(this); WindowStartupLocation=WindowStartupLocation.CenterScreen;
+        InitWindowSize();
         // Only the WPF host surface uses software rendering. WebView2 and VLC
         // own separate child HWNDs and keep their normal video rendering paths.
         SourceInitialized+=(_,_)=>{
@@ -74,7 +75,7 @@ public sealed partial class Desk : Window
             core.Navigate(page);
         } catch(Exception e){MessageBox.Show(this,e.Message,"FrameNote");}};
         Closing+=(_,e)=>{if(pending) {e.Cancel=true; preparing?.Cancel(); Send(new {type="status",text="请等当前操作结束后再关闭。"});} };
-        Closed+=(_,_)=>{native?.Dispose();web.Dispose();recordings.Dispose(); try {if(Directory.Exists(scratch))Directory.Delete(scratch,true);} catch(IOException){}};
+        Closed+=(_,_)=>{StopTimeline();native?.Dispose();web.Dispose();recordings.Dispose(); try {if(Directory.Exists(scratch))Directory.Delete(scratch,true);} catch(IOException){}};
     }
     void ReportError(string text){if(native?.IsVisible==true)native.Preparing(false,text);else Send(new{type="error",text});}
     void Send(object o)=>web.CoreWebView2.PostWebMessageAsJson(JsonSerializer.Serialize(o,Review.Json));
@@ -111,7 +112,7 @@ public sealed partial class Desk : Window
         viewingImage=false;audioPanel.Visibility=Visibility.Visible;imageFile=null;var previous=activeRecording; doc=next; openedPackage=path.EndsWith(".framenote",StringComparison.OrdinalIgnoreCase); media=nextMedia; draft=nextDraft;
         activeRecording=recordingTitle!=null?path:null;
         Title=(activeRecording!=null?"临时录屏 · ":"")+doc.FileName+" · FrameNote";
-        playbackId=Guid.NewGuid();playbackInfo=infoMedia;deskLoaded=false;preview=null;
+        SetPreviewFullscreen(false);StopTimeline();playbackId=Guid.NewGuid();playbackInfo=infoMedia;deskLoaded=false;preview=null;
         draftRestored=recovered;needsPreview=compatibility;
         await web.ExecuteScriptAsync("v.pause();v.removeAttribute('src');v.load();ready=false;render()");
         if(needsPreview){ShowPlayer(0);if(openedPackage)await EnterReview(0);}
@@ -126,6 +127,8 @@ public sealed partial class Desk : Window
         try{
             using var msg=JsonDocument.Parse(raw);var p=msg.RootElement; var op=p.GetProperty("type").GetString();
             if(op=="canOpen"){reviewCanOpen=p.GetProperty("value").GetBoolean();return;}
+            if(op=="previewFullscreen"){var on=p.GetProperty("on").GetBoolean();if(!on || (!viewingImage && deskLoaded && !pending && web.IsVisible))SetPreviewFullscreen(on);return;}
+            if(op=="playbackVolume"){masterVolume.Value=Math.Clamp(p.GetProperty("value").GetInt32(),0,100);return;}
             if(op=="catalog"){Catalog();return;}
             if(op=="meterSources"){MeterSources(p.GetProperty("ids").Deserialize<string[]>()!);return;}
             if(op=="storePicture"){

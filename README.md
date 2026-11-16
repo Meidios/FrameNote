@@ -10,6 +10,8 @@
 
 ### 安装与第一次审阅
 
+录制设置和混音器在左侧，批注列表和编辑器在右侧。中间时间线从上到下显示视频缩略图、混合音频波形和批注；选中一个区间后，可在播放栏开启循环。下次打开时会恢复窗口大小或最大化状态。
+
 1. 在[最新版本](https://github.com/Meidios/FrameNote/releases/latest)的 **Assets** 下载以 `win-x64-Setup.exe` 结尾的安装包。安装包包含 .NET 运行时、VLC、FFmpeg 和 FFprobe；如果电脑缺少 Microsoft Edge WebView2，首次安装需要联网。Windows 的默认视频播放器不会被替换。
 2. 拖入视频，用 **空格** 播放／暂停、**← / →** 逐帧移动。按 **M** 添加点批注，或在不同帧按 **I** 和 **O** 标记区间；输入文字、添加图形或参考图后用 **Ctrl+Enter** 保存。
 3. 点击 **导出审阅包** 交付可编辑版本；只想发一张图时，选择 **复制当前帧** 或 **复制批注图**，直接粘贴到聊天里。可用[示例审阅包](examples/SampleReview.framenote)体验。
@@ -37,6 +39,8 @@ pwsh -File scripts/build.ps1
 Pin feedback such as “this impact lands late” to the frame where it happens. Step through a video, mark a point or a range, and add text, arrows, boxes or reference images. You can also review a still image or a clipboard screenshot. Export a single `.framenote` file to share the original media and editable annotations. Reviewing works locally without an account.
 
 ### Install and review your first clip
+
+Recording settings and the mixer are on the left; the annotation list and editor are on the right. The central timeline stacks video thumbnails, the mixed audio waveform, and annotations. Select a range to loop it from the playback bar. FrameNote remembers the window size and maximized state between sessions.
 
 1. Under **Assets** on the [latest release](https://github.com/Meidios/FrameNote/releases/latest), download the file ending in `win-x64-Setup.exe`. Setup includes .NET, VLC, FFmpeg and FFprobe. If Microsoft Edge WebView2 is missing, setup needs an internet connection. Your default video player is unchanged.
 2. Drop in a video. Press **Space** to play or pause and **Left / Right** to step by frame. Press **M** for a point, or **I** and **O** on different frames for a range. Add feedback, then press **Ctrl+Enter** to save.

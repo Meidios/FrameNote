@@ -8,7 +8,7 @@ notes=[dict(id=str(uuid.uuid4()),number=i,startUs=(i*40000 if i<19 else 2800000)
             endUs=(2950000 if i==20 else None),text="批注 "+str(i),shape=None) for i in range(1,23)]
 notes[18]["shape"]=dict(kind="arrow",x=.12,y=.3,toX=.39,toY=.55)
 notes[19]["shape"]=dict(kind="box",x=.57,y=.3,toX=.84,toY=.7)
-# A lone region to the right of stacked points must remain next to the rail.
+# A lone region to the right of stacked points must remain in the bottom lane.
 notes[0]["startUs"]=notes[1]["startUs"]
 notes[17].update(startUs=880000,endUs=1500000)
 notes[18]["color"]="#ff9d97";notes[19]["color"]="#8de3af"
@@ -21,12 +21,13 @@ with zipfile.ZipFile(package,"w") as z:
 with sync_playwright() as pw:
     proc,page=launch(pw,package)
     try:
+        wait(page,"document.querySelector('#filmstrip img[src]')?.naturalWidth>0 && document.querySelector('#waveform path').hasAttribute('d')",timeout=15000)
         for zoom in ("1","8"):
             page.locator("#zoom").select_option(zoom)
             region=page.locator("#marks button").filter(has_text="#18")
-            gap=region.evaluate("""el=>document.getElementById('seek').getBoundingClientRect().top-
+            gap=region.evaluate("""el=>document.getElementById('markLanes').getBoundingClientRect().bottom-
                 el.getBoundingClientRect().bottom""")
-            assert 0<=gap<=4,(zoom,"isolated region gap above slider",gap)
+            assert 0<=gap<=4,(zoom,"isolated region bottom gap",gap)
             for number in (1,18,19,20,22):
                 label=page.locator("#marks button").nth(number-1)
                 assert label.inner_text()==f"#{number}"

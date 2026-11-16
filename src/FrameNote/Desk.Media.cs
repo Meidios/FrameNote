@@ -27,6 +27,7 @@ public sealed partial class Desk
         await Open(files[i]);
     }
     FrameworkElement audioPanel=null!;
+    Slider masterVolume=null!;
     int volume=100;
     bool volumeDirty;
     readonly DispatcherTimer volumeWrite=new(){Interval=TimeSpan.FromMilliseconds(250)};
@@ -36,7 +37,7 @@ public sealed partial class Desk
         catch(Exception e) when(e is IOException or JsonException or UnauthorizedAccessException){}
         var panel=new StackPanel{Orientation=Orientation.Horizontal,VerticalAlignment=VerticalAlignment.Center,Margin=new Thickness(8,0,14,0)};
         panel.Children.Add(new TextBlock{Text="音量",VerticalAlignment=VerticalAlignment.Center});
-        var slider=new Slider{Minimum=0,Maximum=100,Width=100,Value=volume,TickFrequency=1,IsSnapToTickEnabled=true,IsMoveToPointEnabled=true,Margin=new Thickness(6,0,5,0)};
+        var slider=masterVolume=new Slider{Minimum=0,Maximum=100,Width=100,Value=volume,TickFrequency=1,IsSnapToTickEnabled=true,IsMoveToPointEnabled=true,Margin=new Thickness(6,0,5,0)};
         System.Windows.Automation.AutomationProperties.SetName(slider,"播放音量");
         panel.Children.Add(slider);var label=new TextBlock{Width=36,Text=volume+"%",VerticalAlignment=VerticalAlignment.Center};label.SetResourceReference(TextBlock.FontFamilyProperty,"MonoFont");panel.Children.Add(label);
         void Save(){
@@ -75,7 +76,7 @@ public sealed partial class Desk
         var previous=activeRecording;activeRecording=null;
         if(native!=null){native.Stop();native.Visibility=Visibility.Collapsed;}
         web.Visibility=Visibility.Visible;
-        displayImagePath=path;media=source;draft=nextDraft;preview=null;doc=review;deskLoaded=false;openedPackage=package;playbackInfo=null;playbackId=Guid.NewGuid();
+        SetPreviewFullscreen(false);StopTimeline();displayImagePath=path;media=source;draft=nextDraft;preview=null;doc=review;deskLoaded=false;openedPackage=package;playbackInfo=null;playbackId=Guid.NewGuid();
         audioPanel.Visibility=Visibility.Collapsed;viewingImage=true;imageFile=originalFile;Title=name+" · FrameNote";Send(new{type="image",src,name,doc,images=new Uri(ImageDirectory+Path.DirectorySeparatorChar).AbsoluteUri,folder=imageFile!=null});
         if(previous!=null)recordings.Discard(previous);
     }

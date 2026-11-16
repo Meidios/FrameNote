@@ -60,7 +60,7 @@ public sealed partial class Desk
         autoItem.IsCheckable=true;menu.SubmenuOpened+=(_,_)=>autoItem.IsChecked=prefs.Change(p=>p).Automatic;
         Item("更新记录",()=>History());Item("默认应用设置",()=>Browse("ms-settings:defaultapps?registeredAppUser=FrameNote"));
         Item("关于 FrameNote",()=>Simple("关于 FrameNote","FrameNote "+Updates.Running,"视频审阅、录屏和 REAPER 批注交付工具。\n\n作者：Meidios（MEI）\nWindows x64\n\n如果这个工具对你有帮助，欢迎到 GitHub 点个 Star。",true));
-        var host=new DockPanel();DockPanel.SetDock(bar,Dock.Top);var strip=new DockPanel{LastChildFill=true};strip.SetResourceReference(Panel.BackgroundProperty,"chrome");var audio=VolumeControl();DockPanel.SetDock(audio,Dock.Right);strip.Children.Add(audio);strip.Children.Add(bar);DockPanel.SetDock(strip,Dock.Top);host.Children.Add(strip);host.Children.Add(surfaces);Content=host;
+        var host=new DockPanel();DockPanel.SetDock(bar,Dock.Top);var strip=menuStrip=new DockPanel{LastChildFill=true};strip.SetResourceReference(Panel.BackgroundProperty,"chrome");var audio=VolumeControl();DockPanel.SetDock(audio,Dock.Right);strip.Children.Add(audio);strip.Children.Add(bar);DockPanel.SetDock(strip,Dock.Top);host.Children.Add(strip);host.Children.Add(surfaces);Content=host;
         Closed+=(_,_)=>{lifetime.Cancel();session?.Dispose();installGuard?.Dispose();};
         web.NavigationCompleted+=async (_,e)=>{
             if(!e.IsSuccess||startedUpdates||!first)return;startedUpdates=true;

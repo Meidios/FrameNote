@@ -10,6 +10,19 @@ public sealed partial class Desk
     NativePlayer? native;
     CancellationTokenSource? preparing;
     Guid playbackId;
+    System.Windows.Controls.DockPanel menuStrip=null!;
+    (WindowState State,WindowStyle Style,ResizeMode Resize,WindowSize Size)? beforeFullscreen;
+    void SetPreviewFullscreen(bool on){
+        if(on && beforeFullscreen==null){
+            beforeFullscreen=(WindowState,WindowStyle,ResizeMode,CurrentWindowSize());
+            menuStrip.Visibility=Visibility.Collapsed;
+            WindowState=WindowState.Normal;WindowStyle=WindowStyle.None;ResizeMode=ResizeMode.NoResize;WindowState=WindowState.Maximized;
+            Send(new{type="previewFullscreen",on=true});
+        }else if(!on && beforeFullscreen is {} old){
+            WindowState=WindowState.Normal;WindowStyle=old.Style;ResizeMode=old.Resize;WindowState=old.State;
+            menuStrip.Visibility=Visibility.Visible;beforeFullscreen=null;Send(new{type="previewFullscreen",on=false});
+        }
+    }
     Probe.Info? playbackInfo;
     string? preview;
     bool deskLoaded,needsPreview,draftRestored;
@@ -67,5 +80,6 @@ public sealed partial class Desk
         Send(new{type="loaded",playbackId,doc,frames,src=new Uri(preview??media).AbsoluteUri,proxy=preview!=null,autoPlay=knownFrames!=null || playOnLoad,volume,us,
             images=new Uri(ImageDirectory+Path.DirectorySeparatorChar).AbsoluteUri,recovered=draftRestored,temporary=activeRecording!=null});
         deskLoaded=true;
+        _=BuildTimeline(playbackId,media,playbackInfo);
     }
 }

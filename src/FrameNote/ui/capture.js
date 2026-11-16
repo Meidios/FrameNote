@@ -63,7 +63,8 @@ window.captureButtons=()=>{
   $(id).disabled=starting||(recording?recording!==kind:(!usable||!!editing||(kind==='video'&&channels().some(ch=>ch.offline))));
   $(id).classList.toggle('active',recording===kind);
  }
- $('captureFields').disabled=!!recording||starting;
+ for(const group of $('capturePanel').querySelectorAll('fieldset'))group.disabled=!!recording||starting;
+ $('capturePanel').classList.toggle('isRecording',!!recording);
 };
 function capture(gif){
  if(recording){send('stop');return}
@@ -78,7 +79,9 @@ $('addOutput').onchange=()=>{const d=catalog.outputs.find(d=>d.id===$('addOutput
 $('mic').onchange=()=>{const d=catalog.inputs.find(d=>d.id===$('mic').value);microphone=d?newChannel(d):null;renderMixer()};
 $('pickRegion').onclick=()=>send('pickRegion',{source:$('source').value});
 chrome.webview.addEventListener('message',({data:m})=>{
- if(m.type==='catalog'){
+ if(m.type==='image')$('open').before($('captureCommands'));
+ else if(m.type==='loaded')$('captureDock').append($('captureCommands'));
+ else if(m.type==='catalog'){
   const old=catalog;catalog=m;sources(true);
   const preferred=m.outputs.find(d=>d.preferred);
   if(!old&&preferred)outputs.set(preferred.id,newChannel(preferred));

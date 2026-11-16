@@ -4,6 +4,20 @@
 
 Versions are listed newest first. Earlier entries summarize the offline release history shipped with the app; they do not imply that each version had a public GitHub installer.
 
+## 0.6.0
+
+**中文**
+
+- 时间线分为视频缩略图、混合音频波形和批注三轨。点批注标出单帧，区间批注的两端分别标出起止位置。
+- 中栏播放条集中放置逐帧、倍速、所选区间循环、当前帧操作、音量和全屏。左栏集中录制设置与横向混音器；右栏在批注列表下方编辑。
+- 重新打开时恢复上次的窗口大小或最大化状态。从最小化或视频全屏退出不会覆盖普通窗口尺寸。
+
+**English**
+
+- The timeline now has three tracks: video thumbnails, the mixed audio waveform, and annotations. Point markers indicate a single frame; range markers indicate both endpoints.
+- The central playback bar groups frame stepping, playback speed, looping the selected range, frame actions, volume, and fullscreen. Recording controls and the horizontal mixer sit on the left; annotations can be edited below the list on the right.
+- FrameNote restores the previous window size or maximized state at startup. Closing from minimized or fullscreen video preserves the normal window size.
+
 ## 0.5.1
 
 **中文：** 修复某些视频撑高预览区的问题。录屏和视频现在随窗口等比缩放，整幅画面、播放栏和时间线可同时看见。
