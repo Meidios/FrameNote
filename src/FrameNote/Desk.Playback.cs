@@ -10,7 +10,7 @@ public sealed partial class Desk
     NativePlayer? native;
     CancellationTokenSource? preparing;
     Guid playbackId;
-    System.Windows.Controls.DockPanel menuStrip=null!;
+    Menu menuStrip=null!;
     (WindowState State,WindowStyle Style,ResizeMode Resize,WindowSize Size)? beforeFullscreen;
     void SetPreviewFullscreen(bool on){
         if(on && beforeFullscreen==null){
@@ -41,7 +41,7 @@ public sealed partial class Desk
                     e.Handled=true;SetPreviewFullscreen(false);
                 }
             };
-            native.VolumeRequested+=value=>masterVolume.Value=value;
+            native.VolumeRequested+=SetPlaybackVolume;
             native.FullscreenRequested+=on=>SetPreviewFullscreen(on);
             native.OpenRequested+=async()=>await PickVideo();
             native.ReviewRequested+=async()=>await Work(()=>EnterReview());
@@ -51,8 +51,7 @@ public sealed partial class Desk
         web.Visibility=Visibility.Hidden;
         native.Visibility=Visibility.Visible;
         native.Preparing(false,"");
-        audioPanel.Visibility=Visibility.Collapsed;
-        native.SetVolume(volume);native.Start(media,doc.FileName,us/1000,playbackInfo);
+        native.SetVolume(volume);native.Start(media,doc,us/1000,playbackInfo);
     }
     async Task EnterReview(long? initialUs=null){
         if(media==null || doc==null || native==null)return;
@@ -64,7 +63,7 @@ public sealed partial class Desk
             if(!deskLoaded || needsPreview && preview==null)await LoadReview(position,cancel.Token,playOnLoad:initialUs!=null);
             else Send(new{type="resumeReview",us=position});
             SetPreviewFullscreen(false);
-            native.Stop();native.Visibility=Visibility.Collapsed;audioPanel.Visibility=Visibility.Visible;web.Visibility=Visibility.Visible;web.Focus();
+            native.Stop();native.Visibility=Visibility.Collapsed;web.Visibility=Visibility.Visible;web.Focus();
         }catch(OperationCanceledException){native.Preparing(false,"已取消，可继续播放。");}
         catch(Exception e){native.Preparing(false,"无法进入批注："+e.Message);native.ToolTip=e.Message;}
         finally{preparing=null;if(native.Visibility==Visibility.Collapsed)native.Preparing(false,"");}

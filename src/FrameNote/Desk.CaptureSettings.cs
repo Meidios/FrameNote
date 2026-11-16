@@ -1,6 +1,5 @@
 using System.IO;
 using System.Windows;
-using System.Windows.Threading;
 using System.Text.Json;
 using System.Globalization;
 using NAudio.CoreAudioApi;
@@ -12,7 +11,6 @@ public sealed partial class Desk
 {
     sealed record MixerChannel(string Id,int GainDb,bool Muted);
     sealed record CaptureSettings(string Mode,string Source,int Fps,bool High,MixerChannel[] Outputs,MixerChannel? Mic,bool Cursor);
-    readonly DispatcherTimer meters=new(){Interval=TimeSpan.FromMilliseconds(160)};
     MMDeviceEnumerator? endpoints;
     readonly Dictionary<string,MMDevice> meterDevices=[];
     string regionDevice="";
@@ -34,12 +32,13 @@ public sealed partial class Desk
         foreach(var id in selected.Where(id=>!meterDevices.ContainsKey(id))){
             try{meterDevices[id]=(endpoints??=new()).GetDevice(id);}catch(System.Runtime.InteropServices.COMException){}
         }
-        if(meterDevices.Count>0)meters.Start();else meters.Stop();
+    }
+    void ReadMeterPeaks(){
+        static float Peak(MMDevice? device){try{return device?.AudioMeterInformation.MasterPeakValue??0;}catch(System.Runtime.InteropServices.COMException){return 0;}}
+        Send(new{type="meters",levels=meterDevices.ToDictionary(p=>p.Key,p=>Peak(p.Value))});
     }
     void InitMeters(){
-        static float Peak(MMDevice? device){try{return device?.AudioMeterInformation.MasterPeakValue??0;}catch(System.Runtime.InteropServices.COMException){return 0;}}
-        meters.Tick+=(_,_)=>Send(new{type="meters",levels=meterDevices.ToDictionary(p=>p.Key,p=>Peak(p.Value))});
-        Closed+=(_,_)=>{meters.Stop();foreach(var device in meterDevices.Values)device.Dispose();endpoints?.Dispose();ClearOutline();};
+        Closed+=(_,_)=>{foreach(var device in meterDevices.Values)device.Dispose();endpoints?.Dispose();ClearOutline();};
     }
     void ResetRegion(){ClearOutline();area=null;regionDevice="";}
     void PickRegion(string device){

@@ -6,6 +6,8 @@ local function unhex(v) return (v:gsub("%x%x",function(s)return string.char(tonu
 local function write(name,value) local out=assert(io.open(dir.."/"..name,"wb"));out:write(value);out:close() end
 write("started","1")
 local ok,err=pcall(function()
+  local hwnd=tostring(reaper.GetMainHwnd()):match("(%x+)$")
+  assert(hwnd and tonumber(hwnd,16)==tonumber(lines[2],16),"REAPER 未将请求交给目标窗口，已取消导入。")
   local _,rpp=reaper.EnumProjects(-1,"")
   local folder=rpp and rpp:match("^(.*)[/\\]") or nil
   if not folder then folder=os.getenv("LOCALAPPDATA").."/FrameNote/REAPER" end

@@ -13,6 +13,7 @@ internal static class DeskTheme
 {
     internal static event Action? Changed;
     static readonly Dictionary<string,string> colors = new();
+    static readonly Color Accent = (Color)ColorConverter.ConvertFromString("#A8DDFD");
     internal static bool Dark { get; private set; }
     static readonly (string Key,string Dark,string Light)[] surfaces = [
         ("bg","#141416","#E5E9EE"), ("chrome","#1B1B1D","#EDF0F4"), ("panel","#202022","#F4F6F9"),
@@ -41,9 +42,7 @@ internal static class DeskTheme
     static void Refresh()
     {
         var light=Registry.GetValue(@"HKEY_CURRENT_USER\Software\Microsoft\Windows\CurrentVersion\Themes\Personalize","AppsUseLightTheme",1);
-        var abgr=Registry.GetValue(@"HKEY_CURRENT_USER\Software\Microsoft\Windows\DWM","AccentColor",null);
-        var raw=abgr is int n && (n & 0xffffff)!=0 ? Color.FromRgb((byte)n,(byte)(n>>8),(byte)(n>>16)) : Color.FromRgb(0,120,212);
-        Apply(light is int i && i==0,raw);
+        Apply(light is int i && i==0);
     }
 
     static double Luma(Color c)
@@ -54,7 +53,7 @@ internal static class DeskTheme
     static Color Mix(Color a,Color b,double t)=>Color.FromRgb((byte)Math.Round(a.R+(b.R-a.R)*t),(byte)Math.Round(a.G+(b.G-a.G)*t),(byte)Math.Round(a.B+(b.B-a.B)*t));
     static double Contrast(Color a,Color b){double x=Luma(a)+.05,y=Luma(b)+.05;return Math.Max(x,y)/Math.Min(x,y);}
     static string Hex(Color c)=>$"#{c.R:X2}{c.G:X2}{c.B:X2}";
-    internal static void Apply(bool dark,Color raw)
+    internal static void Apply(bool dark)
     {
         Dark=dark;
         void Set(string key,string css){
@@ -66,8 +65,7 @@ internal static class DeskTheme
         }
         foreach(var s in surfaces)Set(s.Key,dark?s.Dark:s.Light);
         var card=(Color)ColorConverter.ConvertFromString(colors["card"]);
-        var accent=raw;
-        for(int i=1;i<=255 && Contrast(accent,card)<3;i++)accent=Mix(raw,dark?Colors.White:Colors.Black,i/255d);
+        var accent=Accent;
         Set("accent",Hex(accent));Set("accentHover",Hex(Mix(accent,dark?Colors.White:Colors.Black,dark?.14:.08)));
         Set("accentPressed",Hex(Mix(accent,Colors.Black,dark?.12:.18)));
         Set("onAccent",Contrast(accent,Colors.White)>=4.5?"#FFFFFF":"#000000");

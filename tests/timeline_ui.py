@@ -22,8 +22,71 @@ with sync_playwright() as pw:
     proc,page=launch(pw,package)
     try:
         wait(page,"document.querySelector('#filmstrip img[src]')?.naturalWidth>0 && document.querySelector('#waveform path').hasAttribute('d')",timeout=15000)
+        assert not page.locator("#zoom").count()
+        page.evaluate("v.pause()")
+        # Click the real ruler, film and waveform while paused and while playing.
+        page.locator("#rate").select_option("0.5")
+        for selector in ("#seek", "#filmstrip", "#waveform"):
+            for playing in (False, True):
+                page.locator("#seek").click(position={"x":20,"y":6})
+                if playing:
+                    page.locator("#play").click()
+                wait(page,"playing=>!v.seeking && v.paused!==playing && v.currentTime<0.8",playing)
+                track=page.locator(selector)
+                bounds=track.bounding_box()
+                track.click(position={"x":int(bounds["width"]*.6),"y":int(bounds["height"]/2)})
+                wait(page,"playing=>!v.seeking && v.paused!==playing && v.currentTime>1.5 && v.currentTime<2.2",playing)
+                position=page.evaluate("v.currentTime")
+                if playing:
+                    wait(page,"t=>v.currentTime>t+.08",position)
+                    page.locator("#play").click()
+                else:
+                    assert page.evaluate("v.paused && Math.abs(shown/1e6-v.currentTime)<.12")
+        for number in (1,18):  # a Mark and a Region, both away from end-of-file
+            for playing in (False,True):
+                if playing:
+                    page.locator("#play").click()
+                wait(page,"playing=>v.paused!==playing",playing)
+                page.locator("#marks button").nth(number-1).click()
+                wait(page,"i=>v.paused && !v.seeking && selected===doc.notes[i].id && Math.abs(shown-frames[index(doc.notes[i].startUs)])<=2",number-1)
+                position=page.evaluate("v.currentTime")
+                page.keyboard.press("Space")
+                wait(page,"t=>!v.paused && v.currentTime>t+.08",position)
+                page.keyboard.press("Space")
+                wait(page,"t=>v.paused && v.currentTime>t+.08",position)
+        print("PASS: ruler, video and audio preserve transport state; Mark/Region pause and Space resumes/pauses",flush=True)
+        page.locator("#rate").select_option("1.5")
+        def wheel(key,delta):
+            page.keyboard.down(key)
+            try:page.mouse.wheel(0,delta)
+            finally:page.keyboard.up(key)
+        def fraction(x):
+            return page.locator("#ticks").evaluate("(e,x)=>(x-e.getBoundingClientRect().left)/e.clientWidth",x)
+        def geometry():
+            return page.evaluate("""()=>['stage','overlay','transport','marks','trackDesk'].map(id=>{
+                const r=$(id).getBoundingClientRect();return [r.x,r.y,r.width,r.height].filter((_,i)=>id!=='marks'||i%2===1)})""")
+        baseline=geometry()
         for zoom in ("1","8"):
-            page.locator("#zoom").select_option(zoom)
+            if zoom=="8":
+                pos=page.evaluate("v.currentTime")
+                r=page.locator("#scroll").bounding_box();x=round(r["x"]+.4*r["width"])
+                page.mouse.move(x,r["y"]+12);before=fraction(x)
+                wheel("Control",-480);wait(page,"$('timeline').style.width==='800%'")
+                assert abs(before-fraction(x))*page.locator("#ticks").bounding_box()["width"]<2
+                assert geometry()==baseline
+                assert page.evaluate("$('scroll').offsetHeight-$('scroll').clientHeight") == 8
+                left=page.evaluate("$('scroll').scrollLeft")
+                wheel("Shift",120);wait(page,"x=>$('scroll').scrollLeft>x",left)
+                wheel("Shift",-120);wait(page,"x=>Math.abs($('scroll').scrollLeft-x)<2",left)
+                thumb=page.locator("#scroll").evaluate("""e=>{const r=e.getBoundingClientRect();
+                    return [r.x+(e.scrollLeft+e.clientWidth/2)*e.clientWidth/e.scrollWidth,r.bottom-4]}""")
+                page.mouse.move(*thumb);page.mouse.down();page.mouse.move(thumb[0]+24,thumb[1],steps=4);page.mouse.up()
+                wait(page,"x=>$('scroll').scrollLeft>x+25",left)
+                page.mouse.move(x,r["y"]+12)
+                wheel("Control",480);wait(page,"$('timeline').style.width==='100%' && $('scroll').scrollLeft===0")
+                assert geometry()==baseline
+                wheel("Control",-480);wait(page,"$('timeline').style.width==='800%'")
+                assert page.evaluate("t=>v.paused && v.playbackRate===1.5 && v.currentTime===t",pos)
             region=page.locator("#marks button").filter(has_text="#18")
             gap=region.evaluate("""el=>document.getElementById('markLanes').getBoundingClientRect().bottom-
                 el.getBoundingClientRect().bottom""")

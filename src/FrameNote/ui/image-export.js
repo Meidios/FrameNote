@@ -6,24 +6,24 @@ const imageExport=(()=>{
  async function bitmap(url){
   const i=new Image();i.crossOrigin='anonymous';i.src=url;await i.decode();return i;
  }
- async function prepare(base){
-  if(!imageDoc()||editing)throw Error('请先保存当前图片批注。');
+ async function prepare(base,notes){
+  if(!notes){if(!imageDoc()||editing)throw Error('请先保存当前图片批注。');notes=doc.notes}
   const source=await bitmap(base+'source');
   const width=source.naturalWidth,height=source.naturalHeight;
   const canvas=document.createElement('canvas');canvas.width=width;canvas.height=height;
   try{
    const ctx=canvas.getContext('2d');if(!ctx)throw Error('无法创建原尺寸画布。');
    ctx.drawImage(source,0,0,width,height);
-   if(doc.notes.length){
+   if(notes.length){
     const unit=Math.max(1,Math.max(width,height)/1600);
     const layer=svg('svg',{width,height,viewBox:'0 0 '+(width/unit)+' '+(height/unit)});
-    drawInk(layer,doc.notes,width/unit,height/unit);
-    layer.querySelectorAll('.inkHit').forEach(e=>e.remove());
+    drawInk(layer,notes,width/unit,height/unit);
+    layer.querySelectorAll('.inkHit,.pictureHandle,rect[pointer-events="none"]').forEach(e=>e.remove());
     layer.querySelectorAll('.inkBadge text').forEach(e=>{e.setAttribute('fill','#15202a');e.setAttribute('font-family','Consolas, monospace');e.setAttribute('font-weight','700');e.setAttribute('font-size','13')});
     // Standalone SVG images cannot load external resources; embed only the referenced attachments.
     const assets=new Map();
     for(const e of layer.querySelectorAll('image')){
-     const filename=new URL(e.getAttribute('href')).pathname.split('/').pop();
+     const filename=new URL(e.getAttribute('href'),document.baseURI).pathname.split('/').pop();
      if(!assets.has(filename)){
       const response=await fetch(base+filename);
       if(!response.ok)throw Error('无法读取批注附图。');

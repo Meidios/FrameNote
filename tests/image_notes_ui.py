@@ -42,7 +42,7 @@ with sync_playwright() as pw:
         p.keyboard.press("ArrowLeft");wait(p,"doc.notes[0]?.text==='检查边缘' && !busy")
         pack=work/"file.framenote";save(p,proc,pack)
         with zipfile.ZipFile(pack) as z:assert z.read("media/source.tif")==source.read_bytes()
-        p.keyboard.press("Control+o");dialog(proc,fixtures/"capture-60.mp4");wait(p,"ready && !imageDoc()");assert vol(proc) and p.locator("header").is_visible()
+        p.keyboard.press("Control+o");dialog(proc,fixtures/"capture-60.mp4");wait(p,"ready && !imageDoc()");assert not vol(proc) and p.locator("#transport #playbackVolume").is_visible() and p.locator("header").is_visible()
         print("PASS TIFF draft, drawing after zoom, pan registration, original TIFF package and native volume",flush=True)
     finally:stop(proc)
     proc,p=launch(pw,None,"typeof imageDoc==='function'")
@@ -57,7 +57,7 @@ with sync_playwright() as pw:
     proc,p=launch(pw,pack,"typeof imageDoc==='function' && imageDoc() && $('openedImage').naturalWidth===800 && !busy")
     try:
         wait(p,"doc.notes[0]?.shape?.kind==='arrow'");assert not vol(proc)
-        p.locator(".inkBadge").click();p.locator("#edit").click();p.locator("#body").fill("调整箭头");p.keyboard.press("Control+Enter")
+        p.locator(".inkBadge").click();p.locator("#body").fill("调整箭头");p.keyboard.press("Control+Enter")
         wait(p,"doc.notes[0].text==='调整箭头' && !editing")
         print("PASS clipboard arrow-only note -> exported package -> restart -> selection and edit",flush=True)
     finally:stop(proc)

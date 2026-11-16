@@ -40,6 +40,9 @@ public static class Probe
         return new(f.TryGetProperty("duration",out var d)?Us(d.GetString()!):0,f.TryGetProperty("start_time",out var o)?Us(o.GetString()!):0,
             v.GetProperty("codec_name").GetString()!,a.ValueKind==JsonValueKind.Undefined?"":a.GetProperty("codec_name").GetString()!,v.TryGetProperty("pix_fmt",out var fmt)?fmt.GetString()!:"");
     }
+    public static Task<string> DecodeFrame(string source,long us,string file,CancellationToken token)=>
+        Run(token,"ffmpeg","-nostdin","-v","error","-ss",(us/1e6).ToString("F6",CultureInfo.InvariantCulture),
+            "-i",source,"-map","0:v:0","-frames:v","1","-threads","1",file);
     public static async Task<long[]> Frames(string path,Info info,CancellationToken token=default){
         var packets=await Run(token,"ffprobe","-v","error","-select_streams","v:0","-show_entries","packet=pts_time","-of","csv=p=0","-i",path);
         if(packets.Contains("N/A") || string.IsNullOrWhiteSpace(packets))

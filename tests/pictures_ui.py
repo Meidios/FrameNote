@@ -28,12 +28,25 @@ def export(page,proc):
             print(win.window_text(),[(c.class_name(),c.window_text()) for c in win.children() if c.window_text()],flush=True)
     wait(page,"document.querySelector('#status').textContent.startsWith('审阅包已保存')")
 
+def set_clipboard_picture(page):
+    page.context.grant_permissions(["clipboard-read","clipboard-write"])
+    page.evaluate("""async()=>{const c=document.createElement('canvas');c.width=80;c.height=240;
+      const ctx=c.getContext('2d');ctx.fillStyle='#27a959';ctx.fillRect(0,0,80,240);
+      const blob=await new Promise(r=>c.toBlob(r));await navigator.clipboard.write([new ClipboardItem({'image/png':blob})])}""")
+
 with sync_playwright() as pw:
     proc,page=launch(pw,video)
     try:
         at(page,4)
-        with page.expect_file_chooser() as chooser:page.locator("#startPicture").click()
+        action=page.locator("#timelineTools #outBtn + #startPicture")
+        assert action.is_visible() and page.locator("#reviewPanel #startPicture").count()==0
+        with page.expect_file_chooser() as chooser:action.click()
+        chooser.value.set_files([])
+        assert page.evaluate("!editing")
+        with page.expect_file_chooser() as chooser:page.keyboard.press("p")
         chooser.value.set_files(str(png));wait(page,"editing?.pictures?.length===1")
+        page.locator("#body").focus();page.keyboard.press("p");assert page.locator("#body").input_value()=="p"
+        page.locator("#body").fill("")
         before=ink(page,(212,37,94))
         handle=page.locator('[data-corner="1,1"]').bounding_box()
         x,y=handle["x"]+5,handle["y"]+5
@@ -47,10 +60,7 @@ with sync_playwright() as pw:
         at(page,5);assert page.locator("#ink image").count()==0
         at(page,8);page.keyboard.press("i");at(page,22);page.keyboard.press("o")
         # Put a generated PNG on the OS clipboard using the browser clipboard API.
-        page.context.grant_permissions(["clipboard-read","clipboard-write"])
-        page.evaluate("""async()=>{const c=document.createElement('canvas');c.width=80;c.height=240;
-          const ctx=c.getContext('2d');ctx.fillStyle='#27a959';ctx.fillRect(0,0,80,240);
-          const blob=await new Promise(r=>c.toBlob(r));await navigator.clipboard.write([new ClipboardItem({'image/png':blob})])}""")
+        set_clipboard_picture(page)
         page.keyboard.press("Control+v");wait(page,"editing?.pictures?.length===1")
         b=ink(page,(39,169,89));assert abs(b["width"]/b["height"]-1/3)<.01
         page.locator("#body").fill("参考竖图");page.keyboard.press("Control+Enter")
@@ -72,8 +82,9 @@ with sync_playwright() as pw:
         at(page,4);ink(page,(212,37,94))
         at(page,12);ink(page,(39,169,89))
         # Paste directly on the desk without opening an editor.
+        set_clipboard_picture(page);page.locator("#stage").focus()
         at(page,27);page.keyboard.press("Control+v");wait(page,"editing?.pictures?.length===1")
         assert page.evaluate("editing.startUs===frames[27] && editing.endUs===null")
-        page.keyboard.press("Escape");assert page.evaluate("doc.notes.length")==2
+        page.keyboard.press("Control+z");assert page.evaluate("doc.notes.length")==2
     finally:stop(proc)
     print("PASS: file and clipboard, image-only point, range, placement, locked aspect, draft and standalone package",flush=True)

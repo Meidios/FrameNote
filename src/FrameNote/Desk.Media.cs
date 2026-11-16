@@ -1,8 +1,6 @@
 using System.IO;
 using System.Text.Json;
 using System.Windows;
-using System.Windows.Controls;
-using System.Windows.Media;
 using System.Windows.Media.Imaging;
 using System.Windows.Threading;
 
@@ -26,32 +24,26 @@ public sealed partial class Desk
         if(i<0 || i>=files.Length){Send(new{type="status",text=Path.GetFileName(source)+(direction<0?" · 已是第一张":" · 已是最后一张")});return;}
         await Open(files[i]);
     }
-    FrameworkElement audioPanel=null!;
-    Slider masterVolume=null!;
     int volume=100;
     bool volumeDirty;
     readonly DispatcherTimer volumeWrite=new(){Interval=TimeSpan.FromMilliseconds(250)};
-    FrameworkElement VolumeControl(){
+    void InitPlaybackVolume(){
         string file=Path.Combine(root,"volume.json");
         try{if(File.Exists(file))volume=Math.Clamp(JsonSerializer.Deserialize<int>(File.ReadAllText(file)),0,100);}
         catch(Exception e) when(e is IOException or JsonException or UnauthorizedAccessException){}
-        var panel=new StackPanel{Orientation=Orientation.Horizontal,VerticalAlignment=VerticalAlignment.Center,Margin=new Thickness(8,0,14,0)};
-        panel.Children.Add(new TextBlock{Text="音量",VerticalAlignment=VerticalAlignment.Center});
-        var slider=masterVolume=new Slider{Minimum=0,Maximum=100,Width=100,Value=volume,TickFrequency=1,IsSnapToTickEnabled=true,IsMoveToPointEnabled=true,Margin=new Thickness(6,0,5,0)};
-        System.Windows.Automation.AutomationProperties.SetName(slider,"播放音量");
-        panel.Children.Add(slider);var label=new TextBlock{Width=36,Text=volume+"%",VerticalAlignment=VerticalAlignment.Center};label.SetResourceReference(TextBlock.FontFamilyProperty,"MonoFont");panel.Children.Add(label);
         void Save(){
             volumeWrite.Stop();if(!volumeDirty)return;
             try{Packages.Atomic(file,s=>JsonSerializer.Serialize(s,volume));volumeDirty=false;}
             catch(Exception e) when(e is IOException or UnauthorizedAccessException){if(IsLoaded && web.CoreWebView2!=null)ReportError("音量已调整，但无法保存设置。");}
         }
         volumeWrite.Tick+=(_,_)=>Save();Closing+=(_,_)=>Save();
-        slider.ValueChanged+=(_,_)=>{
-            volume=(int)slider.Value;volumeDirty=true;label.Text=volume+"%";native?.SetVolume(volume);
-            if(web.CoreWebView2!=null)Send(new{type="volume",value=volume});
-            volumeWrite.Stop();volumeWrite.Start();
-        };
-        return audioPanel=panel;
+    }
+    void SetPlaybackVolume(int value){
+        value=Math.Clamp(value,0,100);
+        if(volume==value)return;
+        volume=value;volumeDirty=true;native?.SetVolume(volume);
+        if(web.CoreWebView2!=null)Send(new{type="volume",value=volume});
+        volumeWrite.Stop();volumeWrite.Start();
     }
     async Task ShowImage(string path,string name,bool fromClipboard=false,string? nextDraft=null,Review? review=null,bool package=false){
         var source=path;
@@ -77,7 +69,7 @@ public sealed partial class Desk
         if(native!=null){native.Stop();native.Visibility=Visibility.Collapsed;}
         web.Visibility=Visibility.Visible;
         SetPreviewFullscreen(false);StopTimeline();displayImagePath=path;media=source;draft=nextDraft;preview=null;doc=review;deskLoaded=false;openedPackage=package;playbackInfo=null;playbackId=Guid.NewGuid();
-        audioPanel.Visibility=Visibility.Collapsed;viewingImage=true;imageFile=originalFile;Title=name+" · FrameNote";Send(new{type="image",src,name,doc,images=new Uri(ImageDirectory+Path.DirectorySeparatorChar).AbsoluteUri,folder=imageFile!=null});
+        viewingImage=true;imageFile=originalFile;Title=name+" · FrameNote";Send(new{type="image",src,name,doc,images=new Uri(ImageDirectory+Path.DirectorySeparatorChar).AbsoluteUri,folder=imageFile!=null});
         if(previous!=null)recordings.Discard(previous);
     }
     string StorePreview(BitmapSource source){

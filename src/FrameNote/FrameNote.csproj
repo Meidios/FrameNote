@@ -1,7 +1,7 @@
 <Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup>
     <ApplicationIcon>Assets/FrameNote.ico</ApplicationIcon>
-    <OutputType>WinExe</OutputType><TargetFramework>net8.0-windows</TargetFramework><UseWPF>true</UseWPF><Nullable>enable</Nullable><ImplicitUsings>enable</ImplicitUsings><Platform>x64</Platform><PlatformTarget>x64</PlatformTarget><Version>0.6.1</Version>
+    <OutputType>WinExe</OutputType><TargetFramework>net8.0-windows</TargetFramework><UseWPF>true</UseWPF><Nullable>enable</Nullable><ImplicitUsings>enable</ImplicitUsings><Platform>x64</Platform><PlatformTarget>x64</PlatformTarget><Version>0.6.3</Version>
   </PropertyGroup>
   <ItemGroup>
     <Content Include="Assets/FrameNote_File.ico" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
@@ -16,6 +16,14 @@
     <PackageReference Include="ScreenRecorderLib" Version="7.0.1" />
     <PackageReference Include="VideoLAN.LibVLC.Windows" Version="3.0.24" />
   </ItemGroup>
+  <!-- A second apphost gives Explorer a distinct executable identity.
+       Both hosts load FrameNote.dll and share the same runtime and media tools. -->
+  <Target Name="BuildPlayerHost" AfterTargets="Build" Condition="'$(UseAppHost)' == 'true'">
+    <Copy SourceFiles="$(TargetDir)FrameNote.exe" DestinationFiles="$(TargetDir)FrameNote Player.exe" SkipUnchangedFiles="true" />
+  </Target>
+  <Target Name="PublishPlayerHost" AfterTargets="Publish" Condition="'$(UseAppHost)' == 'true'">
+    <Copy SourceFiles="$(PublishDir)/FrameNote.exe" DestinationFiles="$(PublishDir)/FrameNote Player.exe" SkipUnchangedFiles="true" />
+  </Target>
 </Project>
 
 

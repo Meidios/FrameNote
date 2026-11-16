@@ -11,34 +11,32 @@ public sealed partial class Desk
     async Task Snapshot(JsonElement p){
         var save=p.GetProperty("save").GetBoolean();
         await Work(async()=>{
-            // Capture the composited video + SVG from the WebView surface. This
-            // also works for local media and image attachments on separate origins.
-            await web.ExecuteScriptAsync("document.body.classList.add('snapshot')");
+            if(media==null||doc==null||viewingImage||p.GetProperty("playbackId").GetGuid()!=playbackId)return;
+            long us=p.GetProperty("us").GetInt64();
+            var ids=p.GetProperty("ids").EnumerateArray().Select(id=>id.GetGuid()).ToHashSet();
+            var notes=doc.Notes.Where(n=>ids.Contains(n.Id)).ToArray();
+            Directory.CreateDirectory(scratch);
+            var file=Path.Combine(scratch,Guid.NewGuid().ToString("N")+".png");
             try{
-                var raw=await web.ExecuteScriptAsync("""
-                    (()=>{const r=overlay.getBoundingClientRect();return {
-                      x:r.x+scrollX,y:r.y+scrollY,width:r.width,height:r.height,
-                      pixels:v.videoWidth,dpr:devicePixelRatio,us:stamp()}})()
-                    """);
-                using var json=JsonDocument.Parse(raw);var r=json.RootElement;
-                double N(string key)=>r.GetProperty(key).GetDouble();
-                double width=N("width"),height=N("height");
-                if(width<=0||height<=0||N("pixels")<=0)throw new InvalidOperationException("当前没有可捕获的画面。");
-                var args=JsonSerializer.Serialize(new{format="png",fromSurface=true,captureBeyondViewport=true,
-                    clip=new{x=N("x"),y=N("y"),width,height,scale=N("pixels")/(width*N("dpr"))}});
-                var reply=await web.CoreWebView2.CallDevToolsProtocolMethodAsync("Page.captureScreenshot",args);
-                using var result=JsonDocument.Parse(reply);
-                var png=result.RootElement.GetProperty("data").GetBytesFromBase64();
-                var message=await DeliverFrame(this,png,save,doc!.FileName,TimeSpan.FromTicks(r.GetProperty("us").GetInt64()*10));
+                await Probe.DecodeFrame(media,us,file,default);
+                var message=await DeliverVideoFrame(file,save,doc.FileName,TimeSpan.FromTicks(us*10),notes);
                 Send(new{type="status",text=message});
-            }finally{await web.ExecuteScriptAsync("document.body.classList.remove('snapshot')");}
+            }finally{File.Delete(file);}
         });
     }
-    internal static async Task<string> DeliverFrame(Window owner,byte[] png,bool save,string source,TimeSpan time,CancellationToken token=default){
+    internal async Task<string> DeliverVideoFrame(string file,bool save,string source,TimeSpan time,IReadOnlyList<Note> notes,CancellationToken token=default){
+        byte[] png;
+        if(notes.Count==0)png=await File.ReadAllBytesAsync(file,token);
+        else{
+            using var annotated=new MemoryStream();
+            await RenderAnnotatedImage(file,notes,annotated,true);
+            png=FrameDetails.Append(annotated.ToArray(),source,time,notes);
+        }
+        token.ThrowIfCancellationRequested();
         if(save){
             var fd=new SaveFileDialog{Filter="PNG 图片|*.png",DefaultExt=".png",
                 FileName=Path.GetFileNameWithoutExtension(source)+"_"+time.ToString(@"hh\-mm\-ss\.fff"),Title="当前帧另存为"};
-            if(fd.ShowDialog(owner)!=true)return "已取消保存当前帧。";
+            if(fd.ShowDialog(this)!=true)return "已取消保存当前帧。";
             Packages.Atomic(fd.FileName,s=>s.Write(png));
             return "当前帧已保存："+fd.FileName;
         }

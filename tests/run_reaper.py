@@ -9,7 +9,8 @@ test=Path(tempfile.mkdtemp(prefix="reaper-run-",dir=dir))
 package=Path((dir/"latest.txt").read_text(encoding="utf8").strip())
 (test/"latest.txt").write_text(str(package),encoding="utf8")
 with zipfile.ZipFile(package) as z: ns=json.loads(z.read("review.json"))["notes"]
-(test/"expected.tsv").write_text("".join(f"{n['startUs']}\t{n['endUs'] if n['endUs'] is not None else -1}\t#{n.get('number',i)} {n['text']}\n" for i,n in enumerate(sorted(ns,key=lambda n:(n['startUs'],n['id'])),1)),encoding="utf8")
+swatches=["ffd886","8ddcff","8de3af","ff9d97","cfb1ff","ffaed8"]
+(test/"expected.tsv").write_text("".join(f"{n['startUs']}\t{n['endUs'] if n['endUs'] is not None else -1}\t{(n.get('color') or swatches[(n.get('number',i)-1)%6]).lstrip('#')}\t#{n.get('number',i)} {n['text']}\n" for i,n in enumerate(sorted(ns,key=lambda n:(n['startUs'],n['id'])),1)),encoding="utf8")
 rpp=test/"test.rpp";rpp.write_text('<REAPER_PROJECT 0.1 "6.82" 0\n>\n')
 env=dict(os.environ,FRAMENOTE_TEST_DIR=str(test),FRAMENOTE_TEST_ACTION=str(Path(sys.argv[3]).resolve()))
 proc=subprocess.Popen([str(exe),"-newinst","-nosplash",str(rpp),str(Path(__file__).with_name("reaper_acceptance.lua").resolve())],env=env)

@@ -17,10 +17,32 @@ let microphone=null;
 function newChannel(device){return {id:device.id,name:device.name,gainDb:0,muted:false,peak:0,offline:false}}
 function settingsFor({id,gainDb,muted}){return {id,gainDb,muted}}
 function channels(){return [...outputs.values(),...(microphone?[microphone]:[])]}
+let meterRows=[],meterVisible=false,meterFrame=0,meterPending=false,latestLevels=null;
+function scheduleMeters(){
+ const active=meterVisible && !document.hidden && meterRows.length>0;
+ if(active && !meterFrame)meterFrame=requestAnimationFrame(tickMeters);
+ else if(!active && meterFrame){cancelAnimationFrame(meterFrame);meterFrame=0;}
+}
+function tickMeters(){
+ meterFrame=0;
+ if(latestLevels){
+  for(const ch of meterRows){
+   const peak=latestLevels[ch.id]??0;
+   if(ch.peak!==peak){ch.peak=peak;paintPeak(ch);}
+  }
+  latestLevels=null;
+ }
+ // Sample all channels together, with at most one native read in flight.
+ if(!meterPending){meterPending=true;send('readMeters');}
+ scheduleMeters();
+}
+new IntersectionObserver(([entry])=>{meterVisible=entry.isIntersecting;scheduleMeters()}).observe(document.querySelector('.mixer'));
+document.addEventListener('visibilitychange',scheduleMeters);
 function paintPeak(ch){
  const db=ch.muted||ch.offline?-60:Math.min(0,Math.max(-60,20*Math.log10(ch.peak)+ch.gainDb));
  ch.mask.style.transform='scaleX('+(-db/60)+')';
- ch.meter.setAttribute('aria-valuenow',Math.round(db));
+ const rounded=String(Math.round(db));
+ if(ch.meter.getAttribute('aria-valuenow')!==rounded)ch.meter.setAttribute('aria-valuenow',rounded);
 }
 function strip(ch,isMic){
  const row=$('channelStrip').content.firstElementChild.cloneNode(true);
@@ -52,7 +74,8 @@ function renderMixer(){
  if(microphone?.offline)inputs.push({id:microphone.id,name:'已断开 · '+microphone.name});
  populate('mic',inputs,microphone?.id??'');
  $('micStrip').replaceChildren(...(microphone?[strip(microphone,true)]:[]));
- send('meterSources',{ids:channels().filter(ch=>!ch.offline).map(ch=>ch.id)});window.captureButtons();
+ meterRows=channels().filter(ch=>!ch.offline);
+ send('meterSources',{ids:meterRows.map(ch=>ch.id)});scheduleMeters();window.captureButtons();
 }
 window.captureButtons=()=>{
  const usable=!!catalog && !!$('source').value && ($('mode').value!=='region'||region?.device===$('source').value);
@@ -90,7 +113,7 @@ chrome.webview.addEventListener('message',({data:m})=>{
    ch.offline=!d;if(d)ch.name=d.name;else ch.peak=0;
   }
   renderMixer();
- }else if(m.type==='meters'){for(const ch of channels()){ch.peak=m.levels[ch.id]??0;paintPeak(ch)}}
+ }else if(m.type==='meters'){meterPending=false;latestLevels=m.levels}
  else if(m.type==='region'){region=m.width?m:null;$('pickRegion').textContent=region?'重新框选':'框选区域';$('regionSize').textContent=region?m.width+' × '+m.height+' 像素':'';window.captureButtons()}
  else if(m.type==='recording'){starting=false;recording=m.value?(m.gif?'gif':'video'):null;window.captureButtons()}
  else if(m.type==='recordShortcut')capture(false);

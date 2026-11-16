@@ -15,7 +15,7 @@ for ext,fmt in [("gif","GIF"),("apng","PNG"),("webp","WEBP")]:
 for ext in ("jpeg","png","bmp","tiff","ico","avif"):
     colors[0].save(work/("still."+ext))
 def open_file(page,proc,path):
-    page.locator("#open").click(no_wait_after=True)
+    page.keyboard.press("Control+o")
     dialog=Desktop(backend="win32").window(process=proc.pid,class_name="#32770");dialog.wait("ready",timeout=8)
     dialog.child_window(class_name="Edit",found_index=0).set_edit_text(str(path.resolve()));dialog.child_window(control_id=1).click()
 def clipboard_png():
@@ -53,11 +53,15 @@ with sync_playwright() as pw:
         page.locator("#play").click();page.locator("#seek").evaluate("e=>{e.value=doc.durationUs/4;e.dispatchEvent(new Event('input'))}")
         wait(page,"v.paused && Math.abs(shown-doc.durationUs/4)<100000")
         main=Desktop(backend="uia").window(process=proc.pid,title_re=".* · FrameNote",found_index=0)
-        slide=main.child_window(title="播放音量",control_type="Slider");slide.wrapper_object().iface_range_value.SetValue(37)
+        assert not main.child_window(title="播放音量",control_type="Slider",framework_id="WPF").exists(timeout=.4)
+        page.locator("#transport #playbackVolume").evaluate("e=>{e.value=37;e.dispatchEvent(new Event('input'))}")
+        wait(page,"v.volume===0.37")
+        page.locator("#mutePlayback").click();wait(page,"v.volume===0")
+        page.locator("#mutePlayback").click()
         wait(page,"v.volume===0.37")
         clipboard_png();page.locator("#stage").click();page.keyboard.press("Control+v")
         wait(page,"editing?.pictures?.length===1 && doc && ready")
-        page.locator("#cancel").click()
+        page.keyboard.press("Control+z")
         print("PASS autoplay, seek in both states, volume and video paste as annotation",flush=True)
     finally:stop(proc)
     proc,page=launch(pw,Path("examples/SampleReview.framenote").resolve())

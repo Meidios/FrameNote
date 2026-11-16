@@ -35,7 +35,8 @@ main{grid-template-columns:clamp(210px,18vw + 40px,276px) minmax(0,1fr) clamp(22
 #refreshSources,#pickRegion{justify-self:start;padding:4px 9px}
 #regionControls{display:grid;gap:5px}
 #regionSize{letter-spacing:normal}
-#sendReaper{width:35px;height:34px;display:grid;place-items:center;padding:6px;color:var(--ink)}
+#sendReaper.dragging{cursor:grabbing}
+#sendReaper{touch-action:none;user-select:none;width:35px;height:34px;display:grid;place-items:center;padding:6px;color:var(--ink)}
 .iconAction{position:relative;width:35px;height:34px;flex:none;display:inline-grid;place-items:center;padding:0}
 .iconAction svg{display:block;fill:currentColor;pointer-events:none}
 .actionName{position:absolute;width:1px;height:1px;padding:0;overflow:hidden;clip-path:inset(50%);white-space:nowrap}
@@ -45,13 +46,13 @@ main{grid-template-columns:clamp(210px,18vw + 40px,276px) minmax(0,1fr) clamp(22
 #transport{column-gap:9px}.transportClock{font:12px var(--mono);white-space:nowrap;color:var(--muted)}#duration{color:var(--muted)}
 .transportTools{margin-left:auto}#rate{align-self:stretch;padding:0 17px 0 4px;font-size:12px}
 #playbackVolume{width:96px;margin:0 3px;accent-color:var(--accent)}
-#loop[aria-pressed=true]{background:var(--accent);color:var(--ink)}
+#loop[aria-pressed=true]{background:var(--accent);color:var(--onAccent)}
 .previewFullscreen #viewer{position:fixed;inset:0;z-index:5;width:100%;height:100%;background:var(--canvas);grid-template-rows:minmax(0,1fr) auto}
 .previewFullscreen :is(header,footer,aside),.previewFullscreen #viewer :is(#timelineTools,#rangeHint,#trackDesk){display:none}
 #timelineTools{display:flex;align-items:center;flex-wrap:wrap;gap:5px;padding:5px 16px;border-top:1px solid var(--edge)}
 #timelineTools strong{font-size:13px;margin-right:5px}
 #timelineTools button{padding:3px 7px}
-#timelineTools label{white-space:nowrap}
+
 #viewer>#rangeHint:not(:empty){padding:0 16px 4px}
 #stage{grid-row:1}#transport{grid-row:2}#timelineTools{grid-row:3}#rangeHint{grid-row:4}#trackDesk{grid-row:5}
 @media(max-width:1000px){#transport{padding:0 6px}#transport button{padding:4px}aside{padding:10px}#timelineTools{padding-inline:6px}}
@@ -62,10 +63,11 @@ main{grid-template-columns:clamp(210px,18vw + 40px,276px) minmax(0,1fr) clamp(22
 #markLanes{flex:none;position:relative;min-height:4px;margin-inline:var(--pad,12px)}
 #marks button{position:absolute;display:grid;place-content:center;padding:0;border:0;border-radius:3px;background:color-mix(in srgb,var(--mark) 18%,var(--panel));box-shadow:inset 0 0 0 1px var(--mark);color:color-mix(in srgb,var(--mark) 55%,var(--ink));font:500 12px/18px var(--ui);height:19px}
 #marks button span{position:relative;width:max-content;padding:0 4px}
-#marks .point::after,#marks .region::before,#marks .region::after{content:"";position:absolute;top:100%;transform:translateX(-50%);width:2px;height:3px;background:var(--mark);pointer-events:none}
-#marks .point::after{left:50%}
+#marks .point::after{content:"";position:absolute;top:100%;left:50%;transform:translateX(-50%);width:2px;height:3px;background:var(--mark);pointer-events:none}
+#marks .region{border-radius:3px 3px 0 0}
+#marks .region::before,#marks .region::after{content:"";position:absolute;top:calc(100% - 1px);width:min(5px,50%);height:4px;background:var(--mark);pointer-events:none;clip-path:polygon(0 0,100% 0,25% 100%,0 100%)}
 #marks .region::before{left:0}
-#marks .region::after{left:100%}
+#marks .region::after{right:0;transform:scaleX(-1)}
 #marks .region.short span{background:var(--panel);border-radius:2px;top:-3px}
 #marks button:hover,#marks button[aria-pressed="true"]{background:var(--mark);color:#15202a}
 #marks .short:hover span,#marks .short[aria-pressed="true"] span{background:var(--mark)}
@@ -73,7 +75,9 @@ main{grid-template-columns:clamp(210px,18vw + 40px,276px) minmax(0,1fr) clamp(22
 #trackNames{display:grid;align-content:start;grid-template-rows:var(--ruler-h) var(--film-h) var(--wave-h) auto;background:var(--chrome);border-right:1px solid var(--edge)}
 #trackNames span{display:flex;align-items:center;justify-content:center;font-size:12px;color:var(--muted);border-bottom:1px solid var(--edge)}
 #trackNames span:last-child{min-height:26px;border:0}
-#trackDesk #scroll{margin:0;padding:0;min-width:0}
+#trackDesk #scroll{margin:0;padding:0;min-width:0;overflow-x:scroll}
+#scroll::-webkit-scrollbar:horizontal{height:8px}
+#scroll::-webkit-scrollbar-thumb:horizontal{border-block-width:2px}
 #timeline{position:relative}
 #timeline .axis{position:absolute;inset-inline:var(--pad,12px) calc(var(--pad,12px) + var(--gutter,0px));top:0;bottom:0}
 .trackRow{position:relative;border-bottom:1px solid var(--edge);overflow:hidden}
@@ -115,8 +119,6 @@ rect.inkHit{pointer-events:all}
 .picture,.pictureHandle{pointer-events:all;touch-action:none}
 #stage:has(.pictureHandle) .picture{cursor:move}
 
-body.busy.snapshot main{opacity:1}
-body.snapshot .pictureHandle,body.snapshot #ink rect[pointer-events="none"]{visibility:hidden}
 #openedImage{position:absolute;inset:0;width:100%;height:100%;object-fit:contain}
 body.imageView{grid-template-rows:minmax(0,1fr) 34px}
 body.imageView>header{display:none}
@@ -136,24 +138,24 @@ meter::-webkit-meter-bar{background:var(--canvas);border-color:var(--edge)}
 meter::-webkit-meter-optimum-value{background:var(--accent)}
 select{appearance:none;background-image:var(--chevron);background-repeat:no-repeat;background-position:right 3px center;background-size:16px 16px}
 .captureBlock select{padding-right:19px}
-#zoom{width:40px;height:23px;padding-right:16px}
+
 kbd{font-family:var(--ui);display:inline-block;width:.5em;line-height:11px;text-align:center}
 #welcome{padding-block-start:19px}
 #stage:has(#welcome:not([hidden])){color:var(--ink)}
 #stage:has(#welcome[hidden]){background:#101113}
-#del:not(:disabled){color:var(--danger)}
 .imageExport{display:none}
 body.imageView .imageExport{display:flex}
 #reviewPanel{gap:0;min-width:0}
 #reviewPanel .sideTitle{flex-wrap:wrap;flex:none;gap:4px 8px}
 #reviewPanel .sideTitle h2{display:flex;align-items:baseline;gap:8px}
 #reviewPanel #count{font:12px var(--mono)}
-#reviewPanel :is(#noteActions,.actions,.editorFields) button:not(#colors button){padding:4px 8px}
-#reviewPanel .actions{flex:none;padding-block:8px;border-bottom:1px solid var(--edge)}
+#reviewPanel :is(#noteActions,.editorFields) button:not(#colors button){padding:4px 8px}
 #reviewPanel #list{padding-block:6px;min-height:0;overscroll-behavior:contain}
-#reviewPanel .note{padding:6px 8px;margin:0 0 4px}
-#reviewPanel .stamp{margin:0 0 2px;font-size:12px}
-#reviewPanel #editor{flex:0 1 auto;display:flex;flex-direction:column;min-height:0;max-height:64%;padding-top:8px}
+#reviewPanel .note{position:relative;padding:6px 8px;margin:0 0 4px}
+#reviewPanel .stamp{margin:0 30px 2px 0;font-size:12px;min-height:24px}
+.noteDelete{position:absolute;top:4px;right:4px;width:26px;height:26px;padding:0;display:grid;place-items:center;color:var(--muted);background:transparent;border-color:transparent}
+.noteDelete:is(:hover,:focus-visible){color:var(--danger);background:var(--hover)}
+#reviewPanel #editor{flex:0 0 min(280px,46%);display:flex;flex-direction:column;min-height:0;padding-top:8px}
 #editorHeading{font-size:15px;flex:none}
 .editorFields{min-height:0;overflow:auto;overscroll-behavior:contain;padding:5px 2px}
 #editTitle{display:block;font:12px/18px var(--mono);color:var(--muted)}
@@ -162,5 +164,4 @@ body.imageView .imageExport{display:flex}
 .editorColors #colors{margin:0;flex-wrap:wrap}
 .editorFields textarea{display:block;margin:3px 0 6px}
 .editorFields textarea:focus-visible{outline-offset:-2px}
-.editorFooter{flex:none;justify-content:flex-end;padding-top:6px;border-top:1px solid var(--edge)}
 #reviewPanel .imageExport{flex:none;padding-top:6px}

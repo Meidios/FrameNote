@@ -10,6 +10,13 @@ public record Drawing(string Kind, double X, double Y, double ToX, double ToY);
 public record Note(Guid Id, long StartUs, long? EndUs, string Text, Drawing? Shape, int Number=0, string? Color=null, List<Picture>? Pictures=null)
 {
     public string ReaperName() => $"#{Number} {(Text.Length==0?"图片批注":Text.ReplaceLineEndings(" "))}";
+    // Legacy notes without an explicit color use the same numbered swatches as the desk.
+    static readonly string[] legacyColors=["#ffd886","#8ddcff","#8de3af","#ff9d97","#cfb1ff","#ffaed8"];
+    public string DisplayColor() => Color??legacyColors[(Number-1)%legacyColors.Length];
+    public string ReaperRow(bool colors) {
+        var row=$"{StartUs}\t{EndUs??-1}\t{Convert.ToHexString(Encoding.UTF8.GetBytes(ReaperName()))}";
+        return colors?row+"\t"+DisplayColor()[1..]:row;
+    }
 }
 public record Review(int Version, Guid Id, string FileName, long DurationUs, List<Note> Notes, int LastNoteNumber=0)
 {
@@ -106,7 +113,7 @@ public static class Packages
             return (doc,dest);
         } finally { File.Delete(tmp); }
     }
-    public static void PrepareReaper(string package, string dir, string output)
+    public static void PrepareReaper(string package, string dir, string output,bool colors=false)
     {
         var (doc, media) = Read(package, dir);
         if(doc.Version==2)throw new InvalidDataException("图片审阅包不含视频时间线，无法导入 REAPER。");
@@ -114,7 +121,7 @@ public static class Packages
         Atomic(output, s => {
             using var w = new StreamWriter(s,new UTF8Encoding(false),1024,true);
             w.WriteLine(doc.Id); w.WriteLine(Hex(media)); w.WriteLine(doc.DurationUs);
-            foreach (var n in doc.Notes) w.WriteLine($"{n.StartUs}\t{n.EndUs ?? -1}\t{Hex(n.ReaperName())}");
+            foreach (var n in doc.Notes) w.WriteLine(n.ReaperRow(colors));
         });
     }
 }

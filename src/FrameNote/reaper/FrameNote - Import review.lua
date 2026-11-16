@@ -1,6 +1,6 @@
--- FrameNote receiver v1
+-- FrameNote receiver v2
 -- @description FrameNote: Import review at edit cursor
--- @version 0.1.0
+-- @version 0.2.0
 -- Install alongside the .app file exported from FrameNote, or in its reaper directory.
 local R = reaper
 local script = debug.getinfo(1, "S").source:sub(2)
@@ -13,7 +13,7 @@ local function quoted(s)
   assert(not s:find('["\r\n]'), "Invalid path")
   return '"' .. s .. '"'
 end
-local function insert(lines,projectDir,copyKey,title)
+local function insert(lines,projectDir,copyKey,title,placement)
   local id,path,duration=lines[1],unhex(lines[2]),tonumber(lines[3])/1e6
   for i=0,R.CountMediaItems(0)-1 do
     local _,tag=R.GetSetMediaItemInfo_String(R.GetMediaItem(0,i),"P_EXT:FrameNoteReview","",false)
@@ -21,6 +21,14 @@ local function insert(lines,projectDir,copyKey,title)
   end
   local pos=R.GetCursorPosition()
   local track=R.GetSelectedTrack(0,0)
+  if placement and placement~="cursor" then
+    local x,y=placement:match("^drop\t(%-?%d+)\t(%-?%d+)$")
+    x,y=tonumber(x),tonumber(y);assert(x and y,"Invalid drop position.")
+    local context
+    track,context=R.GetThingFromPoint(x,y)
+    assert(context and context:match("^arrange") and track~=R.GetMasterTrack(0),"请将按钮拖到 REAPER 编排区的轨道上或轨道下方。")
+    pos=math.max(0,(R.GetSet_ArrangeView2(0,false,x,x+1,0,0)))
+  end
   if copyKey then
     local folder=projectDir.."/FrameNote Media"
     R.RecursiveCreateDirectory(folder,0)
@@ -55,9 +63,11 @@ local function insert(lines,projectDir,copyKey,title)
     if id~="-" then R.GetSetMediaItemInfo_String(item,"P_EXT:FrameNoteReview",id,true) end
     local start=R.GetMediaItemInfo_Value(item,"D_POSITION")
     for i=4,#lines do
-      local a,b,text=lines[i]:match("^(%d+)\t(%-?%d+)\t(%x+)$")
+      local a,b,text,rgb=lines[i]:match("^(%d+)\t(%-?%d+)\t(%x+)\t(%x%x%x%x%x%x)$")
+      assert(rgb,"Invalid marker color.")
+      local color=R.ColorToNative(tonumber(rgb:sub(1,2),16),tonumber(rgb:sub(3,4),16),tonumber(rgb:sub(5,6),16)) | 0x1000000
       local region=tonumber(b)>=0
-      local idx=R.AddProjectMarker2(0,region,start+tonumber(a)/1e6,region and (start+tonumber(b)/1e6) or 0,unhex(text),-1,0)
+      local idx=R.AddProjectMarker2(0,region,start+tonumber(a)/1e6,region and (start+tonumber(b)/1e6) or 0,unhex(text),-1,color)
       assert(idx>=0,"Could not add a marker."); added[#added+1]={idx,region}
     end
   end)
@@ -74,7 +84,7 @@ end
 local function import(package, projectDir)
   local app = read(script .. ".app") or (script:match("^(.*)[/\\]") .. "\\..\\FrameNote.exe")
   local tmp = os.tmpname()
-  local cmd = table.concat({quoted(app), "--prepare-reaper", quoted(package), quoted(projectDir .. "\\FrameNote Media"), quoted(tmp)}, " ")
+  local cmd = table.concat({quoted(app), "--prepare-reaper", quoted(package), quoted(projectDir .. "\\FrameNote Media"), quoted(tmp), "--colors"}, " ")
   local reply = R.ExecProcess(cmd, 0) or ""
   local code = tonumber(reply:match("^%s*(%-?%d+)"))
   local body = read(tmp); os.remove(tmp)
@@ -85,8 +95,8 @@ local function import(package, projectDir)
 end
 if ...=="receive" then return function(request,dir,key)
   local lines={request[3],request[4],request[5]}
-  for i=8,#request do lines[#lines+1]=request[i] end
-  return insert(lines,dir,request[6]=="copy" and key or nil,unhex(request[7]))
+  for i=9,#request do lines[#lines+1]=request[i] end
+  return insert(lines,dir,request[6]=="copy" and key or nil,unhex(request[7]),request[8])
 end end
 if ...=="module" then return import end
 local _,rpp=R.EnumProjects(-1,"")

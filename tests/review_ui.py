@@ -64,29 +64,26 @@ if __name__ == '__main__':
                 page.keyboard.press("Control+Enter");assert len(notes(page))==1 and notes(page)[0]["shape"]["kind"]=="arrow"
                 at(page,11);page.keyboard.press("i");at(page,n-1);page.keyboard.press("o")
                 page.locator("#body").fill("压低环境声");page.keyboard.press("Control+Enter")
-                page.locator("#edit").click();page.locator("#body").fill("保留对白");page.keyboard.press("Control+Enter")
-                page.locator("#undo").click();assert notes(page)[1]["text"]=="压低环境声"
+                page.locator("#body").fill("保留对白");page.keyboard.press("Control+Enter")
+                page.keyboard.press("Control+z");assert notes(page)[1]["text"]=="压低环境声"
                 assert page.locator(".noteNumber").all_text_contents()==["#1","#2"]
                 at(page,0);page.keyboard.press("m");page.locator("#body").fill("片头");page.keyboard.press("Control+Enter")
                 assert page.locator(".noteNumber").all_text_contents()==["#3","#1","#2"]
                 assert page.locator("#marks button").first.get_attribute("title").startswith("#3 ")
-                page.locator("#del").click();page.locator("#undo").click()
+                page.locator(".note.selected .noteDelete").click();page.keyboard.press("Control+z")
                 assert page.locator(".noteNumber").first.inner_text()=="#3"
-                page.locator(".note").first.click();page.locator("#del").click()
+                page.locator(".note").first.click();page.locator(".note.selected .noteDelete").click()
                 page.locator(".note").last.click();page.locator("#loop").click()
                 wait(page,"!v.paused && loopId!==null");page.locator("#loop").click()
-                page.locator("#gif").click()
-                dlg=Desktop(backend="win32").window(process=proc.pid,class_name="#32770");dlg.wait("ready",timeout=10)
-                dlg.child_window(class_name="Edit",found_index=0).set_edit_text(str(work/"range.gif"))
-                dlg.child_window(control_id=1).click()
-                wait(page,"document.querySelector('#status').textContent.startsWith('GIF 已保存')")
-                from PIL import Image
-                with Image.open(work/"range.gif") as gif:
-                    assert gif.info["loop"]==0 and 26<=gif.n_frames<=28
                 page.locator("#save").click()
                 dlg=Desktop(backend="win32").window(process=proc.pid,class_name="#32770");dlg.wait("ready",timeout=10)
-                dlg.child_window(class_name="Edit",found_index=0).set_edit_text(str(package))
+                filename=dlg.child_window(class_name="Edit",found_index=0)
+                filename.wait("ready");time.sleep(.35)
+                filename.set_edit_text(str(package));assert filename.window_text()==str(package)
                 dlg.child_window(control_id=1).click()
+                # The Windows filename autocomplete can consume the first submission.
+                if not package.exists() and dlg.exists(timeout=.5) and dlg.is_visible():
+                    filename.type_keys("{ENTER}")
                 wait(page,"document.querySelector('#status').textContent.startsWith('审阅包已保存')")
                 before=notes(page);page.screenshot(path=str(work/"review.png"))
             finally:stop(proc)
@@ -106,7 +103,7 @@ if __name__ == '__main__':
             assert page.locator("#ink line:not(.inkHit)").get_attribute("stroke")=="#cfb1ff"
             assert page.locator(".noteNumber").first.evaluate("el=>getComputedStyle(el).backgroundColor")=="rgb(207, 177, 255)"
             assert page.locator("#marks button").first.evaluate("el=>getComputedStyle(el).getPropertyValue('--mark')")=="#cfb1ff"
-            page.locator("#edit").click();page.locator("#body").fill("复核");page.keyboard.press("Control+Enter")
+            page.locator("#body").fill("复核");page.keyboard.press("Control+Enter")
             assert notes(page)[0]["text"]=="复核" or notes(page)[1]["text"]=="复核"
         finally:stop(proc)
     (fixtures/"latest.txt").write_text(str(package),encoding="utf8")

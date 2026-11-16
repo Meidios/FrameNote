@@ -25,7 +25,7 @@ public sealed partial class Desk
                     string mime=Path.GetExtension(path).ToLowerInvariant() switch {
                         ".jpg" or ".jpeg" or ".jfif"=>"image/jpeg",".gif"=>"image/gif",".webp"=>"image/webp",".bmp"=>"image/bmp",
                         ".avif"=>"image/avif",".ico"=>"image/x-icon",_=>"image/png"};
-                    e.Response=core.Environment.CreateWebResourceResponse(File.OpenRead(path),200,"OK",
+                    e.Response=core.Environment.CreateWebResourceResponse(new FileStream(path,FileMode.Open,FileAccess.Read,FileShare.Read|FileShare.Delete),200,"OK",
                         $"Content-Type: {mime}\r\nAccess-Control-Allow-Origin: *\r\nCache-Control: no-store");return;
                 }catch(IOException){}catch(UnauthorizedAccessException){}
             }
@@ -48,21 +48,10 @@ public sealed partial class Desk
             if(string.Equals(fd.FileName,media,StringComparison.OrdinalIgnoreCase))throw new IOException("请选择其他文件名，以保留未合成的原图。");
             destination=fd.FileName;
         }
-        exportFiles=ReviewImages.Assets(doc).ToDictionary(hash=>hash+".png",hash=>ReviewImages.PathFor(ImageDirectory,hash));
-        exportFiles["source"]=displayImagePath;exportBase=ExportOrigin+Guid.NewGuid().ToString("N")+"/";
         Directory.CreateDirectory(scratch);
         string tmp=Path.Combine(scratch,Guid.NewGuid().ToString("N")+".png");
-        try{
-            var size=(await ExportJs("imageExport.prepare("+JsonSerializer.Serialize(exportBase)+")")).GetInt64();
-            if(size<=0)throw new InvalidDataException("PNG 内容为空。");
-            using var stream=new FileStream(tmp,FileMode.CreateNew,FileAccess.ReadWrite,FileShare.None,131072,FileOptions.DeleteOnClose);
-            // Bound each WebView message even for a large, incompressible photo.
-            for(long offset=0;offset<size;){
-                int count=(int)Math.Min(768*1024,size-offset);
-                var bytes=(await ExportJs($"imageExport.chunk({offset},{count})")).GetBytesFromBase64();
-                if(bytes.Length!=count)throw new IOException("PNG 数据不完整。");
-                await stream.WriteAsync(bytes);offset+=count;
-            }
+        using(var stream=new FileStream(tmp,FileMode.CreateNew,FileAccess.ReadWrite,FileShare.None,131072,FileOptions.DeleteOnClose)){
+            await RenderAnnotatedImage(displayImagePath,doc.Notes,stream,false);
             stream.Position=0;
             if(destination!=null){
                 await Task.Run(()=>Packages.Atomic(destination,s=>stream.CopyTo(s)));
@@ -72,6 +61,23 @@ public sealed partial class Desk
                 var bitmap=BitmapFrame.Create(png,BitmapCreateOptions.PreservePixelFormat,BitmapCacheOption.OnLoad);bitmap.Freeze();png.Position=0;
                 var data=new DataObject();data.SetImage(bitmap);data.SetData("PNG",png);Clipboard.SetDataObject(data,true);
                 Send(new{type="status",text="批注图已复制，可直接在聊天框按 Ctrl+V 粘贴。"});
+            }
+        }
+    }
+    async Task RenderAnnotatedImage(string source,IReadOnlyList<Note> notes,Stream stream,bool videoFrame){
+        if(exportBase!=null)throw new InvalidOperationException("上一张图片仍在导出，请稍后再试。");
+        exportFiles=notes.SelectMany(n=>n.Pictures??[]).Select(p=>p.Asset).Distinct()
+            .ToDictionary(hash=>hash+".png",hash=>ReviewImages.PathFor(ImageDirectory,hash));
+        exportFiles["source"]=source;exportBase=ExportOrigin+Guid.NewGuid().ToString("N")+"/";
+        try{
+            var size=(await ExportJs("imageExport.prepare("+JsonSerializer.Serialize(exportBase)+(videoFrame?","+JsonSerializer.Serialize(notes,Review.Json):"")+")")).GetInt64();
+            if(size<=0)throw new InvalidDataException("PNG 内容为空。");
+            // Bound each WebView message even for a large, incompressible photo.
+            for(long offset=0;offset<size;){
+                int count=(int)Math.Min(768*1024,size-offset);
+                var bytes=(await ExportJs($"imageExport.chunk({offset},{count})")).GetBytesFromBase64();
+                if(bytes.Length!=count)throw new IOException("PNG 数据不完整。");
+                await stream.WriteAsync(bytes);offset+=count;
             }
         }finally{exportBase=null;exportFiles=null;await web.ExecuteScriptAsync("imageExport.release()");}
     }

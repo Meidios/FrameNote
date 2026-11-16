@@ -91,6 +91,42 @@ Root: HKCU; Subkey: "Software\Meidios\FrameNote\Capabilities\FileAssociations"; 
 Root: HKCU; Subkey: "Software\Classes\.tiff\OpenWithProgids"; ValueType: string; ValueName: "FrameNote.Image"; ValueData: ""; Flags: uninsdeletevalue uninsdeletekeyifempty
 Root: HKCU; Subkey: "Software\Classes\Applications\FrameNote.exe\SupportedTypes"; ValueType: string; ValueName: ".tiff"; ValueData: ""; Flags: uninsdeletevalue uninsdeletekeyifempty
 
+; Separate executable identities keep both choices visible in Explorer's Open With dialog.
+#define public PlayerCaps "Software\Meidios\FrameNote\Player\Capabilities"
+#define public ReviewCaps "Software\Meidios\FrameNote\Capabilities"
+#define public Classes "Software\Classes"
+Root: HKCU; Subkey: "Software\RegisteredApplications"; ValueName: "FrameNote Player"; ValueType: string; ValueData: "{#PlayerCaps}"; Flags: uninsdeletevalue
+Root: HKCU; Subkey: "{#PlayerCaps}"; ValueName: "ApplicationName"; ValueType: string; ValueData: "FrameNote Player"
+Root: HKCU; Subkey: "{#PlayerCaps}"; ValueName: "ApplicationDescription"; ValueType: string; ValueData: "Play original video files with FrameNote Player"
+Root: HKCU; Subkey: "{#PlayerCaps}"; ValueName: "ApplicationIcon"; ValueType: string; ValueData: """{app}\FrameNote Player.exe"",0"
+Root: HKCU; Subkey: "{#Classes}\Applications\FrameNote Player.exe"; ValueName: "FriendlyAppName"; ValueType: string; ValueData: "FrameNote Player"; Flags: uninsdeletekey
+Root: HKCU; Subkey: "{#Classes}\Applications\FrameNote Player.exe\shell\open\command"; ValueType: string; ValueData: """{app}\FrameNote Player.exe"" ""%1"""
+#define public VideoProg ""
+#define public VideoApp ""
+#sub RegisterVideoHandler
+Root: HKCU; Subkey: "{#Classes}\{#VideoProg}"; ValueType: string; ValueData: "{#VideoApp} Video"; Flags: uninsdeletekey
+Root: HKCU; Subkey: "{#Classes}\{#VideoProg}\Application"; ValueName: "ApplicationName"; ValueType: string; ValueData: "{#VideoApp}"
+Root: HKCU; Subkey: "{#Classes}\{#VideoProg}\Application"; ValueName: "ApplicationIcon"; ValueType: string; ValueData: """{app}\{#VideoApp}.exe"",0"
+Root: HKCU; Subkey: "{#Classes}\{#VideoProg}\DefaultIcon"; ValueType: string; ValueData: """{app}\{#VideoApp}.exe"",0"
+Root: HKCU; Subkey: "{#Classes}\{#VideoProg}\shell\open\command"; ValueType: string; ValueData: """{app}\{#VideoApp}.exe"" ""%1"""
+#endsub
+#expr VideoProg = "FrameNote.Player.Video", VideoApp = "FrameNote Player"
+#expr RegisterVideoHandler
+#expr VideoProg = "FrameNote.Review.Video", VideoApp = "FrameNote"
+#expr RegisterVideoHandler
+
+; Advertise handlers without writing extension defaults or Explorer's UserChoice.
+#define public VideoTypes ".mp4;.m4v;.mov;.webm;.mkv;.avi;.wmv;.asf;.mpg;.mpeg;.ts;.m2ts;.mts;.flv;.mxf;.vob;.ogv;.3gp;"
+#sub RegisterVideoExtension
+#define Ext Copy(VideoTypes, 1, Pos(";", VideoTypes)-1)
+Root: HKCU; Subkey: "{#PlayerCaps}\FileAssociations"; ValueName: "{#Ext}"; ValueType: string; ValueData: "FrameNote.Player.Video"
+Root: HKCU; Subkey: "{#ReviewCaps}\FileAssociations"; ValueName: "{#Ext}"; ValueType: string; ValueData: "FrameNote.Review.Video"
+Root: HKCU; Subkey: "{#Classes}\{#Ext}\OpenWithProgids"; ValueName: "FrameNote.Player.Video"; ValueType: string; ValueData: ""; Flags: uninsdeletevalue uninsdeletekeyifempty
+Root: HKCU; Subkey: "{#Classes}\{#Ext}\OpenWithProgids"; ValueName: "FrameNote.Review.Video"; ValueType: string; ValueData: ""; Flags: uninsdeletevalue uninsdeletekeyifempty
+Root: HKCU; Subkey: "{#Classes}\Applications\FrameNote Player.exe\SupportedTypes"; ValueName: "{#Ext}"; ValueType: string; ValueData: ""
+#endsub
+#for {VideoTypes = VideoTypes; Len(VideoTypes)>0; VideoTypes = Copy(VideoTypes, Pos(";", VideoTypes)+1, Len(VideoTypes))} RegisterVideoExtension
+
 [Run]
 Filename: "{app}\FrameNote.exe"; Description: "启动 FrameNote"; Flags: postinstall nowait skipifsilent
 

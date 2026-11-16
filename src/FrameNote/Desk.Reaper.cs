@@ -1,41 +1,64 @@
 using System.Diagnostics;
 using System.IO;
+using System.Runtime.InteropServices;
 using System.Text;
+using System.Windows;
 using Microsoft.Win32;
 
 namespace FrameNote;
 
 public sealed partial class Desk
 {
-    async Task SendReaper(){
-        const string action="FrameNote - Import review.lua";
-        var bundled=Path.Combine(AppContext.BaseDirectory,"reaper",action);
+    const string ReaperAction="FrameNote - Import review.lua";
+    [DllImport("user32.dll")] static extern nint WindowFromPoint(System.Drawing.Point point);
+    [DllImport("user32.dll")] static extern nint GetAncestor(nint hwnd,uint flags);
+
+    static void SyncReaperFile(string path,byte[] bytes){
+        if(!File.Exists(path)||!File.ReadAllBytes(path).AsSpan().SequenceEqual(bytes))
+            Packages.Atomic(path,f=>f.Write(bytes));
+    }
+    async Task<string?> InstalledReceiver(string bundled){
         var config=Path.Combine(root,"reaper-action.txt");
         var installed=File.Exists(config)?(await File.ReadAllTextAsync(config)).Trim():"";
-        // The installation marker distinguishes this receiver from the older manual-only action.
-        if(!File.Exists(installed)||!File.ReadAllText(installed).Contains("-- FrameNote receiver v1",StringComparison.Ordinal)){
+        var first=!Path.IsPathFullyQualified(installed)||!string.Equals(Path.GetFileName(installed),ReaperAction,StringComparison.OrdinalIgnoreCase)||!Directory.Exists(Path.GetDirectoryName(installed));
+        if(first){
             var folder=new OpenFolderDialog{Title="选择 REAPER 脚本安装目录",InitialDirectory=Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),"REAPER","Scripts")};
-            if(folder.ShowDialog(this)!=true){Send(new{type="status",text="已取消安装 REAPER 脚本。"});return;}
-            installed=Path.Combine(folder.FolderName,action);
-            if(!Path.GetFullPath(installed).Equals(bundled,StringComparison.OrdinalIgnoreCase))
-                Packages.Atomic(installed,f=>{using var src=File.OpenRead(bundled);src.CopyTo(f);});
-            File.WriteAllText(installed+".app",Environment.ProcessPath!,new UTF8Encoding(false));
-            Packages.Atomic(config,f=>f.Write(Encoding.UTF8.GetBytes(installed)));
-            Send(new{type="status",text="REAPER 脚本已安装。打开目标工程后，点此按钮发送当前文件。"});return;
+            if(folder.ShowDialog(this)!=true){Send(new{type="status",text="已取消安装 REAPER 脚本。"});return null;}
+            installed=Path.Combine(folder.FolderName,ReaperAction);
         }
-        if(media==null||doc==null)throw new InvalidOperationException("请先打开视频或 .framenote 审阅包。");
+        SyncReaperFile(installed,await File.ReadAllBytesAsync(bundled));
+        SyncReaperFile(installed+".app",Encoding.UTF8.GetBytes(Environment.ProcessPath!));
+        if(first){
+            Packages.Atomic(config,f=>f.Write(Encoding.UTF8.GetBytes(installed)));
+            Send(new{type="status",text="REAPER 脚本已安装。打开目标工程后，点此按钮发送当前文件。"});return null;
+        }
+        return installed;
+    }
+    async Task SendReaper(Point? drop){
+        var bundled=Path.Combine(AppContext.BaseDirectory,"reaper",ReaperAction);
+        var installed=drop.HasValue?bundled:await InstalledReceiver(bundled);
+        if(installed==null)return;
+        if(media==null||doc==null||viewingImage)throw new InvalidOperationException("请先打开视频或 .framenote 审阅包。");
         var candidates=Process.GetProcessesByName("reaper");
         try{
             using var self=Process.GetCurrentProcess();
             var live=candidates.Where(p=>p.SessionId==self.SessionId && p.MainWindowHandle!=IntPtr.Zero).ToArray();
-            if(live.Length!=1)throw new InvalidOperationException(live.Length==0?"请先打开目标 REAPER 工程，再点击发送。":"检测到多个 REAPER 实例，请只保留目标实例后再发送。");
+            var placement="cursor";
+            if(drop is {} point){
+                var xy=new System.Drawing.Point((int)Math.Round(point.X),(int)Math.Round(point.Y));
+                var hwnd=GetAncestor(WindowFromPoint(xy),2); // GA_ROOT
+                live=live.Where(p=>p.MainWindowHandle==hwnd).ToArray();
+                if(live.Length==0){Send(new{type="status",text="未放入 REAPER 编排区，已取消导入。"});return;}
+                placement=$"drop\t{xy.X}\t{xy.Y}";
+            }
+            if(live.Length!=1)throw new InvalidOperationException(live.Length==0?"请先打开目标 REAPER 工程，再点击发送。":"检测到多个 REAPER 实例，请拖放到目标工程或只保留一个实例。");
             var target=live[0];
             var job=Path.Combine(scratch,Guid.NewGuid().ToString("N"));Directory.CreateDirectory(job);
             try{
                 string Hex(string s)=>Convert.ToHexString(Encoding.UTF8.GetBytes(s));
-                var lines=new List<string>{Hex(installed),target.Id.ToString(),openedPackage?doc.Id.ToString():"-",Hex(media),
-                    doc.DurationUs.ToString(),openedPackage||activeRecording!=null?"copy":"link",Hex(doc.FileName)};
-                if(openedPackage)foreach(var n in doc.Notes)lines.Add($"{n.StartUs}\t{n.EndUs??-1}\t{Hex(n.ReaperName())}");
+                var lines=new List<string>{Hex(installed),target.MainWindowHandle.ToInt64().ToString("X"),openedPackage?doc.Id.ToString():"-",Hex(media),
+                    doc.DurationUs.ToString(),openedPackage||activeRecording!=null?"copy":"link",Hex(doc.FileName),placement};
+                if(openedPackage)foreach(var n in doc.Notes)lines.Add(n.ReaperRow(true));
                 await File.WriteAllLinesAsync(Path.Combine(job,"request"),lines,new UTF8Encoding(false));
                 var entry=Path.Combine(job,"send.lua");
                 File.Copy(Path.Combine(AppContext.BaseDirectory,"reaper","send.lua"),entry);

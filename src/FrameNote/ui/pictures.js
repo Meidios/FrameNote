@@ -54,11 +54,11 @@ document.addEventListener('DOMContentLoaded',()=>{
   const width=Math.min(.38,.48/ratio),height=width*ratio;
   (editing.pictures??=[]).push({asset:m.asset,pixelWidth:m.pixelWidth,pixelHeight:m.pixelHeight,
     x:(1-width)/2,y:(1-height)/2,width});
-  activePicture=editing.pictures.length-1;setTool(null);render();
+  activePicture=editing.pictures.length-1;setTool(null);persistEdit();render();
   status('拖动图片移动位置，拖动角点等比缩放。');
  });
  $('removePicture').onclick=()=>{if(!editing||activePicture<0)return;
-  editing.pictures.splice(activePicture,1);activePicture=editing.pictures.length-1;render()};
+  editing.pictures.splice(activePicture,1);activePicture=editing.pictures.length-1;persistEdit();render()};
  overlay.addEventListener('pointerdown',e=>{
   const el=e.target.closest('[data-picture]');if(!editing||tool||!el||e.button!==0)return;
   const i=Number(el.dataset.picture),p=editing.pictures[i],corner=el.dataset.corner?.split(',').map(Number);
@@ -86,6 +86,6 @@ document.addEventListener('DOMContentLoaded',()=>{
   }
   e.stopImmediatePropagation();paint();
  },true);
- const finish=e=>{if(imageDrag?.pointer!==e.pointerId)return;imageDrag=null;e.stopImmediatePropagation()};
+ const finish=e=>{if(imageDrag?.pointer!==e.pointerId)return;imageDrag=null;persistEdit();e.stopImmediatePropagation()};
  for(const event of ['pointerup','pointercancel','lostpointercapture'])overlay.addEventListener(event,finish,true);
 });

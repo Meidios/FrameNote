@@ -15,10 +15,11 @@ public static class Program
     [STAThread] public static int Main(string[] args)
     {
         if (args.FirstOrDefault()=="--prepare-reaper") {
-            try { if(args.Length!=4) return 2; Packages.PrepareReaper(args[1],args[2],args[3]); return 0; }
-            catch(Exception e) { if(args.Length==4) File.WriteAllText(args[3]+".error",e.Message); return 1; }
+            try { if(args.Length!=4 && !(args.Length==5 && args[4]=="--colors")) return 2; Packages.PrepareReaper(args[1],args[2],args[3],args.Length==5); return 0; }
+            catch(Exception e) { if(args.Length>=4) File.WriteAllText(args[3]+".error",e.Message); return 1; }
         }
-        var app=new Application();DeskTheme.Start(app);return app.Run(new Desk(args.FirstOrDefault()));
+        var player=string.Equals(Path.GetFileName(Environment.ProcessPath),"FrameNote Player.exe",StringComparison.OrdinalIgnoreCase);
+        var app=new Application();DeskTheme.Start(app);return app.Run(new Desk(args.FirstOrDefault(),player));
     }
 }
 public sealed partial class Desk : Window
@@ -34,7 +35,9 @@ public sealed partial class Desk : Window
     Review? doc;
     bool pending,openedPackage;
     TaskCompletionSource? currentWork;
-    public Desk(string? initial) {
+    readonly bool playerEntry;
+    public Desk(string? initial,bool playerEntry=false) {
+        this.playerEntry=playerEntry;
         Title="FrameNote · 视频审阅"; Width=1230; Height=800; MinWidth=840; MinHeight=560;
         DeskTheme.Window(this); WindowStartupLocation=WindowStartupLocation.CenterScreen;
         InitWindowSize();
@@ -46,7 +49,7 @@ public sealed partial class Desk : Window
         };
         scratch=Path.Combine(Path.GetTempPath(),"FrameNote",Guid.NewGuid().ToString("N"));
         InitCapture();
-        surfaces.Children.Add(web); InitHelp(); AllowDrop=true;
+        surfaces.Children.Add(web); InitPlaybackVolume(); InitHelp(); AllowDrop=true;
         Drop+=async (_,e)=>{if(!pending && e.Data.GetData(DataFormats.FileDrop) is string[] {Length:1} files) await Work(()=>Open(files[0]));};
         Loaded+=async (_,_)=>{try {
             await web.EnsureCoreWebView2Async(await CoreWebView2Environment.CreateAsync(null,Path.Combine(root,"Browser"),new CoreWebView2EnvironmentOptions("--autoplay-policy=no-user-gesture-required")));
@@ -105,17 +108,18 @@ public sealed partial class Desk : Window
         if(picture){await ShowImage(nextMedia,next.FileName,nextDraft:nextDraft,review:next,package:path.EndsWith(".framenote",StringComparison.OrdinalIgnoreCase));return;}
         var compatibility=!infoMedia!.Direct(nextMedia);
         long[]? directFrames=null;
-        if(!compatibility){
+        bool playOriginal=playerEntry && recordingTitle==null && !info.Extension.Equals(".framenote",StringComparison.OrdinalIgnoreCase);
+        if(!compatibility && !playOriginal){
             try{directFrames=await Probe.Frames(nextMedia,infoMedia);}
             catch(InvalidDataException){compatibility=true;}
         }
-        viewingImage=false;audioPanel.Visibility=Visibility.Visible;imageFile=null;var previous=activeRecording; doc=next; openedPackage=path.EndsWith(".framenote",StringComparison.OrdinalIgnoreCase); media=nextMedia; draft=nextDraft;
+        viewingImage=false;imageFile=null;var previous=activeRecording; doc=next; openedPackage=path.EndsWith(".framenote",StringComparison.OrdinalIgnoreCase); media=nextMedia; draft=nextDraft;
         activeRecording=recordingTitle!=null?path:null;
-        Title=(activeRecording!=null?"临时录屏 · ":"")+doc.FileName+" · FrameNote";
+        Title=(activeRecording!=null?"临时录屏 · ":"")+doc.FileName+(playOriginal?" · FrameNote Player":" · FrameNote");
         SetPreviewFullscreen(false);StopTimeline();playbackId=Guid.NewGuid();playbackInfo=infoMedia;deskLoaded=false;preview=null;
         draftRestored=recovered;needsPreview=compatibility;
         await web.ExecuteScriptAsync("v.pause();v.removeAttribute('src');v.load();ready=false;render()");
-        if(needsPreview){ShowPlayer(0);if(openedPackage)await EnterReview(0);}
+        if(needsPreview || playOriginal){ShowPlayer(0);if(openedPackage)await EnterReview(0);}
         else {
             if(native!=null){native.Stop();native.Visibility=Visibility.Collapsed;}
             web.Visibility=Visibility.Visible;
@@ -128,9 +132,10 @@ public sealed partial class Desk : Window
             using var msg=JsonDocument.Parse(raw);var p=msg.RootElement; var op=p.GetProperty("type").GetString();
             if(op=="canOpen"){reviewCanOpen=p.GetProperty("value").GetBoolean();return;}
             if(op=="previewFullscreen"){var on=p.GetProperty("on").GetBoolean();if(!on || (!viewingImage && deskLoaded && !pending && web.IsVisible))SetPreviewFullscreen(on);return;}
-            if(op=="playbackVolume"){masterVolume.Value=Math.Clamp(p.GetProperty("value").GetInt32(),0,100);return;}
+            if(op=="playbackVolume"){SetPlaybackVolume(p.GetProperty("value").GetInt32());return;}
             if(op=="catalog"){Catalog();return;}
             if(op=="meterSources"){MeterSources(p.GetProperty("ids").Deserialize<string[]>()!);return;}
+            if(op=="readMeters"){ReadMeterPeaks();return;}
             if(op=="storePicture"){
                 var request=p.GetProperty("request").GetGuid();
                 try{
@@ -156,7 +161,11 @@ public sealed partial class Desk : Window
                 if(op=="decodeError"){needsPreview=true;deskLoaded=false;}
                 ShowPlayer(Math.Max(0,p.GetProperty("us").GetInt64()));return;
             }
-            if(op=="sendReaper"){await Work(SendReaper);return;}
+            if(op=="sendReaper"){await Work(()=>SendReaper(null));return;}
+            if(op=="dropReaper" && !viewingImage && doc!=null){
+                var screen=web.PointToScreen(new Point(p.GetProperty("x").GetDouble(),p.GetProperty("y").GetDouble()));
+                await Work(()=>SendReaper(screen));return;
+            }
             if(doc==null || media==null)return;
             if(op=="imageExport"){if(viewingImage)await Work(()=>ExportImage(p.GetProperty("save").GetBoolean()));return;}
             if(op=="snapshot"){await Snapshot(p);return;}

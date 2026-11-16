@@ -23,8 +23,10 @@ local function check()
   local _,num,regions=r.CountProjectMarkers(0);assert(num==2 and regions==1)
   local expected=read(dir.."\\expected.tsv")
   for i=1,2 do
-    local _,isrgn,pos,ending,name=r.EnumProjectMarkers3(0,i)
-    local a,b,text=expected:match("^(%d+)\t(%-?%d+)\t([^\r\n]+)")
+    local _,isrgn,pos,ending,name,_,color=r.EnumProjectMarkers3(0,i)
+    local a,b,rgb,text=expected:match("^(%d+)\t(%-?%d+)\t(%x+)\t([^\r\n]+)")
+    local red,green,blue=r.ColorFromNative(color)
+    assert(color & 0x1000000 ~= 0 and string.format("%02x%02x%02x",red,green,blue)==rgb:lower(),"Wrong color: "..name)
     assert(name==text,name.." vs "..text);near(pos,60+tonumber(a)/1e6)
     assert(isrgn==(tonumber(b)>=0));if isrgn then near(ending,60+tonumber(b)/1e6) end
     expected=expected:gsub("^[^\n]*\n?","",1)
@@ -35,6 +37,20 @@ local function check()
   r.Undo_DoUndo2(0)
   assert(r.CountTracks(0)==1 and r.CountMediaItems(0)==0, "Undo: tracks="..r.CountTracks(0).." items="..r.CountMediaItems(0))
   local _,nm,nr=r.CountProjectMarkers(0);assert(nm==1 and nr==0)
+  -- The click receiver must still use the selected track and edit cursor.
+  local receive=assert(loadfile(os.getenv("FRAMENOTE_TEST_ACTION")))("receive")
+  local function hex(s) return (s:gsub(".",function(c)return string.format("%02X",c:byte())end)) end
+  r.SetOnlyTrackSelected(r.GetTrack(0,0));r.SetEditCurPos(17.25,false,false)
+  assert(receive({"","","-",hex(path),"3000000","link",hex("Click test"),"cursor",
+      "250000\t-1\t41\t1289FE","500000\t1250000\t42\tE42639"},dir,"unused"))
+  assert(r.CountTrackMediaItems(r.GetTrack(0,0))==1)
+  near(r.GetMediaItemInfo_Value(r.GetMediaItem(0,0),"D_POSITION"),17.25)
+  for i,rgb in ipairs({{18,137,254},{228,38,57}}) do
+    local _,region,a,b,_,_,color=r.EnumProjectMarkers3(0,i)
+    near(a,i==1 and 17.5 or 17.75);if region then near(b,18.5) end
+    assert(color==(r.ColorToNative(table.unpack(rgb)) | 0x1000000))
+  end
+  r.Undo_DoUndo2(0);assert(r.CountMediaItems(0)==0)
   assert(action(package,dir),"Undo left duplicate tag")
   return "PASS "..r.GetAppVersion().." source="..video.." duration="..h.." media="..path
 end

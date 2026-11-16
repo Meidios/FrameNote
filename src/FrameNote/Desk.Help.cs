@@ -44,7 +44,7 @@ public sealed partial class Desk
         string key=Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(Path.GetFullPath(root).ToUpperInvariant())))[..16];
         session=new Mutex(false,@"Local\FrameNote.Startup."+key,out bool first);
         if(File.Exists(Path.Combine(AppContext.BaseDirectory,"unins000.exe")))installGuard=new Mutex(false,@"Local\FrameNote.Installed");
-        var bar=new Menu();
+        var bar=menuStrip=new Menu();
         var file=new MenuItem{Header="文件(_F)"};bar.Items.Add(file);
         var open=new MenuItem{Header="打开文件…(_O)"};
         bool CanOpen()=>!pending && !configuring && (native?.IsVisible==true ? native.OpenButton.IsEnabled : reviewCanOpen);
@@ -54,13 +54,13 @@ public sealed partial class Desk
         var exit=new MenuItem{Header="退出(_X)"};exit.Click+=(_,_)=>Close();file.Items.Add(exit);
         var menu=new MenuItem{Header="帮助(_H)"};bar.Items.Add(menu);
         MenuItem Item(string label,Action action){var item=new MenuItem{Header=label};item.Click+=(_,_)=>action();menu.Items.Add(item);return item;}
-        Item("使用帮助",()=>Simple("使用帮助","FrameNote 视频审阅","打开或拖入视频，定位需要反馈的画面。按 M 添加点批注；按 I 和 O 标记区间，再填写反馈。Ctrl+Enter 保存批注。\n\n点「导出审阅包」把原片和批注一起交付。收件人双击 .framenote 即可重新审阅；点 REAPER 图标可发送至当前工程。\n\n在 VLC 播放界面点「进入批注」即可逐帧审阅。"));
+        Item("使用帮助",()=>Simple("使用帮助","FrameNote 视频审阅","打开或拖入视频，定位需要反馈的画面。按 M 添加点批注；按 I 和 O 标记区间，再填写反馈。修改自动保存。点卡片右上角的垃圾桶删除批注；Ctrl+Z 撤销，Ctrl+Shift+Z 重做。\n\n点「导出审阅包」把原片和批注一起交付。收件人双击 .framenote 即可重新审阅；点 REAPER 图标可发送至当前工程。\n\n在 VLC 播放界面点「进入批注」即可逐帧审阅。"));
         Item("检查更新…",async()=>await CheckUpdates(true));
         autoItem=Item("启动时检查更新",()=>prefs.Change(p=>p with{Automatic=autoItem.IsChecked}));
         autoItem.IsCheckable=true;menu.SubmenuOpened+=(_,_)=>autoItem.IsChecked=prefs.Change(p=>p).Automatic;
         Item("更新记录",()=>History());Item("默认应用设置",()=>Browse("ms-settings:defaultapps?registeredAppUser=FrameNote"));
         Item("关于 FrameNote",()=>Simple("关于 FrameNote","FrameNote "+Updates.Running,"视频审阅、录屏和 REAPER 批注交付工具。\n\n作者：Meidios（MEI）\nWindows x64\n\n如果这个工具对你有帮助，欢迎到 GitHub 点个 Star。",true));
-        var host=new DockPanel();DockPanel.SetDock(bar,Dock.Top);var strip=menuStrip=new DockPanel{LastChildFill=true};strip.SetResourceReference(Panel.BackgroundProperty,"chrome");var audio=VolumeControl();DockPanel.SetDock(audio,Dock.Right);strip.Children.Add(audio);strip.Children.Add(bar);DockPanel.SetDock(strip,Dock.Top);host.Children.Add(strip);host.Children.Add(surfaces);Content=host;
+        var host=new DockPanel();DockPanel.SetDock(bar,Dock.Top);host.Children.Add(bar);host.Children.Add(surfaces);Content=host;
         Closed+=(_,_)=>{lifetime.Cancel();session?.Dispose();installGuard?.Dispose();};
         web.NavigationCompleted+=async (_,e)=>{
             if(!e.IsSuccess||startedUpdates||!first)return;startedUpdates=true;

@@ -43,7 +43,26 @@ try:
                 panel.locator("#micStrip .muteChannel").click()
             tone=subprocess.Popen([sys.argv[3],"--mixer-tones",*ids],stdin=subprocess.PIPE,stdout=subprocess.PIPE,text=True)
             assert tone.stdout.readline().strip()=="ready"
+            panel.locator(".mixer").scroll_into_view_if_needed()
             wait(page,"Array.from(outputs.values()).every(c=>c.peak>0)",timeout=12000)
+            rate=page.evaluate("""async()=>{
+              const times=[],paints=[];let frame=0;
+              const arrived=e=>{if(e.data.type==='meters')times.push(performance.now())};
+              const paint=t=>{paints.push(t);frame=requestAnimationFrame(paint)};
+              chrome.webview.addEventListener('message',arrived);frame=requestAnimationFrame(paint);
+              const pause=ms=>new Promise(r=>setTimeout(r,ms));
+              try {
+                await pause(3200);
+                const hz=a=>1000*(a.length-1)/(a.at(-1)-a[0]);
+                const stats={samples:hz(times),display:hz(paints),count:times.length};
+                const mixer=document.querySelector('.mixer');mixer.hidden=true;
+                try {await pause(250);const start=times.length;await pause(350);stats.hidden=times.length-start}
+                finally {mixer.hidden=false}
+                return stats;
+              } finally {chrome.webview.removeEventListener('message',arrived);cancelAnimationFrame(frame)}
+            }""")
+            print("Meter samples and display frames per second:",rate,flush=True)
+            assert rate["count"]>0 and rate["samples"]>=min(60,rate["display"])*.95 and rate["hidden"]==0,rate
             panel.screenshot(path=str(work/"horizontal-mixer.png"))
             def record():
                 old=page.evaluate("doc.id");page.locator("#record").click();wait(page,"recording==='video'")

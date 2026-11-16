@@ -18,6 +18,7 @@ public partial class NativePlayer : UserControl, IDisposable
     long startMs;
     int volume=100, audibleVolume=100;
     string source="";
+    Review? review;
     Probe.Info info=null!;
     CancellationTokenSource? session;
     long[]? frames;
@@ -119,8 +120,7 @@ public partial class NativePlayer : UserControl, IDisposable
             // VLC 3 cannot step backwards and a paused seek need not present the target frame.
             // Decode the indexed PTS once; display and export these same pixels while stopped here.
             Directory.CreateDirectory(scratch);
-            await Probe.Run(token,"ffmpeg","-nostdin","-v","error","-ss",(pts[target]/1e6).ToString("F6",CultureInfo.InvariantCulture),
-                "-i",source,"-map","0:v:0","-frames:v","1","-threads","1",file);
+            await Probe.DecodeFrame(source,pts[target],file,token);
             var png=await File.ReadAllBytesAsync(file,token);
             if(token.IsCancellationRequested || revision!=seekRevision)return;
             using var stream=new MemoryStream(png);
@@ -143,23 +143,32 @@ public partial class NativePlayer : UserControl, IDisposable
         void Taken(object? sender,MediaPlayerSnapshotTakenEventArgs e){if(string.Equals(e.Filename,file,StringComparison.OrdinalIgnoreCase))ready.TrySetResult();}
         capturing=true;Hint.Text="";player.SnapshotTaken+=Taken;
         try{
-            var name=Caption.Text;var time=TimeMs;
-            if(stillPng is {} still){
-                Hint.Text=await Desk.DeliverFrame(Window.GetWindow(this),still,save,name,TimeSpan.FromMilliseconds(time),token);return;
-            }
+            var name=Caption.Text;long us=TimeUs;var still=stillPng;
+            Note[] notes=[];
             Directory.CreateDirectory(scratch);
-            if(!player.TakeSnapshot(0,file,0,0))throw new IOException("当前没有可捕获的画面。");
-            await ready.Task.WaitAsync(TimeSpan.FromSeconds(5),token);
-            var png=await File.ReadAllBytesAsync(file,token);
+            if(review is {Notes.Count:>0} document){
+                // Resolve both the pixels and the notes at the button press, even if VLC keeps playing.
+                var pts=frames??await Probe.Frames(source,info,token);token.ThrowIfCancellationRequested();
+                frames=pts;
+                int FrameAt(long t){int i=Array.BinarySearch(pts,t+2);return i>=0?i:Math.Max(0,~i-1);}
+                int i=FrameAt(us);us=pts[i];
+                notes=document.Notes.Where(n=>n.EndUs is long end?us>=n.StartUs-2 && us<end:FrameAt(n.StartUs)==i).ToArray();
+                if(still==null)await Probe.DecodeFrame(source,us,file,token);
+            }
+            else if(still==null){
+                if(!player.TakeSnapshot(0,file,0,0))throw new IOException("当前没有可捕获的画面。");
+                await ready.Task.WaitAsync(TimeSpan.FromSeconds(5),token);
+            }
+            if(still!=null)await File.WriteAllBytesAsync(file,still,token);
             token.ThrowIfCancellationRequested();
-            Hint.Text=await Desk.DeliverFrame(Window.GetWindow(this),png,save,name,TimeSpan.FromMilliseconds(time),token);
+            Hint.Text=await ((Desk)Window.GetWindow(this)).DeliverVideoFrame(file,save,name,TimeSpan.FromTicks(us*10),notes,token);
         }catch(OperationCanceledException){}
         catch(Exception e){if(!token.IsCancellationRequested)Hint.Text="未能导出当前帧："+e.Message;}
         finally{player.SnapshotTaken-=Taken;if(!token.IsCancellationRequested)capturing=false;File.Delete(file);}
     }
-    public void Start(string path,string name,long ms,Probe.Info mediaInfo){
-        Stop();session=new();source=path;info=mediaInfo;startMs=ms;
-        Caption.Text=name;Hint.Text="";
+    public void Start(string path,Review document,long ms,Probe.Info mediaInfo){
+        Stop();session=new();source=path;info=mediaInfo;review=document;startMs=ms;
+        Caption.Text=document.FileName;Hint.Text="";
         using var input=new Media(engine,path,FromType.FromPath);
         if(!player.Play(input))throw new IOException("VLC 未能打开视频。");
         timer.Start();Focus();

@@ -1,6 +1,26 @@
 'use strict';
 (()=>{
  const axis=$('ticks'),film=$('filmstrip'),wave=$('waveform').querySelector('path');
+ const viewport=$('scroll'),timeline=$('timeline');
+ let scale=1;
+ function navigate(e){
+  if(!duration||!ready||busy||editing||e.altKey||e.metaKey||e.ctrlKey===e.shiftKey)return;
+  const unit=e.deltaMode===1?16:e.deltaMode===2?viewport.clientWidth:1;
+  const delta=(e.deltaY||e.deltaX)*unit;
+  if(!delta)return;
+  e.preventDefault();
+  if(e.shiftKey){viewport.scrollLeft+=delta;return;}
+  const next=Math.max(1,Math.min(8,scale*2**(-delta/120)));
+  if(next===scale)return;
+  const bounds=viewport.getBoundingClientRect(),x=Math.max(bounds.left,Math.min(bounds.right,e.clientX));
+  const before=axis.getBoundingClientRect();
+  if(!before.width)return;
+  const fraction=Math.max(0,Math.min(1,(x-before.left)/before.width));
+  scale=next;timeline.style.width=(100*scale)+'%';
+  const after=axis.getBoundingClientRect();
+  viewport.scrollLeft+=after.left+fraction*after.width-x;
+ }
+ for(const area of [$('trackDesk'),$('timelineTools')])area.addEventListener('wheel',navigate,{passive:false});
  let duration=0,id=null,frameset=[],requested=0;
  function ruler(){
   if(!duration||!axis.clientWidth)return;
@@ -30,6 +50,7 @@
  function scheduleFilm(){if(!requested)requested=requestAnimationFrame(paintFilm)}
  new ResizeObserver(()=>{ruler();scheduleFilm()}).observe(axis);
  function reset(m){
+  scale=1;timeline.style.width='100%';viewport.scrollLeft=0;
   duration=m?.doc.durationUs??0;id=m?.playbackId??null;frameset=[];
   $('trackDesk').hidden=!id;film.replaceChildren();wave.removeAttribute('d');
   $('filmState').textContent=id?'正在生成缩略图…':'';
@@ -57,7 +78,7 @@
  });
  function scrub(e){
   const r=axis.getBoundingClientRect();if(!ready||editing||!r.width)return;
-  clearPlaybackLoop();seekUs(Math.max(0,Math.min(1,(e.clientX-r.left)/r.width))*duration);
+  seekTimeline(Math.max(0,Math.min(1,(e.clientX-r.left)/r.width))*duration);
  }
  for(const track of document.querySelectorAll('.mediaTrack')){
   track.onpointerdown=e=>{if(e.button||!ready||editing)return;track.setPointerCapture(e.pointerId);scrub(e)};
