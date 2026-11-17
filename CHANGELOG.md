@@ -4,6 +4,11 @@
 
 Versions are listed newest first. Earlier entries summarize the offline release history shipped with the app; they do not imply that each version had a public GitHub installer.
 
+## 0.6.6
+
+- 修复审阅页启动时可能误报导航取消的问题。安装目录的首页无法加载时，主程序与审阅包均可从当前用户的临时目录恢复界面。
+- Fixed a spurious navigation cancellation on startup. If the installed review page cannot load, the application restores its bundled interface in the user's temporary directory for both normal launches and review packages.
+
 ## 0.6.5
 
 **中文**

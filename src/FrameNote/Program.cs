@@ -33,7 +33,7 @@ public sealed partial class Desk : Window
 {
     readonly WebView2 web = new();
     readonly string root = Environment.GetEnvironmentVariable("FRAMENOTE_DATA_DIR") ?? Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),"FrameNote");
-    readonly string page = new Uri(Path.Combine(AppContext.BaseDirectory,"ui","index.html")).AbsoluteUri;
+    readonly ReviewNavigation reviewPage;
     readonly string scratch;
     string ImageDirectory=>Path.Combine(scratch,"images");
     readonly TemporaryRecordings recordings=new();
@@ -44,7 +44,7 @@ public sealed partial class Desk : Window
     TaskCompletionSource? currentWork;
     readonly bool playerEntry;
     Task? webStartup;
-    bool webReady,openingPlayer;
+    bool webReady,openingPlayer,webConfigured;
     public Desk(string[] paths,bool playerEntry=false,Task<LibVLCSharp.Shared.LibVLC>? engine=null) {
         startingEngine=engine;
         string? initial=paths.FirstOrDefault();
@@ -60,6 +60,7 @@ public sealed partial class Desk : Window
             if(target!=null)target.RenderMode=RenderMode.SoftwareOnly;
         };
         scratch=Path.Combine(Path.GetTempPath(),"FrameNote",Guid.NewGuid().ToString("N"));
+        reviewPage=new(Path.Combine(AppContext.BaseDirectory,"ui","index.html"),Path.Combine(scratch,"interface"));
         InitCapture();
         InitPlaybackVolume(); InitHelp(direct); AllowDrop=true;
         if(direct){
@@ -83,39 +84,37 @@ public sealed partial class Desk : Window
         try{
             surfaces.Children.Insert(0,web);
             web.Visibility=native?.IsVisible==true?Visibility.Hidden:Visibility.Visible;
-            await web.EnsureCoreWebView2Async(await CoreWebView2Environment.CreateAsync(null,Path.Combine(root,"Browser"),new CoreWebView2EnvironmentOptions("--autoplay-policy=no-user-gesture-required")));
-            var core=web.CoreWebView2;
-            core.SetVirtualHostNameToFolderMapping("fonts.framenote.invalid",Path.Combine(AppContext.BaseDirectory,"ui","fonts"),CoreWebView2HostResourceAccessKind.Allow);
-            void ApplyWebTheme(){
-                core.Profile.PreferredColorScheme=DeskTheme.Dark?CoreWebView2PreferredColorScheme.Dark:CoreWebView2PreferredColorScheme.Light;
-                if(core.Source==page) _=web.ExecuteScriptAsync(DeskTheme.WebScript());
-            }
-            ApplyWebTheme();DeskTheme.Changed+=ApplyWebTheme;Closed+=(_,_)=>DeskTheme.Changed-=ApplyWebTheme;
-            core.DOMContentLoaded+=(_,_)=>ApplyWebTheme();
-            core.Settings.AreDefaultContextMenusEnabled=false; core.Settings.IsStatusBarEnabled=false; core.Settings.AreHostObjectsAllowed=false;
-            core.Settings.IsZoomControlEnabled=false;core.Settings.IsPinchZoomEnabled=false;web.ZoomFactor=1;
-            core.Settings.AreBrowserAcceleratorKeysEnabled=false; core.Settings.AreDevToolsEnabled=false;
-            InitImageExport();
-            core.NavigationStarting+=(_,e)=>{if(e.Uri!=page)e.Cancel=true;};
-            core.NewWindowRequested+=(_,e)=>e.Handled=true;
-            web.AllowExternalDrop=true;
-            core.WebMessageReceived+=async (_,e)=>{
-                if(e.Source!=page)return;
-                if(e.AdditionalObjects is {Count:>0} objects)
-                    await OpenFiles(objects.OfType<CoreWebView2File>().Select(f=>f.Path).ToArray(),true);
-                else await Message(e.WebMessageAsJson);
-            };
-            var loaded=new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
-            void Navigated(object? sender,CoreWebView2NavigationCompletedEventArgs e){
-                core.NavigationCompleted-=Navigated;
-                if(e.IsSuccess){webReady=true;loaded.TrySetResult();}
-                else loaded.TrySetException(new IOException("无法打开审阅界面："+e.WebErrorStatus));
-            }
-            core.NavigationCompleted+=Navigated;core.Navigate(page);
-            await loaded.Task.WaitAsync(lifetime.Token);
+            if(web.CoreWebView2==null)
+                await web.EnsureCoreWebView2Async(await CoreWebView2Environment.CreateAsync(null,Path.Combine(root,"Browser"),new CoreWebView2EnvironmentOptions("--autoplay-policy=no-user-gesture-required")));
+            var core=web.CoreWebView2 ?? throw new InvalidOperationException("WebView2 初始化未完成。");
+            if(!webConfigured){ConfigureReviewWeb(core);webConfigured=true;}
+            await reviewPage.Load(core,lifetime.Token);
+            webReady=true;
         }catch{surfaces.Children.Remove(web);webStartup=null;throw;}
     }
-    void ReportError(string text){if(lifetime.IsCancellationRequested)return;if(native?.IsVisible==true)native.Preparing(false,text);else Send(new{type="error",text});}
+    void ConfigureReviewWeb(CoreWebView2 core){
+        core.SetVirtualHostNameToFolderMapping("fonts.framenote.invalid",Path.Combine(AppContext.BaseDirectory,"ui","fonts"),CoreWebView2HostResourceAccessKind.Allow);
+        void ApplyWebTheme(){
+            core.Profile.PreferredColorScheme=DeskTheme.Dark?CoreWebView2PreferredColorScheme.Dark:CoreWebView2PreferredColorScheme.Light;
+            if(reviewPage.IsPage(core.Source)) _=web.ExecuteScriptAsync(DeskTheme.WebScript());
+        }
+        ApplyWebTheme();DeskTheme.Changed+=ApplyWebTheme;Closed+=(_,_)=>DeskTheme.Changed-=ApplyWebTheme;
+        core.DOMContentLoaded+=(_,_)=>ApplyWebTheme();
+        core.Settings.AreDefaultContextMenusEnabled=false; core.Settings.IsStatusBarEnabled=false; core.Settings.AreHostObjectsAllowed=false;
+        core.Settings.IsZoomControlEnabled=false;core.Settings.IsPinchZoomEnabled=false;web.ZoomFactor=1;
+        core.Settings.AreBrowserAcceleratorKeysEnabled=false; core.Settings.AreDevToolsEnabled=false;
+        InitImageExport();
+        core.NavigationStarting+=(_,e)=>{if(!reviewPage.IsPage(e.Uri))e.Cancel=true;};
+        core.NewWindowRequested+=(_,e)=>e.Handled=true;
+        web.AllowExternalDrop=true;
+        core.WebMessageReceived+=async (_,e)=>{
+            if(!reviewPage.IsPage(e.Source))return;
+            if(e.AdditionalObjects is {Count:>0} objects)
+                await OpenFiles(objects.OfType<CoreWebView2File>().Select(f=>f.Path).ToArray(),true);
+            else await Message(e.WebMessageAsJson);
+        };
+    }
+    void ReportError(string text){if(lifetime.IsCancellationRequested)return;if(native?.IsVisible==true)native.Preparing(false,text);else if(webReady)Send(new{type="error",text});else MessageBox.Show(this,text,"FrameNote");}
     void Send(object o){if(!lifetime.IsCancellationRequested && web.CoreWebView2!=null)web.CoreWebView2.PostWebMessageAsJson(JsonSerializer.Serialize(o,Review.Json));}
     async Task Work(Func<Task> action) {
         if(pending)return; pending=true;var done=currentWork=new();Send(new{type="busy",value=true});
