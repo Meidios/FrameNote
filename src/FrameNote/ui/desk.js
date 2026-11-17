@@ -2,7 +2,7 @@
 const $=id=>document.getElementById(id), v=$('video'), overlay=$('overlay');
 const send=(type,data={})=>chrome.webview.postMessage({type,...data});
 window.addEventListener('dragover',e=>{e.preventDefault();e.dataTransfer.dropEffect='copy'});
-window.addEventListener('drop',e=>{e.preventDefault();if(!busy&&!editing && e.dataTransfer.files.length===1)chrome.webview.postMessageWithAdditionalObjects({type:'drop'},[e.dataTransfer.files[0]])});
+window.addEventListener('drop',e=>{e.preventDefault();if(!editing && e.dataTransfer.files.length)chrome.webview.postMessageWithAdditionalObjects({type:'drop'},Array.from(e.dataTransfer.files))});
 let imageBase="",temporary=false,doc=null,frames=[],shown=0,selected=null,editing=null,inUs=null,loopId=null,history=[],future=[],lastEditGroup=null,tool=null,anchor=null,busy=false,ready=false;
 const imageDoc=()=>doc?.version===2;
 const fmt=us=>{const ms=Math.floor((us+500)/1000);return String(Math.floor(ms/60000)).padStart(2,'0')+':'+String(Math.floor(ms/1000)%60).padStart(2,'0')+'.'+String(ms%1000).padStart(3,'0')};
@@ -300,17 +300,18 @@ document.onkeydown=e=>{
  if(doc&&!busy&&!e.isComposing&&!e.altKey&&e.ctrlKey&&e.key.toLowerCase()==='z'&&!e.target.closest('#capturePanel')){
   e.preventDefault();if(!e.repeat){moveHistory(e.shiftKey);if(e.target===$('body'))e.target.blur()}return;
  }
- if(e.key==='Escape'&&isFullPreview()){e.preventDefault();send('previewFullscreen',{on:false});return}if(busy||e.isComposing||e.repeat||e.target.closest('#playbackVolume')||(e.key===' '&&e.target.closest('#transport button')))return;if(isFullPreview()&&![' ','ArrowLeft','ArrowRight'].includes(e.key))return;if(!doc && $('openedImage').hidden && e.ctrlKey && e.key.toLowerCase()==='v'){e.preventDefault();send('pasteAsImage');return}if(editing){if(e.key==='Escape'){finishEdit();document.activeElement?.blur()}if(e.ctrlKey&&e.key==='Enter')$('editor').requestSubmit();return}if((e.ctrlKey||e.metaKey)&&e.key.toLowerCase()==='o'){e.preventDefault();$('open').click();return}if(!$('openedImage').hidden && !e.altKey && !e.ctrlKey && !e.metaKey && !e.shiftKey && ['ArrowLeft','ArrowRight'].includes(e.key)){e.preventDefault();send('adjacentImage',{direction:e.key==='ArrowLeft'?-1:1});return}if(!(ready||imageDoc())||e.target.closest('select,input[type=checkbox],#capturePanel'))return;
+ if(e.key==='Escape'&&isFullPreview()){e.preventDefault();send('previewFullscreen',{on:false});return}if(busy||e.isComposing||e.repeat||e.target.closest('#playbackVolume')||(e.key===' '&&e.target.closest('#transport button,#imageNav button')))return;if(isFullPreview()&&![' ','ArrowLeft','ArrowRight'].includes(e.key))return;if(!doc && $('openedImage').hidden && e.ctrlKey && e.key.toLowerCase()==='v'){e.preventDefault();send('pasteAsImage');return}if(editing){if(e.key==='Escape'){finishEdit();document.activeElement?.blur()}if(e.ctrlKey&&e.key==='Enter')$('editor').requestSubmit();return}if((e.ctrlKey||e.metaKey)&&e.key.toLowerCase()==='o'){e.preventDefault();$('open').click();return}if(!$('openedImage').hidden && !e.altKey && !e.ctrlKey && !e.metaKey && !e.shiftKey && ['ArrowLeft','ArrowRight'].includes(e.key)){e.preventDefault();imageView.adjacent(e.key==='ArrowLeft'?-1:1);return}if(!(ready||imageDoc())||e.target.closest('select,input[type=checkbox],#capturePanel'))return;
  // Space activates an unselected marker; on the current marker it controls playback.
  if(e.key===' '&&e.target.closest('#marks button[aria-pressed="false"]'))return;
  if(e.key.toLowerCase()==='p' && ready && !e.ctrlKey && !e.metaKey && !e.altKey && !e.shiftKey && !e.target.closest('input,textarea,[contenteditable]')){e.preventDefault();$('startPicture').click();return}
  const action=e.ctrlKey?({s:'save'})[e.key.toLowerCase()]:({m:'point',i:'inBtn',o:'outBtn',' ':'play',arrowleft:'prev',arrowright:'next'})[e.key.toLowerCase()];
  if(action){e.preventDefault();$(action).click()}else if(['ArrowDown','ArrowUp'].includes(e.key)&&doc.notes.length){e.preventDefault();const ns=[...doc.notes].sort((a,b)=>a.startUs-b.startUs||a.number-b.number);select(ns[Math.min(ns.length-1,Math.max(0,ns.findIndex(x=>x.id===selected)+(e.key==='ArrowDown'?1:-1)))].id)}};
 chrome.webview.addEventListener('message',({data:m})=>{if(m.type==='volume'){displayVolume(m.value);return}if(m.type==='previewFullscreen'){showFullPreview(m.on);return}if(m.type==='timelineData')return;
+ if(m.type==='fullImage'){if(m.id===doc?.id)imageView.upgrade(m.src);return;}
  if(m.type==='image'){
   doc=m.doc;imageBase=m.images;$('noteActions').append($('point'));$('pointLabel').textContent='添加批注';$('modeLabel').textContent='图片审阅';ready=autoPlay=temporary=false;entryUs=0;frames=[];shown=0;playbackId=inUs=selected=loopId=null;history=[];future=[];
   v.pause();v.removeAttribute('src');v.load();closeEditor();$('welcome').hidden=true;document.body.classList.add('imageView');
-  imageView.show(m.src,m.folder);render();status(m.name);return;
+  imageView.show(m.src,m.folder,m.scaled);render();status(m.name);return;
  }
  if(m.type==='loaded'){$('inBtn').before($('point'));$('pointLabel').textContent='点批注';$('modeLabel').textContent='视频审阅';imageView.reset();document.body.classList.remove('imageView');$('openedImage').hidden=true;$('openedImage').removeAttribute('src');autoPlay=m.autoPlay;displayVolume(m.volume);$('duration').textContent=fmt(m.doc.durationUs);$('rate').value='1';v.defaultPlaybackRate=v.playbackRate=1;playbackId=m.playbackId;entryUs=m.us;reviewProxy=m.proxy;imageBase=m.images;temporary=!!m.temporary;doc=m.doc;frames=m.frames;shown=frames[0];ready=false;inUs=selected=loopId=null;history=[];future=[];closeEditor();$('welcome').hidden=true;$('seek').max=doc.durationUs;$('seek').value=0;$('seek').style.removeProperty('--played');v.src=m.src;render();status(m.recovered?'已恢复本地草稿':'正在打开视频…')}
  else if(m.type==='resumeReview'){seekUs(m.us);status(doc.fileName+(reviewProxy?' · 临时审阅预览':''))}

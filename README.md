@@ -12,6 +12,8 @@
 
 安装后，右键视频 → **打开方式**。选 **FrameNote Player** 直接播放原片，选 **FrameNote** 进入原有审阅流程。要让某种视频双击时总是播放，在 Windows 的默认应用设置中为该扩展名选择 **FrameNote Player**。
 
+在资源管理器多选照片和视频，右键选 **用 FrameNote Player 打开**，即可在同一个窗口浏览。左侧播放列表显示缩略图和文件名，单个文件默认收起，多个文件默认展开。向窗口拖入更多文件会追加到列表，不打断当前播放。
+
 录制设置和混音器在左侧，批注列表和编辑器在右侧。中间时间线从上到下显示视频缩略图、混合音频波形和批注；选中一个区间后，可在播放栏开启循环。下次打开时会恢复窗口大小或最大化状态。
 
 1. 在[最新版本](https://github.com/Meidios/FrameNote/releases/latest)的 **Assets** 下载以 `win-x64-Setup.exe` 结尾的安装包。安装包包含 .NET 运行时、VLC、FFmpeg 和 FFprobe；如果电脑缺少 Microsoft Edge WebView2，首次安装需要联网。Windows 的默认视频播放器不会被替换。
@@ -60,6 +62,8 @@ Recording settings and the mixer are on the left; the annotation list and editor
 | REAPER handoff | The first click installs the action. Later clicks check for updates and send to the selected track at the edit cursor. Drag the button onto the arrange view to choose a track and time instead. Review packages preserve marker and region colors. |
 
 In the original-media player, use the bottom transport to step by frame, copy the current frame, or save it as PNG. In the image viewer, the canvas starts directly below the menus. Use **Ctrl+O** to open a file and **Ctrl+S** to export a review package.
+
+Select images and videos together in Explorer and choose **用 FrameNote Player 打开** (Open with FrameNote Player) to browse them in one window. The thumbnail playlist starts collapsed for one file and expanded for multiple files. Drop more files onto the window to append them without interrupting playback.
 
 ### Build from source
 

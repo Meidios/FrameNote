@@ -18,8 +18,8 @@ def png(image):
 tile=png(Image.new("RGB",(64,32),"magenta"));asset=hashlib.sha256(tile).hexdigest()
 def uid():return str(uuid.uuid4())
 doc=dict(version=2,id=uid(),fileName="full.png",durationUs=0,lastNoteNumber=2,notes=[
- dict(id=uid(),startUs=0,endUs=None,number=1,text="box",color="#00ff00",shape=dict(kind="box",x=.10,y=.25,toX=.20,toY=.40)),
- dict(id=uid(),startUs=0,endUs=None,number=2,text="arrow",color="#00ffff",shape=dict(kind="arrow",x=.76,y=.40,toX=.89,toY=.40),
+ dict(id=uid(),startUs=0,endUs=None,number=1,text="检查框选区域。\n保留边缘的透明通道。",color="#00ff00",shape=dict(kind="box",x=.10,y=.25,toX=.20,toY=.40)),
+ dict(id=uid(),startUs=0,endUs=None,number=2,text="箭头所指处请参考附图。",color="#00ffff",shape=dict(kind="arrow",x=.76,y=.40,toX=.89,toY=.40),
  pictures=[dict(asset=asset,pixelWidth=64,pixelHeight=32,x=.50,y=.58,width=.10)])])
 package=work/"source.framenote"
 with zipfile.ZipFile(package,"w") as z:
@@ -36,7 +36,12 @@ with sync_playwright() as pw:
             except Exception:time.sleep(.06)
         try:data=cb.GetClipboardData(cb.RegisterClipboardFormat("PNG"));assert cb.IsClipboardFormatAvailable(cb.CF_DIB)
         finally:cb.CloseClipboard()
-        result=Image.open(io.BytesIO(data)).convert("RGBA");assert result.size==(W,H)
+        result=Image.open(io.BytesIO(data)).convert("RGBA");assert result.width==W and result.height>H
+        assert p.locator("#imageNav").is_hidden()
+        footer=result.crop((0,H,W,result.height))
+        for col in [(0,255,0,255),(0,255,255,255)]:
+            assert col in footer.get_flattened_data()
+        assert (255,255,255,255) in footer.get_flattened_data()
         assert len(data)>768*1024
         for x,y in [(1,1),(W-2,1),(1,H-2),(W-2,H-2),(645,40),(164,650)]:assert result.getpixel((x,y))==im.getpixel((x,y))
         for x,y,col in [(.1,.3,(0,255,0)),(.80,.4,(0,255,255)),(.55,.62,(255,0,255))]:
@@ -53,10 +58,20 @@ with sync_playwright() as pw:
         d=Desktop(backend="win32").window(process=proc.pid,class_name="#32770");d.wait("ready");edit=d.child_window(class_name="Edit",found_index=0)
         time.sleep(.3);edit.set_edit_text(str(dest));d.child_window(control_id=1).click()
         wait(p,"!busy && $('status').textContent.startsWith('批注图已保存')",timeout=16000)
-        assert Image.open(dest).convert("RGBA").tobytes()==result.tobytes()
+        assert Image.open(dest).convert("RGBA").tobytes()==result.crop((0,0,W,H)).tobytes()
         assert before==p.locator("#openedImage").get_attribute("style")
         chat=p.context.new_page();chat.set_content('<textarea autofocus></textarea>');chat.evaluate("document.addEventListener('paste',e=>{window.mime=e.clipboardData.files[0]?.type})")
         chat.locator("textarea").focus();chat.keyboard.press("Control+v");assert chat.evaluate("window.mime")=="image/png";chat.close()
-        print("PASS full 2048x1024 PNG: original corners/alpha, box, arrow, both numbered badges, attachment, >1 chunk, identical after zoom/pan, PNG+DIB and chat paste.")
+        (work/"copied-image.png").write_bytes(data)
+        print("PASS: copied details, both note colors, full size art/alpha, attachment, original-size save, PNG+DIB and chat paste.",work)
+    finally:stop(proc)
+    plain=work/"no-notes.png";im.save(plain)
+    proc,p=launch(pw,plain,"typeof imageDoc==='function' && imageDoc() && $('openedImage').naturalWidth===2048")
+    try:
+        p.locator("#copyImage").click();wait(p,"!busy && $('status').textContent.includes('批注图已复制')")
+        cb.OpenClipboard()
+        try:result=Image.open(io.BytesIO(cb.GetClipboardData(cb.RegisterClipboardFormat("PNG")))).convert("RGBA")
+        finally:cb.CloseClipboard()
+        assert result.size==im.size and result.tobytes()==im.tobytes()
     finally:stop(proc)
 

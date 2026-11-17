@@ -4,6 +4,32 @@
 
 Versions are listed newest first. Earlier entries summarize the offline release history shipped with the app; they do not imply that each version had a public GitHub installer.
 
+## 0.6.5
+
+**中文**
+
+- 图片查看器和视频播放器共用带缩略图的播放列表。单个文件默认收起列表，多选默认展开；拖入其他文件会追加并展开列表，当前媒体继续显示。
+- 在资源管理器里右键选择「用 FrameNote Player 打开」，可在同一窗口打开多张图片、多个视频或混合选择。优化了大图片和本地视频的首次显示。
+- VBMatrix 回送可直接作为系统输出录制；录制中的电平表显示实际采集信号。修复了图片查看器切图箭头，并调整了按钮透明度。
+
+**English**
+
+- The image viewer and video player share a thumbnail playlist. It starts collapsed for one file and expanded for a selection. Dropping more files appends them without interrupting the current item.
+- The Explorer context menu opens selected images and videos together in FrameNote Player. Large images and local videos appear sooner.
+- VBMatrix returns can be recorded as system outputs. Meters show captured samples while recording. Image navigation arrows now render correctly and use translucent buttons.
+
+## 0.6.4
+
+**中文**
+
+- FrameNote Player 在单个窗口里直接播放视频，标题为「FrameNote Player - 视频名」。关闭窗口即可退出；进入批注时仍使用同一窗口。
+- 图片查看器新增左右切图箭头。复制批注图时，图片下方会附上批注编号、颜色及完整正文；没有批注时保持原尺寸。复制与另存按钮改为与主程序一致的图标。
+
+**English**
+
+- FrameNote Player opens videos directly in one window titled “FrameNote Player - filename”. Closing it exits the player; entering review uses the same window.
+- The image viewer adds previous and next arrows. Copying an annotated image appends note numbers, colors and full text below the image; unannotated copies keep their original dimensions. Copy and Save As now use the same icons as the main application.
+
 ## 0.6.3
 
 **中文**

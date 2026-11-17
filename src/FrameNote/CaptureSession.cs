@@ -20,6 +20,7 @@ public sealed class CaptureSession : IDisposable
     long epoch,firstFrame;
     internal long VideoEpoch100ns=>Interlocked.Read(ref firstFrame);
     public Task Completion=>completed.Task;
+    internal float RecordedPeak(string deviceId)=>audio.FirstOrDefault(t=>t.Track.DeviceId==deviceId).Track?.RecordedPeak??0;
     public CaptureSession(RecordingSourceBase source,List<CaptureInput> sources,int fps,bool high){
         if(sources.Any(s=>s.GainDb is < -60 or > 0))throw new ArgumentOutOfRangeException(nameof(sources));
         this.sources=sources;

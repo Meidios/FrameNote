@@ -25,22 +25,27 @@ public partial class NativePlayer : UserControl, IDisposable
     int? stepped;
     byte[]? stillPng;
     int seekRevision;
-    public event Action? OpenRequested, ReviewRequested, CancelRequested;
+    public event Action? OpenRequested, ReviewRequested, CancelRequested, PlaybackEnded;
     public event Action<int>? VolumeRequested;
     public event Action<bool>? FullscreenRequested;
     public long TimeUs => stepped is int i && frames!=null ? frames[i] : Math.Max(0,player.Time)*1000;
     long TimeMs => (TimeUs+500)/1000;
 
-    public NativePlayer(string scratch){
-        this.scratch=scratch;InitializeComponent();
+    internal static LibVLC CreateEngine(bool rebuildCache=false){
         Core.Initialize(Path.Combine(AppContext.BaseDirectory,"libvlc","win-x64"));
-        engine=new LibVLC("--no-video-title-show","--no-snapshot-preview");
+        return rebuildCache?new LibVLC("--reset-plugins-cache"):new LibVLC("--no-video-title-show","--no-snapshot-preview");
+    }
+    public NativePlayer(string scratch,Task<LibVLC>? warming=null){
+        this.scratch=scratch;InitializeComponent();
+        engine=warming?.GetAwaiter().GetResult()??CreateEngine();
         player=new MediaPlayer(engine){EnableMouseInput=false,EnableKeyInput=false};
-        Surface.MediaPlayer=player;
+        player.EndReached+=(_,_)=>Dispatcher.BeginInvoke(()=>{
+            if(!disposed && session!=null && IsVisible && player.State==VLCState.Ended)PlaybackEnded?.Invoke();
+        });
         player.Playing+=(_,_)=>Dispatcher.BeginInvoke(()=>{if(!disposed && session!=null){
             player.Volume=volume;
             if(startMs>0){player.Time=startMs;startMs=0;}
-            if(pauseOnStart || !ReviewButton.IsEnabled){player.SetPause(true);pauseOnStart=false;}
+            if(pauseOnStart || CancelButton.IsVisible){player.SetPause(true);pauseOnStart=false;}
         }});
         timer.Tick+=(_,_)=>RefreshControls();
         Timeline.ValueChanged+=(_,_)=>{if(!syncing && player.IsSeekable){ClearStill();player.Time=(long)Timeline.Value;}};
@@ -102,7 +107,7 @@ public partial class NativePlayer : UserControl, IDisposable
         Still.Visibility=Visibility.Collapsed;Surface.Visibility=Visibility.Visible;
     }
     async Task Step(int direction){
-        if(stepping || session==null || !Shuttle.IsEnabled)return;
+        if(stepping || review==null || session==null || !Shuttle.IsEnabled)return;
         var token=session.Token;
         bool ended=player.State==VLCState.Ended;
         if(!ended && !player.IsSeekable)return;
@@ -166,10 +171,20 @@ public partial class NativePlayer : UserControl, IDisposable
         catch(Exception e){if(!token.IsCancellationRequested)Hint.Text="未能导出当前帧："+e.Message;}
         finally{player.SnapshotTaken-=Taken;if(!token.IsCancellationRequested)capturing=false;File.Delete(file);}
     }
-    public void Start(string path,Review document,long ms,Probe.Info mediaInfo){
-        Stop();session=new();source=path;info=mediaInfo;review=document;startMs=ms;
-        Caption.Text=document.FileName;Hint.Text="";
+    public void BindReview(Review document,Probe.Info mediaInfo){review=document;info=mediaInfo;Previous.IsEnabled=Next.IsEnabled=ReviewButton.IsEnabled=true;}
+    public async Task Start(string path,string name,long ms){
+        Stop();session=new();source=path;review=null;startMs=ms;Previous.IsEnabled=Next.IsEnabled=ReviewButton.IsEnabled=false;
+        Caption.Text=name;Hint.Text="";
+        var token=session.Token;
+        // Wait for WPF to create the embedded child before handing video to VLC.
+        // Starting VLC with a zero HWND lets it create its own Direct3D output window.
+        Surface.UpdateLayout();
+        await Dispatcher.InvokeAsync(()=>{},DispatcherPriority.Loaded,token);
+        token.ThrowIfCancellationRequested();
+        if(Surface.Handle==IntPtr.Zero)throw new IOException("视频画面未能连接到播放器窗口。");
+        player.Hwnd=Surface.Handle;
         using var input=new Media(engine,path,FromType.FromPath);
+        input.AddOption(":file-caching=150");
         if(!player.Play(input))throw new IOException("VLC 未能打开视频。");
         timer.Start();Focus();
     }
@@ -182,5 +197,5 @@ public partial class NativePlayer : UserControl, IDisposable
         timer.Stop();session?.Cancel();session?.Dispose();session=null;
         ClearStill();frames=null;stepping=capturing=pauseOnStart=false;player.Stop();
     }
-    public void Dispose(){disposed=true;Stop();Surface.MediaPlayer=null;player.Dispose();engine.Dispose();}
+    public void Dispose(){disposed=true;Stop();player.Hwnd=IntPtr.Zero;player.Dispose();engine.Dispose();}
 }

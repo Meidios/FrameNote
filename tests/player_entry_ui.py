@@ -1,9 +1,9 @@
 """Verify the separate Windows video registrations and both launch paths on an installed build."""
-import ctypes, os, shutil, winreg
+import ctypes, os, shutil, subprocess, sys, winreg
 from playwright.sync_api import sync_playwright
-from pywinauto import Desktop
+from pathlib import Path
 import review_ui
-from review_ui import fixtures, work, launch, stop, wait
+from review_ui import fixtures, work, launch, stop
 
 root=review_ui.app.parent
 player=root/"FrameNote Player.exe"
@@ -32,17 +32,5 @@ with sync_playwright() as pw:
     proc,page=launch(pw,path)
     try:assert page.locator("#transport").is_visible()
     finally:stop(proc)
-    review_ui.app=player
-    proc,page=launch(pw,path,"document.querySelector('#transport')!==null")
-    try:
-        win=Desktop(backend="uia").window(process=proc.pid,title_re=".*FrameNote Player$")
-        button=win.child_window(auto_id="ReviewButton");button.wait("visible",timeout=12)
-        clock=win.child_window(auto_id="Clock")
-        import time
-        deadline=time.monotonic()+6
-        while not clock.window_text().split(" / ")[0].strip("0:.") and time.monotonic()<deadline:time.sleep(.1)
-        assert clock.window_text().split(" / ")[0].strip("0:.")
-        button.invoke();wait(page,"ready && !reviewProxy && !busy")
-        assert page.locator("#transport").is_visible()
-    finally:stop(proc)
+subprocess.run([sys.executable,str(Path(__file__).with_name("player_window_ui.py")),*sys.argv[1:]],check=True)
 print("PASS: both Shell friendly names, 18 associations, Unicode MP4 review/playback, and entering review from Player.")

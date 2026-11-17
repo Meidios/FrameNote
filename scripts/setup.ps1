@@ -20,6 +20,8 @@ $bin=Split-Path (Get-Command ffmpeg.exe).Source
 New-Item "$stage/tools" -ItemType Directory | Out-Null
 Copy-Item "$bin/ffmpeg.exe","$bin/ffprobe.exe","$bin/../LICENSE","$bin/../README.txt" "$stage/tools/"
 Copy-Item "$CrtDirectory/*.dll" "$stage/"
+$cacheJob=Start-Process -FilePath (Join-Path $stage 'FrameNote.exe') -ArgumentList '--prepare-vlc-cache' -WindowStyle Hidden -Wait -PassThru
+if($cacheJob.ExitCode -ne 0){throw 'Failed to prepare VLC plugin cache.'}
 $deps=New-Item (Join-Path $art 'installer-deps') -ItemType Directory -Force
 $bootstrap=Join-Path $deps 'MicrosoftEdgeWebview2Setup.exe'
 if(!(Test-Path $bootstrap)){Invoke-WebRequest 'https://go.microsoft.com/fwlink/p/?LinkId=2124703' -OutFile $bootstrap}

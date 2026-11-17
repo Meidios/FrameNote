@@ -16,12 +16,29 @@ public sealed partial class Desk
     string regionDevice="";
     ScreenRect? area;
     Int32Rect regionMonitor;
+    sealed record MixerOutput(string Id,string Name,bool Preferred,bool Loopback);
+    static MixerOutput[] MixerOutputs(){
+        var renders=Recorder.GetSystemAudioLoopbackDevices();
+        var inputs=Recorder.GetSystemAudioCaptureDevices();
+        // Matrix In is a playback endpoint. Its mix is exposed to recorders on
+        // a separately routable Matrix Out bus, not necessarily on WASAPI loopback.
+        static bool MatrixBus(string name,string side)=>System.Text.RegularExpressions.Regex.IsMatch(
+            name,@"^VBMatrix "+side+@" [0-9]+ \(VB-Audio Matrix VAIO\)$",System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+        var returns=inputs.Where(d=>MatrixBus(d.FriendlyName,"Out")).ToArray();
+        var preferred=renders.FirstOrDefault(d=>d.IsDefaultDevice);
+        var returnName=preferred!=null && MatrixBus(preferred.FriendlyName,"In")
+            ? preferred.FriendlyName.Replace("VBMatrix In ","VBMatrix Out ",StringComparison.OrdinalIgnoreCase):null;
+        var defaultReturn=returns.FirstOrDefault(d=>string.Equals(d.FriendlyName,returnName,StringComparison.OrdinalIgnoreCase));
+        return returns.Select(d=>new MixerOutput(d.DeviceName,d.FriendlyName+" · 矩阵回送",d.DeviceName==defaultReturn?.DeviceName,false))
+            .Concat(renders.Select(d=>new MixerOutput(d.DeviceName,d.FriendlyName+(MatrixBus(d.FriendlyName,"In")?" · Windows 回环":""),
+                d.IsDefaultDevice && defaultReturn==null,true))).ToArray();
+    }
     void Catalog(){
         static string Handle(IntPtr h)=>h.ToInt64().ToString(CultureInfo.InvariantCulture);
         Send(new{type="catalog",
             displays=Recorder.GetDisplays().Select(d=>new{id=d.DeviceName,name=d.FriendlyName+"  "+d.DeviceName}),
             windows=Recorder.GetWindows().Where(w=>w.Handle!=new System.Windows.Interop.WindowInteropHelper(this).Handle && w.Title!="FrameNote 选区边框").Select(w=>new{id=Handle(w.Handle),name=w.Title}),
-            outputs=Recorder.GetSystemAudioLoopbackDevices().Select(d=>new{id=d.DeviceName,name=d.FriendlyName,preferred=d.IsDefaultDevice}),
+            outputs=MixerOutputs().Select(d=>new{id=d.Id,name=d.Name,preferred=d.Preferred}),
             inputs=Recorder.GetSystemAudioCaptureDevices().Select(d=>new{id=d.DeviceName,name=d.FriendlyName})});
     }
     void MeterSources(string[] ids){
@@ -35,7 +52,7 @@ public sealed partial class Desk
     }
     void ReadMeterPeaks(){
         static float Peak(MMDevice? device){try{return device?.AudioMeterInformation.MasterPeakValue??0;}catch(System.Runtime.InteropServices.COMException){return 0;}}
-        Send(new{type="meters",levels=meterDevices.ToDictionary(p=>p.Key,p=>Peak(p.Value))});
+        Send(new{type="meters",levels=meterDevices.ToDictionary(p=>p.Key,p=>recorder is {} session?session.RecordedPeak(p.Key):Peak(p.Value))});
     }
     void InitMeters(){
         Closed+=(_,_)=>{foreach(var device in meterDevices.Values)device.Dispose();endpoints?.Dispose();ClearOutline();};
@@ -73,12 +90,13 @@ public sealed partial class Desk
         }
         List<CaptureInput> audio=[];
         if(!gif){
-            var outputs=Recorder.GetSystemAudioLoopbackDevices().Select(d=>d.DeviceName).ToHashSet();
+            var outputs=MixerOutputs().ToDictionary(d=>d.Id);
             foreach(var channel in s.Outputs){
-                if(!outputs.Remove(channel.Id))throw new InvalidOperationException("输出设备已断开或重复，请刷新采集来源。");
-                audio.Add(new(channel.Id,true,channel.GainDb,channel.Muted));
+                if(!outputs.Remove(channel.Id,out var output))throw new InvalidOperationException("输出设备已断开或重复，请刷新采集来源。");
+                audio.Add(new(channel.Id,output.Loopback,channel.GainDb,channel.Muted));
             }
             if(s.Mic is {} mic){
+                if(audio.Any(ch=>ch.Id==mic.Id))throw new InvalidOperationException("同一设备不能同时作为系统输出和麦克风录制。");
                 if(!Recorder.GetSystemAudioCaptureDevices().Any(d=>d.DeviceName==mic.Id))throw new InvalidOperationException("麦克风已断开，请刷新采集来源。");
                 audio.Add(new(mic.Id,false,mic.GainDb,mic.Muted));
             }

@@ -130,6 +130,12 @@ body.imageView :is(#capturePanel,#transport,#timelineTools,#trackDesk,#video,#he
 .imageView #stage{touch-action:none;user-select:none;outline:none}
 .imageView #stage.pannable{cursor:grab}
 .imageView #stage.dragging{cursor:grabbing}
+#imageNav{display:none}
+.imageView #imageNav:not([hidden]){position:absolute;inset:0;display:flex;align-items:center;justify-content:space-between;padding-inline:12px;pointer-events:none}
+.imageView #stage:has(#overlay.drawing) #imageNav{visibility:hidden}
+#imageNav button{pointer-events:auto;display:grid;place-items:center;width:36px;height:42px;padding:0;background:var(--panel);color:var(--ink);opacity:.15}
+#imageNav button:is(:hover,:focus-visible){opacity:.5}
+#imageNav button svg{width:24px;height:24px;fill:none;stroke:currentColor;stroke-width:2.5;stroke-linecap:round;stroke-linejoin:round;pointer-events:none}
 /* Retain default scrollbar gutters, native select sizing and range hit geometry. */
 ::-webkit-scrollbar{background:transparent}
 ::-webkit-scrollbar-thumb{border:3px solid transparent;border-radius:6px;background:var(--scroll);background-clip:padding-box}

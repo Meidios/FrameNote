@@ -51,13 +51,17 @@ public sealed partial class Desk
         Directory.CreateDirectory(scratch);
         string tmp=Path.Combine(scratch,Guid.NewGuid().ToString("N")+".png");
         using(var stream=new FileStream(tmp,FileMode.CreateNew,FileAccess.ReadWrite,FileShare.None,131072,FileOptions.DeleteOnClose)){
-            await RenderAnnotatedImage(displayImagePath,doc.Notes,stream,false);
+            await RenderAnnotatedImage(await OriginalImage(),doc.Notes,stream,false);
             stream.Position=0;
             if(destination!=null){
                 await Task.Run(()=>Packages.Atomic(destination,s=>stream.CopyTo(s)));
                 Send(new{type="status",text="批注图已保存："+destination});
             }else{
-                using var png=new MemoryStream();await stream.CopyToAsync(png);png.Position=0;
+                using var png=doc.Notes.Count>0
+                    ?new MemoryStream(FrameDetails.Append(stream,doc.FileName,null,doc.Notes))
+                    :new MemoryStream();
+                if(doc.Notes.Count==0)await stream.CopyToAsync(png);
+                png.Position=0;
                 var bitmap=BitmapFrame.Create(png,BitmapCreateOptions.PreservePixelFormat,BitmapCacheOption.OnLoad);bitmap.Freeze();png.Position=0;
                 var data=new DataObject();data.SetImage(bitmap);data.SetData("PNG",png);Clipboard.SetDataObject(data,true);
                 Send(new{type="status",text="批注图已复制，可直接在聊天框按 Ctrl+V 粘贴。"});
@@ -65,6 +69,7 @@ public sealed partial class Desk
         }
     }
     async Task RenderAnnotatedImage(string source,IReadOnlyList<Note> notes,Stream stream,bool videoFrame){
+        await EnsureReviewWeb();
         if(exportBase!=null)throw new InvalidOperationException("上一张图片仍在导出，请稍后再试。");
         exportFiles=notes.SelectMany(n=>n.Pictures??[]).Select(p=>p.Asset).Distinct()
             .ToDictionary(hash=>hash+".png",hash=>ReviewImages.PathFor(ImageDirectory,hash));

@@ -8,6 +8,7 @@ public sealed partial class Desk
 {
     readonly Grid surfaces=new();
     NativePlayer? native;
+    Task<LibVLCSharp.Shared.LibVLC>? startingEngine;
     CancellationTokenSource? preparing;
     Guid playbackId;
     Menu menuStrip=null!;
@@ -18,10 +19,12 @@ public sealed partial class Desk
             menuStrip.Visibility=Visibility.Collapsed;
             WindowState=WindowState.Normal;WindowStyle=WindowStyle.None;ResizeMode=ResizeMode.NoResize;WindowState=WindowState.Maximized;
             if(native?.IsVisible==true)native.SetFullscreen(true);else Send(new{type="previewFullscreen",on=true});
+            ShowPlaylist();
         }else if(!on && beforeFullscreen is {} old){
             WindowState=WindowState.Normal;WindowStyle=old.Style;ResizeMode=old.Resize;WindowState=old.State;
             menuStrip.Visibility=Visibility.Visible;beforeFullscreen=null;
             if(native?.IsVisible==true)native.SetFullscreen(false);else Send(new{type="previewFullscreen",on=false});
+            ShowPlaylist();
         }
     }
     Probe.Info? playbackInfo;
@@ -29,13 +32,12 @@ public sealed partial class Desk
     bool deskLoaded,needsPreview,draftRestored;
 
     async Task PickVideo(){
-        var fd=new OpenFileDialog{Filter="图片、视频与审阅包|"+string.Join(";",Review.Formats.Concat(ImageFormats).Append(".framenote").Select(ext=>"*"+ext))};
-        if(fd.ShowDialog(this)==true)await Work(()=>Open(fd.FileName));
+        var fd=new OpenFileDialog{Multiselect=true,Filter="图片、视频与审阅包|"+string.Join(";",Review.Formats.Concat(ImageFormats).Append(".framenote").Select(ext=>"*"+ext))};
+        if(fd.ShowDialog(this)==true)await OpenFiles(fd.FileNames);
     }
-    void ShowPlayer(long us){
-        if(media==null || doc==null || playbackInfo==null)return;
+    NativePlayer EnsurePlayer(){
         if(native==null){
-            native=new NativePlayer(scratch);
+            native=new NativePlayer(scratch,startingEngine);startingEngine=null;
             PreviewKeyDown+=(_,e)=>{
                 if(e.Key==System.Windows.Input.Key.Escape && beforeFullscreen!=null && native.IsVisible){
                     e.Handled=true;SetPreviewFullscreen(false);
@@ -46,12 +48,23 @@ public sealed partial class Desk
             native.OpenRequested+=async()=>await PickVideo();
             native.ReviewRequested+=async()=>await Work(()=>EnterReview());
             native.CancelRequested+=()=>preparing?.Cancel();
+            native.PlaybackEnded+=async()=>{
+                int next=playlist.Items.SelectedIndex+1;
+                if(!pending && !configuring && recorder==null && next>0 && next<playlist.Files.Count)
+                    await Work(()=>Open(playlist.Files[next].Path,viewer:true));
+            };
             surfaces.Children.Add(native);
         }
+        return native;
+    }
+    async Task ShowPlayer(long us){
+        if(media==null || doc==null || playbackInfo==null)return;
+        var player=EnsurePlayer();
+        if(playerEntry)Title="FrameNote Player - "+doc.FileName;
         web.Visibility=Visibility.Hidden;
-        native.Visibility=Visibility.Visible;
-        native.Preparing(false,"");
-        native.SetVolume(volume);native.Start(media,doc,us/1000,playbackInfo);
+        player.Visibility=Visibility.Visible;
+        player.Preparing(false,"");
+        player.SetVolume(volume);await player.Start(media,doc.FileName,us/1000);player.BindReview(doc,playbackInfo);
     }
     async Task EnterReview(long? initialUs=null){
         if(media==null || doc==null || native==null)return;
@@ -64,12 +77,14 @@ public sealed partial class Desk
             else Send(new{type="resumeReview",us=position});
             SetPreviewFullscreen(false);
             native.Stop();native.Visibility=Visibility.Collapsed;web.Visibility=Visibility.Visible;web.Focus();
+            Title=(activeRecording!=null?"临时录屏 · ":"")+doc.FileName+" · FrameNote";
         }catch(OperationCanceledException){native.Preparing(false,"已取消，可继续播放。");}
         catch(Exception e){native.Preparing(false,"无法进入批注："+e.Message);native.ToolTip=e.Message;}
         finally{preparing=null;if(native.Visibility==Visibility.Collapsed)native.Preparing(false,"");}
     }
     async Task LoadReview(long us,CancellationToken token,long[]? knownFrames=null,bool playOnLoad=false){
         if(media==null || doc==null || playbackInfo==null)return;
+        await EnsureReviewWeb();
         var frames=knownFrames??await Probe.Frames(media,playbackInfo,token);
         if(needsPreview && preview==null){
             Directory.CreateDirectory(scratch);

@@ -36,6 +36,16 @@ Source: "..\artifacts\installer-deps\MicrosoftEdgeWebview2Setup.exe"; Flags: don
 Name: "{userprograms}\FrameNote"; Filename: "{app}\FrameNote.exe"
 
 [Registry]
+; A shared verb is available even when pictures and videos are selected together.
+#define public MenuMedia ".png;.apng;.jpg;.jpeg;.jfif;.bmp;.gif;.webp;.avif;.ico;.tif;.tiff;.mp4;.m4v;.mov;.webm;.mkv;.avi;.wmv;.asf;.mpg;.mpeg;.ts;.m2ts;.mts;.flv;.mxf;.vob;.ogv;.3gp;"
+#sub RegisterPlayerMenu
+#define VerbKey "Software\Classes\SystemFileAssociations\" + Copy(MenuMedia,1,Pos(";",MenuMedia)-1) + "\shell\FrameNotePlayer"
+Root: HKCU; Subkey: "{#VerbKey}"; ValueType: string; ValueData: "用 FrameNote Player 打开"; Flags: uninsdeletekey
+Root: HKCU; Subkey: "{#VerbKey}"; ValueName: "Icon"; ValueType: string; ValueData: """{app}\FrameNote Player.exe"",0"
+Root: HKCU; Subkey: "{#VerbKey}"; ValueName: "MultiSelectModel"; ValueType: string; ValueData: "Player"
+Root: HKCU; Subkey: "{#VerbKey}\command"; ValueType: string; ValueData: """{app}\FrameNote Player.exe"" --shell-selection ""%1"""
+#endsub
+#for {MenuMedia = MenuMedia; Len(MenuMedia)>0; MenuMedia = Copy(MenuMedia, Pos(";", MenuMedia)+1, Len(MenuMedia))} RegisterPlayerMenu
 Root: HKCU; Subkey: "Software\Meidios\FrameNote"; Flags: uninsdeletekey
 Root: HKCU; Subkey: "Software\Meidios\FrameNote\Capabilities"; ValueType: string; ValueName: "ApplicationName"; ValueData: "FrameNote"
 Root: HKCU; Subkey: "Software\Meidios\FrameNote\Capabilities"; ValueType: string; ValueName: "ApplicationDescription"; ValueData: "FrameNote 视频审阅与批注"

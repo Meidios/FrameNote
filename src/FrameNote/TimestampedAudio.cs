@@ -17,12 +17,17 @@ sealed class TimestampedAudio : IDisposable
     public string Path { get; }
     public bool HasPackets { get; private set; }
     public int Channels { get; private set; }
+    public string DeviceId { get; }
+    float peak;
+    long peakAt;
+    public float RecordedPeak=>Stopwatch.GetElapsedTime(Volatile.Read(ref peakAt)).TotalMilliseconds<100?Volatile.Read(ref peak):0;
 
     public static long Now100ns() => (long)(Stopwatch.GetTimestamp()*(10_000_000.0/Stopwatch.Frequency));
 
     public TimestampedAudio(string id,bool loopback,string path,long epoch)
     {
         Path=path;
+        DeviceId=id;
         var ready=new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         worker=Task.Factory.StartNew(()=>{
             try {
@@ -60,6 +65,11 @@ sealed class TimestampedAudio : IDisposable
                                 using var cluster=writer.StartMasterElement(Id(0x1F43B675));
                                 cluster.Write(Id(0xE7),(ulong)((qpc-epoch)/10)); // microsecond time base
                                 cluster.Write(Id(0xA3),bytes,0,length+4);HasPackets=true;
+                                int max=0;
+                                foreach(short sample in MemoryMarshal.Cast<byte,short>(bytes.AsSpan(4,length)))
+                                    max=Math.Max(max,Math.Abs((int)sample));
+                                Volatile.Write(ref peak,max/32768f);
+                                Volatile.Write(ref peakAt,Stopwatch.GetTimestamp());
                             } finally {capture.ReleaseBuffer(count);}
                         }
                         stop.Token.WaitHandle.WaitOne(4);

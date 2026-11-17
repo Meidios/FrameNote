@@ -56,7 +56,7 @@ function strip(ch,isMic){
  mute.setAttribute('aria-label',ch.name+' 录制静音');slider.setAttribute('aria-label',ch.name+' 录制增益');
  ch.meter=row.querySelector('.channelMeter');ch.mask=ch.meter.firstElementChild;
  ch.meter.setAttribute('aria-label',ch.name+' 设备电平（应用录制增益，dBFS）');
- ch.meter.title='Windows 设备峰值（已计入录制增益和静音）';
+ ch.meter.title='录制前显示所选设备电平；录制中显示实际采集电平（已计入增益和静音）';
  function update(){
   mute.setAttribute('aria-pressed',String(ch.muted));mute.title=ch.muted?'取消静音':'静音';
   mute.querySelector('use').setAttribute('href',ch.muted?'#icon-speaker_mute':'#icon-speaker_2');
@@ -66,11 +66,11 @@ function strip(ch,isMic){
  mute.onclick=()=>{ch.muted=!ch.muted;update()};update();return row;
 }
 function renderMixer(){
- const available=catalog.outputs.filter(d=>!outputs.has(d.id));
+ const available=catalog.outputs.filter(d=>!outputs.has(d.id)&&d.id!==microphone?.id);
  populate('addOutput',[{id:'',name:available.length?'添加输出设备…':'没有更多输出设备'},...available],'');
  $('addOutput').disabled=!available.length;
  $('outputStrips').replaceChildren(...Array.from(outputs.values(),ch=>strip(ch,false)));
- const inputs=[{id:'',name:'关闭'},...catalog.inputs];
+ const inputs=[{id:'',name:'关闭'},...catalog.inputs.filter(d=>!outputs.has(d.id))];
  if(microphone?.offline)inputs.push({id:microphone.id,name:'已断开 · '+microphone.name});
  populate('mic',inputs,microphone?.id??'');
  $('micStrip').replaceChildren(...(microphone?[strip(microphone,true)]:[]));

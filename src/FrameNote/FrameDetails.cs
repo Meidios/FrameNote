@@ -16,6 +16,9 @@ internal static class FrameDetails
 
     public static byte[] Append(byte[] png,string source,TimeSpan time,IReadOnlyList<Note> notes){
         using var input=new MemoryStream(png);
+        return Append(input,source,time,notes);
+    }
+    public static byte[] Append(Stream input,string source,TimeSpan? time,IReadOnlyList<Note> notes){
         var frame=BitmapFrame.Create(input,BitmapCreateOptions.PreservePixelFormat,BitmapCacheOption.OnLoad);
         int width=Math.Max(256,frame.PixelWidth),imageHeight=frame.PixelHeight;
         double unit=Math.Clamp(width/1100d,1,3),pad=Math.Round(16*unit),x=pad+11*unit;
@@ -35,10 +38,11 @@ internal static class FrameDetails
                 dc.DrawText(text,new Point(left,y));y+=Math.Ceiling(text.Height);
             }
             dc.DrawImage(frame,new Rect((width-frame.PixelWidth)/2,0,frame.PixelWidth,imageHeight));
-            Line($"{source}　·　{Stamp(TimeSpan.FromMilliseconds((time.Ticks+5000)/10000))}　·　{notes.Count} 条批注",15,Bold,Brushes.White,pad);
+            string timestamp=time is {} t?"　·　"+Stamp(TimeSpan.FromMilliseconds((t.Ticks+5000)/10000)):"";
+            Line($"{source}{timestamp}　·　{notes.Count} 条批注",15,Bold,Brushes.White,pad);
             foreach(var note in notes.OrderBy(n=>n.Number)){
                 y+=11*unit;double top=y;
-                string range=note.EndUs is long end?$"区间批注　{Stamp(note.StartUs)} – {Stamp(end)}":$"点批注　{Stamp(note.StartUs)}";
+                string range=time==null?"图片批注":note.EndUs is long end?$"区间批注　{Stamp(note.StartUs)} – {Stamp(end)}":$"点批注　{Stamp(note.StartUs)}";
                 string attachment=note.Pictures is {Count:>0} pics?$"　·　参考图 ×{pics.Count}":"";
                 string shape=note.Shape?.Kind switch{"arrow"=>"　·　箭头","box"=>"　·　框选",_=>""};
                 var color=new SolidColorBrush((Color)ColorConverter.ConvertFromString(note.DisplayColor()));
@@ -52,7 +56,8 @@ internal static class FrameDetails
         int height=checked((int)Math.Ceiling(y+pad));CheckHeight(height);
         var page=new DrawingVisual();
         using(var dc=page.RenderOpen()){
-            dc.DrawRectangle(background,null,new Rect(0,0,width,height));dc.DrawDrawing(visual.Drawing);
+            // Keep the image's transparency; only the annotation legend needs a background.
+            dc.DrawRectangle(background,null,new Rect(0,imageHeight,width,height-imageHeight));dc.DrawDrawing(visual.Drawing);
         }
         var bitmap=new RenderTargetBitmap(width,height,96,96,PixelFormats.Pbgra32);
         bitmap.Render(page);var encoder=new PngBitmapEncoder();encoder.Frames.Add(BitmapFrame.Create(bitmap));

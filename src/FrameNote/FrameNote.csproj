@@ -1,14 +1,14 @@
 <Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup>
     <ApplicationIcon>Assets/FrameNote.ico</ApplicationIcon>
-    <OutputType>WinExe</OutputType><TargetFramework>net8.0-windows</TargetFramework><UseWPF>true</UseWPF><Nullable>enable</Nullable><ImplicitUsings>enable</ImplicitUsings><Platform>x64</Platform><PlatformTarget>x64</PlatformTarget><Version>0.6.3</Version>
+    <OutputType>WinExe</OutputType><TargetFramework>net8.0-windows</TargetFramework><UseWPF>true</UseWPF><Nullable>enable</Nullable><ImplicitUsings>enable</ImplicitUsings><Platform>x64</Platform><PlatformTarget>x64</PlatformTarget><Version>0.6.5</Version>
   </PropertyGroup>
   <ItemGroup>
     <Content Include="Assets/FrameNote_File.ico" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
     <Content Include="../../docs/releases/v*.md" Link="releases/%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
     <InternalsVisibleTo Include="UpdateCheck" />
     <InternalsVisibleTo Include="CaptureCheck" />
-    <PackageReference Include="LibVLCSharp.WPF" Version="3.10.2" />
+    <PackageReference Include="LibVLCSharp" Version="3.10.2" />
     <PackageReference Include="Microsoft.Web.WebView2" Version="1.0.3179.45" />
     <Content Include="ui/**/*;reaper/*.lua" CopyToOutputDirectory="PreserveNewest" />
     <PackageReference Include="NAudio.Wasapi" Version="2.2.1" />

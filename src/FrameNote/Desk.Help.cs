@@ -39,7 +39,7 @@ public sealed partial class Desk
     bool updating,startedUpdates;
     static void Browse(string url)=>Process.Start(new ProcessStartInfo(url){UseShellExecute=true})?.Dispose();
     static void Releases()=>Browse(Updates.Home+"/releases");
-    void InitHelp(){
+    void InitHelp(bool directPlayer){
         prefs=new(root);
         string key=Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(Path.GetFullPath(root).ToUpperInvariant())))[..16];
         session=new Mutex(false,@"Local\FrameNote.Startup."+key,out bool first);
@@ -60,10 +60,10 @@ public sealed partial class Desk
         autoItem.IsCheckable=true;menu.SubmenuOpened+=(_,_)=>autoItem.IsChecked=prefs.Change(p=>p).Automatic;
         Item("更新记录",()=>History());Item("默认应用设置",()=>Browse("ms-settings:defaultapps?registeredAppUser=FrameNote"));
         Item("关于 FrameNote",()=>Simple("关于 FrameNote","FrameNote "+Updates.Running,"视频审阅、录屏和 REAPER 批注交付工具。\n\n作者：Meidios（MEI）\nWindows x64\n\n如果这个工具对你有帮助，欢迎到 GitHub 点个 Star。",true));
-        var host=new DockPanel();DockPanel.SetDock(bar,Dock.Top);host.Children.Add(bar);host.Children.Add(surfaces);Content=host;
+        var host=new DockPanel();DockPanel.SetDock(bar,Dock.Top);host.Children.Add(bar);InitPlaylist(host);host.Children.Add(surfaces);Content=host;
         Closed+=(_,_)=>{lifetime.Cancel();session?.Dispose();installGuard?.Dispose();};
-        web.NavigationCompleted+=async (_,e)=>{
-            if(!e.IsSuccess||startedUpdates||!first)return;startedUpdates=true;
+        async Task StartupUpdates(){
+            if(startedUpdates||!first)return;startedUpdates=true;
             try{
                 while(currentWork is {} w)await w.Task;
                 await Task.Delay(350,lifetime.Token);
@@ -73,7 +73,9 @@ public sealed partial class Desk
                 if(from!=null)History(from);
                 if(previous.Automatic)await CheckUpdates(false);
             }catch(OperationCanceledException){}catch(IOException){}catch(UnauthorizedAccessException){}
-        };
+        }
+        if(directPlayer)ContentRendered+=async (_,_)=>await StartupUpdates();
+        else web.NavigationCompleted+=async (_,e)=>{if(e.IsSuccess)await StartupUpdates();};
     }
     void Simple(string title,string heading,string message,bool home=false){
         var dialog=new InfoDialog(this,title,heading,message);
@@ -126,7 +128,7 @@ public sealed partial class Desk
         }finally{completed=true;if(dlg.IsVisible)dlg.Close();IsEnabled=true;}
         if(installer==null || lifetime.IsCancellationRequested)return;
         try{
-            bool editingNow=await web.ExecuteScriptAsync("!!editing")=="true";
+            bool editingNow=webReady && await web.ExecuteScriptAsync("!!editing")=="true";
             if(pending || configuring || recorder!=null || activeRecording!=null || editingNow){
                 Simple("安装更新","请先保存当前工作","请结束录制、保存编辑中的批注并导出需要保留的临时录屏。切换到普通文件后，再从帮助菜单检查更新。");return;
             }
