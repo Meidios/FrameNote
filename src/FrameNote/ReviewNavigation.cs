@@ -19,8 +19,9 @@ internal sealed class ReviewNavigation(string indexPath,string recoveryDirectory
             using var output=File.Create(file);
             await input.CopyToAsync(output,token);
         }
-        page=new Uri(Path.Combine(dest,"index.html"));
-        if(!File.Exists(page.LocalPath))throw new IOException("无法恢复审阅页，请重新安装 FrameNote。");
+        var entry=Path.Combine(dest,"index.html");
+        if(!File.Exists(entry))throw new IOException("无法恢复审阅页，请重新安装 FrameNote。");
+        page=new Uri(entry);
     }
 
     internal bool IsPage(string? address)=>
@@ -32,10 +33,15 @@ internal sealed class ReviewNavigation(string indexPath,string recoveryDirectory
 
     internal async Task Load(CoreWebView2 core,CancellationToken token)
     {
+        // Navigate to the bundled copy first. An installed page on a slow or
+        // restricted volume can stall without delivering a navigation failure.
+        try{await RecoverPage(token);}
+        catch(Exception e) when(e is IOException or UnauthorizedAccessException){
+            page=new Uri(Path.GetFullPath(indexPath));
+            if(!File.Exists(page.LocalPath))throw;
+        }
         for(int attempt=0;attempt<2;attempt++){
             token.ThrowIfCancellationRequested();
-            if(attempt==1)await RecoverPage(token);
-            if(!File.Exists(page.LocalPath))continue;
             ulong? target=null;
             var done=new TaskCompletionSource<CoreWebView2NavigationCompletedEventArgs>(TaskCreationOptions.RunContinuationsAsynchronously);
             void Starting(object? _,CoreWebView2NavigationStartingEventArgs e){

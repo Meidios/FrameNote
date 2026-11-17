@@ -35,13 +35,16 @@ internal static class Program
                 core.Navigate("about:blank");
                 await await overlap.Task.WaitAsync(timeout.Token);
                 if(finished[0].Id!=unrelated || finished[0].Status!=CoreWebView2WebErrorStatus.OperationCanceled ||
-                    attempts!=1 || core.DocumentTitle!="review ready")throw new Exception("Unrelated cancellation was not isolated");
+                    attempts!=1 || policy.IsPage(url) || await core.ExecuteScriptAsync("typeof imageView.show")!="\"function\"")throw new Exception("Bundled page did not start independently of unrelated cancellation");
                 cancel=1;attempts=0;await policy.Load(core,timeout.Token);
                 if(attempts!=2 || !policy.IsPage(core.Source) || policy.IsPage(url) ||
                     await core.ExecuteScriptAsync("typeof imageView.show")!="\"function\"")throw new Exception("Bundled recovery UI did not start");
                 cancel=2;attempts=0;
                 try{await policy.Load(core,timeout.Token);throw new Exception("Permanent cancellation reported success");}
                 catch(IOException e) when(attempts==2 && e.Message.Contains("OperationCanceled")){}
+                policy=new ReviewNavigation(file,file);
+                await policy.Load(core,timeout.Token);
+                if(!policy.IsPage(url) || core.DocumentTitle!="review ready")throw new Exception("Read-only scratch fallback failed");
                 Console.WriteLine("PASS: unrelated cancellation arrives first, target-only retry, persistent failure and page identity.");
                 app.Shutdown(0);
             }catch(Exception e){Console.Error.WriteLine(e);app.Shutdown(1);}

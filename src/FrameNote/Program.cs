@@ -81,16 +81,20 @@ public sealed partial class Desk : Window
     }
     Task EnsureReviewWeb()=>webStartup??=InitializeReviewWeb();
     async Task InitializeReviewWeb(){
+        var loading=new System.Windows.Controls.TextBlock{Text="正在打开审阅界面…",HorizontalAlignment=HorizontalAlignment.Center,VerticalAlignment=VerticalAlignment.Center};
         try{
             surfaces.Children.Insert(0,web);
-            web.Visibility=native?.IsVisible==true?Visibility.Hidden:Visibility.Visible;
+            web.Visibility=Visibility.Hidden;
+            surfaces.Children.Insert(0,loading);
             if(web.CoreWebView2==null)
                 await web.EnsureCoreWebView2Async(await CoreWebView2Environment.CreateAsync(null,Path.Combine(root,"Browser"),new CoreWebView2EnvironmentOptions("--autoplay-policy=no-user-gesture-required")));
             var core=web.CoreWebView2 ?? throw new InvalidOperationException("WebView2 初始化未完成。");
             if(!webConfigured){ConfigureReviewWeb(core);webConfigured=true;}
             await reviewPage.Load(core,lifetime.Token);
             webReady=true;
+            if(native?.IsVisible!=true)web.Visibility=Visibility.Visible;
         }catch{surfaces.Children.Remove(web);webStartup=null;throw;}
+        finally{surfaces.Children.Remove(loading);}
     }
     void ConfigureReviewWeb(CoreWebView2 core){
         core.SetVirtualHostNameToFolderMapping("fonts.framenote.invalid",Path.Combine(AppContext.BaseDirectory,"ui","fonts"),CoreWebView2HostResourceAccessKind.Allow);
@@ -124,6 +128,7 @@ public sealed partial class Desk : Window
     async Task Open(string path,string? recordingTitle=null,bool viewer=false) {
         path=Path.GetFullPath(path);var info=new FileInfo(path);
         if(!info.Exists)throw new FileNotFoundException("找不到文件。",path);
+        if(webReady)Send(new{type="status",text="正在打开 "+info.Name+"…"});
         var key=Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes($"{path.ToUpperInvariant()}|{info.Length}|{info.LastWriteTimeUtc.Ticks}")));
         string? nextDraft=recordingTitle==null ? Path.Combine(root,"Drafts",key+".json") : null;
         string nextMedia=path;Review? next=null;
@@ -180,7 +185,7 @@ public sealed partial class Desk : Window
             if(op=="canOpen"){reviewCanOpen=p.GetProperty("value").GetBoolean();return;}
             if(op=="previewFullscreen"){var on=p.GetProperty("on").GetBoolean();if(!on || (!viewingImage && deskLoaded && !pending && web.IsVisible))SetPreviewFullscreen(on);return;}
             if(op=="playbackVolume"){SetPlaybackVolume(p.GetProperty("value").GetInt32());return;}
-            if(op=="catalog"){Catalog();return;}
+            if(op=="catalog"){await Catalog();return;}
             if(op=="meterSources"){MeterSources(p.GetProperty("ids").Deserialize<string[]>()!);return;}
             if(op=="readMeters"){ReadMeterPeaks();return;}
             if(op=="storePicture"){

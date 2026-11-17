@@ -4,6 +4,11 @@
 
 Versions are listed newest first. Earlier entries summarize the offline release history shipped with the app; they do not imply that each version had a public GitHub installer.
 
+## 0.6.7
+
+- 修复直接打开审阅包或 MP4 时，安装目录中的页面响应缓慢导致的约 30 秒空白。启动期间显示加载提示，录制设备改在后台枚举。见 [#1](https://github.com/Meidios/FrameNote/issues/1)。
+- Fixed a roughly 30-second blank window when opening a review package or MP4 if the installed page stalled. Startup now shows a loading message and discovers recording devices in the background. See [#1](https://github.com/Meidios/FrameNote/issues/1).
+
 ## 0.6.6
 
 - 修复审阅页启动时可能误报导航取消的问题。安装目录的首页无法加载时，主程序与审阅包均可从当前用户的临时目录恢复界面。

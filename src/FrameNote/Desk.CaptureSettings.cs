@@ -33,13 +33,20 @@ public sealed partial class Desk
             .Concat(renders.Select(d=>new MixerOutput(d.DeviceName,d.FriendlyName+(MatrixBus(d.FriendlyName,"In")?" · Windows 回环":""),
                 d.IsDefaultDevice && defaultReturn==null,true))).ToArray();
     }
-    void Catalog(){
+    bool catalogPending;
+    async Task Catalog(){
+        if(catalogPending)return;
         static string Handle(IntPtr h)=>h.ToInt64().ToString(CultureInfo.InvariantCulture);
-        Send(new{type="catalog",
-            displays=Recorder.GetDisplays().Select(d=>new{id=d.DeviceName,name=d.FriendlyName+"  "+d.DeviceName}),
-            windows=Recorder.GetWindows().Where(w=>w.Handle!=new System.Windows.Interop.WindowInteropHelper(this).Handle && w.Title!="FrameNote 选区边框").Select(w=>new{id=Handle(w.Handle),name=w.Title}),
-            outputs=MixerOutputs().Select(d=>new{id=d.Id,name=d.Name,preferred=d.Preferred}),
-            inputs=Recorder.GetSystemAudioCaptureDevices().Select(d=>new{id=d.DeviceName,name=d.FriendlyName})});
+        var handle=new System.Windows.Interop.WindowInteropHelper(this).Handle;
+        catalogPending=true;
+        try{
+            var catalog=await Task.Run(()=>new{type="catalog",
+                displays=Recorder.GetDisplays().Select(d=>new{id=d.DeviceName,name=d.FriendlyName+"  "+d.DeviceName}).ToArray(),
+                windows=Recorder.GetWindows().Where(w=>w.Handle!=handle && w.Title!="FrameNote 选区边框").Select(w=>new{id=Handle(w.Handle),name=w.Title}).ToArray(),
+                outputs=MixerOutputs().Select(d=>new{id=d.Id,name=d.Name,preferred=d.Preferred}).ToArray(),
+                inputs=Recorder.GetSystemAudioCaptureDevices().Select(d=>new{id=d.DeviceName,name=d.FriendlyName}).ToArray()},lifetime.Token);
+            Send(catalog);
+        }finally{catalogPending=false;}
     }
     void MeterSources(string[] ids){
         var selected=ids.ToHashSet(StringComparer.Ordinal);
