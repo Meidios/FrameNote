@@ -13,6 +13,7 @@ doc={'version':1,'id':str(uuid.uuid4()),'fileName':'source.mp4','durationUs':100
 with zipfile.ZipFile(package,'w') as z:z.writestr('review.json',json.dumps(doc));z.write(source,'media/source.mp4');z.write(voice,'voice/'+hash+'.m4a')
 def dialog(proc,path):
     d=Desktop(backend='win32').window(process=proc.pid,class_name='#32770');d.wait('ready',timeout=15);time.sleep(.3);d.child_window(class_name='Edit',found_index=0).set_edit_text(str(path));d.child_window(control_id=1).click()
+    if not path.exists() and d.exists(timeout=.5) and d.is_visible():d.child_window(class_name='Edit',found_index=0).type_keys('{ENTER}')
 def drag(p,selector,delta,edge=None):
     el=p.locator(selector);box=el.bounding_box();axis=p.locator('#ticks').bounding_box();duration=p.evaluate('doc.durationUs');x=box['x']+(box['width']-3 if edge=='right' else 3 if edge=='left' else box['width']/2);y=box['y']+box['height']/2
     p.mouse.move(x,y);p.mouse.down();p.mouse.move(x+delta/duration*axis['width'],y,steps=8);p.mouse.up();time.sleep(.15)
@@ -37,7 +38,7 @@ with sync_playwright() as pw:
         p.keyboard.press('Control+Shift+z');assert p.evaluate('doc.notes[0].startUs')==6000000+moved
         # Snap the second video segment back to the first segment's tail.
         drag(p,'#videoClips .editClip:nth-child(2)',-moved+10000)
-        assert p.evaluate('doc.timeline.clips.filter(c=>c.track==="video")[1].startUs')==split
+        assert p.evaluate('doc.timeline.clips.filter(c=>c.track==="video")[1].startUs')==split,(split,moved,p.evaluate('doc.timeline'),p.locator('#status').inner_text())
         # Move again, then detach original audio without moving other tracks.
         drag(p,'#videoClips .editClip:nth-child(2)',2000000)
         p.locator('#linkTracks').click();before=p.evaluate('doc.notes')
