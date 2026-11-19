@@ -18,7 +18,7 @@ public sealed partial class Desk
             Directory.CreateDirectory(scratch);
             var file=Path.Combine(scratch,Guid.NewGuid().ToString("N")+".png");
             try{
-                await Probe.DecodeFrame(media,us,file,default);
+                await Probe.DecodeFrame(await EditedMedia(lifetime.Token),us,file,lifetime.Token);
                 var message=await DeliverVideoFrame(file,save,doc.FileName,TimeSpan.FromTicks(us*10),notes);
                 Send(new{type="status",text=message});
             }finally{File.Delete(file);}

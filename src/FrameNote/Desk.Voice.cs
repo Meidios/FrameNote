@@ -36,7 +36,7 @@ public sealed partial class Desk
             await Probe.Run(lifetime.Token,"ffmpeg","-nostdin","-v","error","-i",wave,"-ac","1","-ar","48000","-c:a","aac","-b:a","128k","-movflags","+faststart",encoded);
             string hash=ReviewVoice.Store(ImageDirectory,await File.ReadAllBytesAsync(encoded));
             var updated=note with{Voice=new(hash,duration),EndUs=Math.Min(doc.DurationUs,note.StartUs+duration)};
-            var review=doc.WithNotes(doc.Notes.Select(n=>n.Id==id?updated:n).ToList());review.Check();
+            var review=doc.WithNotes(doc.Notes.Select(n=>n.Id==id?updated:n).ToList());if(review.Timeline is {} edits){var clips=edits.Clips.Where(c=>c.NoteId!=id).ToList();clips.Add(new(Guid.NewGuid(),"voice",note.StartUs,0,updated.EndUs!.Value-note.StartUs,hash,duration,id));review=review with{Timeline=edits with{Clips=clips}};}review.Check();
             if(draft!=null){ReviewImages.Copy(review,ImageDirectory,draft+".images");Packages.Atomic(draft,s=>JsonSerializer.Serialize(s,review,Review.Json));}
             doc=review;Send(new{type="voiceStored",id,voice=updated.Voice,endUs=updated.EndUs});
         }catch(Exception e){Send(new{type="voiceStored",id,error="语音录制失败："+e.Message});}

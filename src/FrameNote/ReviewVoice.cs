@@ -7,7 +7,7 @@ namespace FrameNote;
 internal static class ReviewVoice
 {
     internal const int MaxBytes=32*1024*1024;
-    internal static string[] Assets(Review doc)=>doc.Notes.Where(n=>n.Voice!=null).Select(n=>n.Voice!.Asset).Distinct().ToArray();
+    internal static string[] Assets(Review doc)=>doc.Notes.Where(n=>n.Voice!=null).Select(n=>n.Voice!.Asset).Concat(doc.Timeline?.Clips.Where(c=>c.Track=="voice").Select(c=>c.Asset!)??[]).Distinct().ToArray();
     internal static string PathFor(string dir,string hash)=>Path.Combine(dir,hash+".m4a");
     internal static string Store(string dir,byte[] bytes,string? expected=null){
         if(bytes.Length<12 || bytes.Length>MaxBytes || !bytes.AsSpan(4,4).SequenceEqual("ftyp"u8))throw new InvalidDataException("语音附件格式或大小无效。");

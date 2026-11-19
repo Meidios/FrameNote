@@ -150,7 +150,7 @@ public sealed partial class Desk : Window
         bool recovered=false;
         if(File.Exists(nextDraft)){
             var saved=JsonSerializer.Deserialize<Review>(await File.ReadAllTextAsync(nextDraft),Review.Json) ?? throw new InvalidDataException("草稿损坏。");
-            saved=saved.WithLegacyNumbers();saved.Check(); if(saved.DurationUs==next.DurationUs && (!path.EndsWith(".framenote",StringComparison.OrdinalIgnoreCase)||saved.Id==next.Id)){next=saved;recovered=true;}
+            saved=saved.WithLegacyNumbers();saved.Check(); if((saved.Timeline?.SourceDurationUs??saved.DurationUs)==(next.Timeline?.SourceDurationUs??next.DurationUs) && (!path.EndsWith(".framenote",StringComparison.OrdinalIgnoreCase)||saved.Id==next.Id)){next=saved;recovered=true;}
         }
         next.Check();
         if(recovered)ReviewImages.Copy(next,nextDraft+".images",ImageDirectory);
@@ -168,8 +168,8 @@ public sealed partial class Desk : Window
         Title=playOriginal?"FrameNote Player - "+doc.FileName:(activeRecording!=null?"临时录屏 · ":"")+doc.FileName+" · FrameNote";
         SetPreviewFullscreen(false);StopTimeline();playbackId=Guid.NewGuid();playbackInfo=infoMedia;deskLoaded=false;preview=null;
         draftRestored=recovered;needsPreview=compatibility;
-        if(webReady)await web.ExecuteScriptAsync("v.pause();v.removeAttribute('src');v.load();ready=false;render()");
-        if(earlyPlayback){native!.BindReview(doc,infoMedia!);}
+        if(webReady)await web.ExecuteScriptAsync("transport.pause();v.removeAttribute('src');v.load();ready=false;render()");
+        if(earlyPlayback){if(doc.Timeline!=null)await ShowPlayer(0);else native!.BindReview(doc,infoMedia!);}
         else if(playOriginal){await ShowPlayer(0);}
         else if(needsPreview){await ShowPlayer(0);if(openedPackage)await EnterReview(0);}
         else {
@@ -237,7 +237,9 @@ public sealed partial class Desk : Window
             }
             if(op=="notes"){
                 var notes=p.GetProperty("notes").Deserialize<List<Note>>(Review.Json) ?? throw new InvalidDataException("批注格式有误。");
-                var updated=doc.WithNotes(notes);updated.Check();
+                var updated=doc.WithNotes(notes);
+                if(p.TryGetProperty("timeline",out var timeline)){var edits=timeline.Deserialize<EditTimeline>(Review.Json);updated=updated with{Timeline=edits,Version=edits==null?(viewingImage?2:1):3,DurationUs=p.GetProperty("durationUs").GetInt64()};}
+                updated.Check();
                 if(draft!=null){ReviewImages.Copy(updated,ImageDirectory,draft+".images");Packages.Atomic(draft,s=>JsonSerializer.Serialize(s,updated,Review.Json));}doc=updated;
                 Send(new{type="status",text=draft!=null?"草稿已保存" :viewingImage?"批注已更新；导出审阅包可保留剪贴板图片和批注。":"批注已更新；要保留这次临时录屏，请导出审阅包。"});return;
             }

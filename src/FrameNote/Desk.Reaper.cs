@@ -55,9 +55,10 @@ public sealed partial class Desk
             var target=live[0];
             var job=Path.Combine(scratch,Guid.NewGuid().ToString("N"));Directory.CreateDirectory(job);
             try{
+                var playable=await EditedMedia(lifetime.Token);
                 string Hex(string s)=>Convert.ToHexString(Encoding.UTF8.GetBytes(s));
-                var lines=new List<string>{Hex(installed),target.MainWindowHandle.ToInt64().ToString("X"),openedPackage?doc.Id.ToString():"-",Hex(media),
-                    doc.DurationUs.ToString(),openedPackage||activeRecording!=null?"copy":"link",Hex(doc.FileName),placement};
+                var lines=new List<string>{Hex(installed),target.MainWindowHandle.ToInt64().ToString("X"),openedPackage?doc.Id.ToString():"-",Hex(playable),
+                    doc.DurationUs.ToString(),openedPackage||activeRecording!=null||doc.Timeline!=null?"copy":"link",Hex(doc.FileName),placement};
                 if(openedPackage)foreach(var n in doc.Notes)lines.Add(n.ReaperRow(true));
                 await File.WriteAllLinesAsync(Path.Combine(job,"request"),lines,new UTF8Encoding(false));
                 var entry=Path.Combine(job,"send.lua");

@@ -4,6 +4,13 @@
 
 Versions are listed newest first. Earlier entries summarize the offline release history shipped with the app; they do not imply that each version had a public GitHub installer.
 
+## 0.8.0
+
+- 新增视频、原声、录音批注和批注轨的非破坏性剪辑，支持分割、两端裁剪、移动、删除与撤销/重做。
+- 默认联动所有轨道，也可独立编辑。删除保留空隙，拖动可吸附相邻边缘，Alt 暂停吸附。
+- 播放、截图、语音、审阅包和 MP4 导出使用剪辑后的时间线。
+- 详见 [0.8.0 发布说明](docs/releases/v0.8.0.md)。
+
 ## 0.7.0
 
 - 进点、出点改为图标，保留 I／O 快捷键。新建批注立即出现在列表和时间线，空白批注也可保存。

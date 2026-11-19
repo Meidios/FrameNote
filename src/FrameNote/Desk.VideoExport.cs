@@ -23,7 +23,9 @@ public sealed partial class Desk
         await Work(async()=>{
             string output=dialog.FileName+"."+Guid.NewGuid().ToString("N")+".tmp.mp4";
             try{
-                await RenderVideo(doc,media,output,cancel.Token);
+                Send(new{type="exportProgress",active=true,text="正在准备剪辑后的画面与声音…"});
+                var input=await EditedMedia(cancel.Token);
+                await RenderVideo(doc,input,output,cancel.Token);
                 cancel.Token.ThrowIfCancellationRequested();File.Move(output,dialog.FileName,true);
                 Send(new{type="status",text="带批注的 MP4 已保存："+dialog.FileName});
             }catch(OperationCanceledException){Send(new{type="status",text="已取消 MP4 导出。"});}
@@ -43,7 +45,7 @@ public sealed partial class Desk
         if(!double.IsFinite(fps)||fps<=0)fps=30;fps=Math.Min(fps,120);
         double displayWidth=sw*sar,scale=Math.Min(1,Math.Min(1920d/displayWidth,1080d/sh));int width=Math.Max(2,(int)(displayWidth*scale)/2*2),height=Math.Max(2,(int)(sh*scale)/2*2);
         var renderer=new VideoAnnotations(review,width,height,sw,sh,ImageDirectory);
-        var info=await Probe.Inspect(input,token);var voices=review.Notes.Where(n=>n.Voice!=null).ToArray();
+        var info=await Probe.Inspect(input,token);var voices=review.Timeline==null?review.Notes.Where(n=>n.Voice!=null).ToArray():Array.Empty<Note>();
         var encode=new List<string>{"-nostdin","-v","error","-f","rawvideo","-pixel_format","bgra","-video_size",$"{width}x{renderer.OutputHeight}","-framerate",Num(fps),"-i","pipe:0","-i",input};
         foreach(var n in voices)encode.AddRange(["-i",ReviewVoice.PathFor(ImageDirectory,n.Voice!.Asset)]);
         var filters=new List<string>();var mix=new List<string>();

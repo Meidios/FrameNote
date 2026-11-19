@@ -61,6 +61,6 @@ public sealed partial class Desk
         if(note?.EndUs is not long end || media==null)return;
         if(end-note.StartUs>30_000_000)throw new InvalidDataException("GIF 最长 30 秒，请缩短区间。");
         var fd=new SaveFileDialog{DefaultExt=".gif",Filter="GIF|*.gif",FileName=Path.GetFileNameWithoutExtension(doc!.FileName)+".gif"};
-        if(fd.ShowDialog(this)==true)await Work(async()=>{await Capture.Gif(media,note.StartUs/1e6,(end-note.StartUs)/1e6,fd.FileName);Send(new{type="status",text="GIF 已保存："+fd.FileName});});
+        if(fd.ShowDialog(this)==true)await Work(async()=>{await Capture.Gif(await EditedMedia(lifetime.Token),note.StartUs/1e6,(end-note.StartUs)/1e6,fd.FileName);Send(new{type="status",text="GIF 已保存："+fd.FileName});});
     }
 }

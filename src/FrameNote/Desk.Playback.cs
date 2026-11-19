@@ -64,7 +64,7 @@ public sealed partial class Desk
         web.Visibility=Visibility.Hidden;
         player.Visibility=Visibility.Visible;
         player.Preparing(false,"");
-        player.SetVolume(volume);await player.Start(media,doc.FileName,us/1000);player.BindReview(doc,playbackInfo);
+        player.SetVolume(volume);var playable=await EditedMedia(lifetime.Token);await player.Start(playable,doc.FileName,us/1000);player.BindReview(doc,doc.Timeline==null?playbackInfo:await Probe.Inspect(playable,lifetime.Token));
     }
     async Task EnterReview(long? initialUs=null){
         if(media==null || doc==null || native==null)return;

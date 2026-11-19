@@ -21,7 +21,18 @@
   viewport.scrollLeft+=after.left+fraction*after.width-x;
  }
  for(const area of [$('trackDesk'),$('timelineTools')])area.addEventListener('wheel',navigate,{passive:false});
- let duration=0,id=null,frameset=[],requested=0;
+ let duration=0,id=null,frameset=[],requested=0,waveData=null;
+ window.paintClipMedia=()=>{
+  const edits=doc?.timeline??window.initialEdits?.value;if(!edits)return;
+  for(const el of document.querySelectorAll('.editClip')){
+   el.querySelector('.clipMedia')?.remove();const c=edits.clips.find(c=>c.id===el.dataset.id);if(!c)continue;
+   const layer=document.createElement('div');layer.className='clipMedia';
+   if(c.track==='video'&&frameset.length){const count=Math.max(1,Math.ceil(el.clientWidth/76));for(let i=0;i<count;i++){const im=new Image();im.draggable=false;im.alt='';const position=(c.sourceUs+(i+.5)*c.durationUs/count)/edits.sourceDurationUs;const src=frameset[Math.min(frameset.length-1,Math.floor(position*frameset.length))];if(src)im.src=src;layer.append(im)}}
+   if(c.track==='audio'&&waveData){const {peaks,stepUs}=waveData,top=[],bottom=[];const count=Math.min(500,Math.max(2,Math.round(el.clientWidth)));for(let i=0;i<count;i++){const at=Math.floor((c.sourceUs+i*c.durationUs/count)/stepUs),h=14*Math.sqrt((peaks[at]??0)/255),x=i*1000/(count-1);top.push(x+','+(16-h));bottom.push(x+','+(16+h))}const graph=svg('svg',{viewBox:'0 0 1000 32',preserveAspectRatio:'none'});graph.append(svg('path',{d:'M'+top.join(' L')+' L'+bottom.reverse().join(' L')+' Z'}));layer.append(graph)}
+   el.prepend(layer);
+  }
+ };
+ window.refreshTimeline=()=>{duration=doc?.durationUs??0;ruler();};
  function ruler(){
   if(!duration||!axis.clientWidth)return;
   const width=axis.clientWidth,ideal=duration*86/width,base=10**Math.floor(Math.log10(ideal));
@@ -51,7 +62,7 @@
  new ResizeObserver(()=>{ruler();scheduleFilm()}).observe(axis);
  function reset(m){
   scale=1;timeline.style.width='100%';viewport.scrollLeft=0;
-  duration=m?.doc.durationUs??0;id=m?.playbackId??null;frameset=[];
+  waveData=null;duration=m?.doc.durationUs??0;id=m?.playbackId??null;frameset=[];
   $('trackDesk').hidden=!id;film.replaceChildren();wave.removeAttribute('d');
   $('filmState').textContent=id?'正在生成缩略图…':'';
   $('waveState').textContent=id?'正在读取波形…':'';
@@ -63,9 +74,9 @@
   if(m.type!=='timelineData'||m.playbackId!==id)return;
   if(m.track==='frame'){
    frameset.length=m.data.count;frameset[m.data.i]=m.data.src;
-   $('filmState').textContent='';scheduleFilm();
+   $('filmState').textContent='';scheduleFilm();window.paintClipMedia();
   }else if(m.track==='wave'){
-   const {peaks,stepUs}=m.data,top=[],bottom=[];
+   waveData=m.data;window.paintClipMedia();const {peaks,stepUs}=m.data,top=[],bottom=[];
    for(let i=0;i<peaks.length;i++){
     const x=Math.min(1000,1000*(i+.5)*stepUs/duration).toFixed(2),h=15*Math.sqrt(peaks[i]/255);
     top.push(x+','+(16-h).toFixed(2));bottom.push(x+','+(16+h).toFixed(2));
@@ -81,7 +92,7 @@
   seekTimeline(Math.max(0,Math.min(1,(e.clientX-r.left)/r.width))*duration);
  }
  for(const track of document.querySelectorAll('.mediaTrack')){
-  track.onpointerdown=e=>{if(e.button||!ready||editing)return;track.setPointerCapture(e.pointerId);scrub(e)};
+  track.onpointerdown=e=>{if(e.target.closest("[data-track]")||e.button||!ready||editing)return;track.setPointerCapture(e.pointerId);scrub(e)};
   track.onpointermove=e=>{if(track.hasPointerCapture(e.pointerId))scrub(e)};
  }
 })();

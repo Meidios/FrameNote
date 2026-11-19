@@ -48,6 +48,9 @@ with sync_playwright() as pw:
         p.keyboard.press('Escape')
         # Only a virtual input receives a generated test signal; never capture a physical microphone.
         wait(p,"$('voiceDevice').options.length>0",timeout=15000)
+        # Also exercise native recording while the independent project clock is active.
+        if os.environ.get('FRAMENOTE_TEST_EDITS'):
+            p.evaluate("()=>{window.audioProbes=[];window.Audio=class extends Audio{constructor(...args){super(...args);audioProbes.push(this)}}}");p.locator('#linkTracks').click();p.locator('#linkTracks').click()
         devices=p.locator('#voiceDevice option').evaluate_all('(els)=>els.map(e=>({id:e.value,name:e.textContent}))')
         p.locator('#voiceDevice').evaluate("el=>{el.add(new Option('Disconnected test input','missing-test-device'));el.value='missing-test-device'}")
         p.locator('#voiceRecord').click()
@@ -71,7 +74,9 @@ with sync_playwright() as pw:
             p.locator('#voicePreview').click();wait(p,'voicePreview && !voicePreview.paused')
             p.evaluate('voicePreview.pause()')
             at(p,0);p.locator('#play').click()
-            wait(p,"(()=>{const a=voicePlayers.get(doc.notes.at(-1).id);return a && !a.paused && Math.abs(a.currentTime-v.currentTime)<.2})()")
+            if os.environ.get('FRAMENOTE_TEST_EDITS'):
+                wait(p,"audioProbes.some(a=>a.src.endsWith(doc.notes.at(-1).voice.asset+'.m4a') && !a.paused && Math.abs(a.currentTime-transport.currentTime)<.2)")
+            else:wait(p,"(()=>{const a=voicePlayers.get(doc.notes.at(-1).id);return a && !a.paused && Math.abs(a.currentTime-v.currentTime)<.2})()")
             p.locator('#play').click()
         package=work/'annotation-tools.framenote';p.locator('#save').click();save_dialog(proc,package)
         wait(p,"!busy && $('status').textContent.startsWith('审阅包已保存')",timeout=15000)

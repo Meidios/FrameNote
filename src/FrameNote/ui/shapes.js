@@ -14,7 +14,7 @@ function drawLiveMagnifiers(group,notes,w,h){
   const r=lensRect(n.shape,w,h),foreign=svg('foreignObject',r),canvas=document.createElement('canvas');
   canvas.width=Math.max(1,Math.ceil(w));canvas.height=Math.max(1,Math.ceil(h));
   // Draw only source pixels; reference pictures and other annotations stay above lenses.
-  try{drawMagnifiers(canvas.getContext('2d'),imageDoc()?$('openedImage'):v,[n],w,h)}catch{}
+  try{if(!imageDoc()&&v.style.visibility==='hidden'){canvas.getContext('2d').fillRect(0,0,w,h);}else drawMagnifiers(canvas.getContext('2d'),imageDoc()?$('openedImage'):v,[n],w,h)}catch{}
   canvas.style.cssText=`position:absolute;left:${-r.x}px;top:${-r.y}px;width:${w}px;height:${h}px`;
   foreign.append(canvas);group.append(foreign);
  }

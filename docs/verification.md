@@ -1,3 +1,14 @@
+# 0.8.0 多轨剪辑验证（2026-11-19）
+
+- `node tests/edit_model.cjs`：联动分割、移动、裁剪、独立删除、保留空隙、头尾吸附、重叠拒绝、Mark 零时长、独立语音移动与恢复裁剪。
+- `tests/edit_timeline_ui.py`：实际 WebView2 鼠标拖动和按钮操作，验证视频/原声/语音/批注联动、独立原声偏移、语音裁剪和删除、联动删除、撤销/重做、PNG 空隙黑帧、审阅包保存恢复、MP4 完整解码、空隙黑画面/静音与后移音频。
+- 设置 `FRAMENOTE_TEST_EDITS=1` 运行 `tests/annotation_tools_ui.py`：实际 CABLE 虚拟输入录音，剪辑模式同步回放、保存恢复、MP4 中 619/1423 Hz 分量验证与取消清理。未使用物理麦克风。
+- `tests/review_ui.py` 与 `tests/annotation_image_ui.py`：原有 29.97/60/VFR 逐帧、批注编辑、草稿、审阅包原片 SHA-256、五种图形、像素标尺和 2× 放大镜回归通过。
+
+UI 脚本参数为程序绝对路径与测试素材目录，需要 Playwright、pywinauto 和 FFmpeg。测试生成独立工作目录；录音测试使用虚拟输入。VLC、GIF 与 REAPER 使用同一个剪辑媒体合成入口，本轮没有重新运行 REAPER 实机工程导入。
+
+下面为既有版本验证记录。
+
 # Development build verification
 
 Tested on Windows x64 with the .NET 8 Desktop Runtime, WebView2, FFmpeg/FFprobe 8.0.1 and an isolated REAPER 6.82 x64 portable instance. The REAPER test starts from a saved project, keeps an existing track and marker, and never edits a working session.

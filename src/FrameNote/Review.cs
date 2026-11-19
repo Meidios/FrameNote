@@ -19,7 +19,7 @@ public record Note(Guid Id, long StartUs, long? EndUs, string Text, Drawing? Sha
         return colors?row+"\t"+DisplayColor()[1..]:row;
     }
 }
-public record Review(int Version, Guid Id, string FileName, long DurationUs, List<Note> Notes, int LastNoteNumber=0)
+public record Review(int Version, Guid Id, string FileName, long DurationUs, List<Note> Notes, int LastNoteNumber=0, EditTimeline? Timeline=null)
 {
     public static readonly JsonSerializerOptions Json = new(JsonSerializerDefaults.Web);
     public static readonly string[] Formats = [".mp4", ".m4v", ".mov", ".webm", ".mkv", ".avi", ".wmv", ".asf", ".mpg", ".mpeg", ".ts", ".m2ts", ".mts", ".flv", ".mxf", ".vob", ".ogv", ".3gp"];
@@ -37,8 +37,10 @@ public record Review(int Version, Guid Id, string FileName, long DurationUs, Lis
         bool image=Version==2;
         if (Id == Guid.Empty ||
             string.IsNullOrWhiteSpace(FileName) || FileName.Length > 255 || FileName.IndexOfAny(Path.GetInvalidFileNameChars()) >= 0 ||
-            (image ? !Desk.ImageFormats.Contains(Extension) || DurationUs!=0 : Version!=1 || !Formats.Contains(Extension) || DurationUs<=0 || DurationUs>604800000000L) || Notes == null || Notes.Count > 10000 || LastNoteNumber<0)
+            (image ? !Desk.ImageFormats.Contains(Extension) || DurationUs!=0 : (Version!=1 && Version!=3) || !Formats.Contains(Extension) || DurationUs<=0 || DurationUs>604800000000L) || Notes == null || Notes.Count > 10000 || LastNoteNumber<0)
             throw new InvalidDataException("不支持的审阅包版本、媒体或时长。");
+        if((Version==3)!=(Timeline!=null))throw new InvalidDataException("剪辑版本与时间线不匹配。");
+        Timeline?.Check(DurationUs);
         HashSet<Guid> ids = [];
         HashSet<int> numbers = [];
         foreach (var n in Notes)
@@ -120,7 +122,9 @@ public static class Packages
     }
     public static void PrepareReaper(string package, string dir, string output,bool colors=false)
     {
-        var (doc, media) = Read(package, dir);
+        var assets=Path.Combine(dir,"assets");
+        var (doc, media) = Read(package, dir,assets);
+        if(doc.Timeline!=null){var edited=Path.Combine(dir,Guid.NewGuid()+".mp4");MediaEdits.Compose(media,doc,assets,edited,default).GetAwaiter().GetResult();media=edited;}
         if(doc.Version==2)throw new InvalidDataException("图片审阅包不含视频时间线，无法导入 REAPER。");
         static string Hex(string s) => Convert.ToHexString(Encoding.UTF8.GetBytes(s));
         Atomic(output, s => {
