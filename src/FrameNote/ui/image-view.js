@@ -73,5 +73,5 @@ const imageView=(()=>{
   stage.addEventListener(event,e=>{if(drag?.id===e.pointerId)stopDrag()});
  img.addEventListener("load",draw);
  new ResizeObserver(()=>{if(!img.hidden)draw()}).observe(stage);
- return {prepare,show,reset,adjacent,upgrade};
+ return {prepare,show,reset,adjacent,upgrade,ensureOriginal(){if(scaled&&!busy)send('fullImage',{id:doc.id})}};
 })();

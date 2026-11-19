@@ -6,10 +6,11 @@ using System.Text.Json;
 
 namespace FrameNote;
 
-public record Drawing(string Kind, double X, double Y, double ToX, double ToY);
-public record Note(Guid Id, long StartUs, long? EndUs, string Text, Drawing? Shape, int Number=0, string? Color=null, List<Picture>? Pictures=null)
+public record Drawing(string Kind, double X, double Y, double ToX, double ToY, double? ThirdX=null, double? ThirdY=null);
+public record Voice(string Asset, long DurationUs);
+public record Note(Guid Id, long StartUs, long? EndUs, string Text, Drawing? Shape, int Number=0, string? Color=null, List<Picture>? Pictures=null, Voice? Voice=null)
 {
-    public string ReaperName() => $"#{Number} {(Text.Length==0?"图片批注":Text.ReplaceLineEndings(" "))}";
+    public string ReaperName() => $"#{Number} {(Text.Length==0?(Voice!=null?"语音批注":Shape!=null?"图形批注":Pictures is {Count:>0}?"图片批注":"批注"):Text.ReplaceLineEndings(" "))}";
     // Legacy notes without an explicit color use the same numbered swatches as the desk.
     static readonly string[] legacyColors=["#ffd886","#8ddcff","#8de3af","#ff9d97","#cfb1ff","#ffaed8"];
     public string DisplayColor() => Color??legacyColors[(Number-1)%legacyColors.Length];
@@ -42,13 +43,17 @@ public record Review(int Version, Guid Id, string FileName, long DurationUs, Lis
         HashSet<int> numbers = [];
         foreach (var n in Notes)
         {
-            if (n == null || n.Id == Guid.Empty || !ids.Add(n.Id) || n.Number<=0 || n.Number>LastNoteNumber || !numbers.Add(n.Number) || n.Text==null || (string.IsNullOrWhiteSpace(n.Text)&&n.Pictures is not {Count:>0}&&!(image && n.Shape!=null)) || n.Text.Length > 4000 ||
+            if (n == null || n.Id == Guid.Empty || !ids.Add(n.Id) || n.Number<=0 || n.Number>LastNoteNumber || !numbers.Add(n.Number) || n.Text==null || n.Text.Length > 4000 ||
                 n.Text.Any(c => char.IsControl(c) && c != '\n' && c != '\r' && c != '\t') ||
                 (image ? n.StartUs!=0 || n.EndUs!=null : n.StartUs < 0 || n.StartUs >= DurationUs || (n.EndUs is long e && (e <= n.StartUs || e > DurationUs))))
                 throw new InvalidDataException("批注时间、文字或编号无效。");
-            if (n.Shape is Drawing d && (!(d.Kind is "arrow" or "box") ||
-                new[]{d.X,d.Y,d.ToX,d.ToY}.Any(x => !double.IsFinite(x) || x < 0 || x > 1)))
+            if (n.Shape is Drawing d && (!(d.Kind is "arrow" or "box" or "line" or "angle" or "ruler" or "magnifier" or "text") ||
+                new[]{d.X,d.Y,d.ToX,d.ToY}.Any(x => !double.IsFinite(x) || x < 0 || x > 1) ||
+                (d.Kind=="angle" && (d.ThirdX==null || d.ThirdY==null)) ||
+                new[]{d.ThirdX,d.ThirdY}.Any(x=>x.HasValue && (!double.IsFinite(x.Value)||x<0||x>1))))
                 throw new InvalidDataException("画面标记无效。");
+            if(n.Voice is {} voice && (image || voice.Asset is not {Length:64} || !voice.Asset.All(c=>char.IsAsciiDigit(c)||c is >= 'a' and <= 'f') || voice.DurationUs<=0 || voice.DurationUs>600_000_000))
+                throw new InvalidDataException("语音批注无效。");
             if(n.Color is {} color && (color.Length!=7 || color[0]!='#' || !color.Skip(1).All(Uri.IsHexDigit)))
                 throw new InvalidDataException("批注颜色无效。");
             if(n.Pictures is { } pics && (pics.Count>16 || pics.Any(p=>p==null||p.Asset is not {Length:64}||

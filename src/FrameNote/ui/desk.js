@@ -10,7 +10,7 @@ function status(t,error=false){$('status').textContent=t;$('status').title=t;$('
 function index(us){let lo=0,hi=frames.length;while(lo<hi){const mid=(lo+hi)>>>1;if(frames[mid]<=us+2)lo=mid+1;else hi=mid}return Math.max(0,lo-1)}
 function seekUs(us,pause=true){if(!ready)return;if(pause)v.pause();const i=index(us);v.currentTime=(frames[i]+((frames[i+1]??doc.durationUs)-frames[i])*.5)/1e6;}
 function stamp(){return frames[index(shown)]}
-function tick(_,m){shown=Math.round(m.mediaTime*1e6);$('clock').textContent=fmt(shown);$('seek').value=shown;$('timeline').style.setProperty('--position',(100*shown/(doc?.durationUs||1))+'%');paint();const n=doc?.notes.find(n=>n.id===loopId);if(n && !v.paused && shown>=n.endUs)v.currentTime=n.startUs/1e6;v.requestVideoFrameCallback(tick)}
+function tick(_,m){window.syncNoteVoices?.();shown=Math.round(m.mediaTime*1e6);$('clock').textContent=fmt(shown);$('seek').value=shown;$('timeline').style.setProperty('--position',(100*shown/(doc?.durationUs||1))+'%');paint();const n=doc?.notes.find(n=>n.id===loopId);if(n && !v.paused && shown>=n.endUs)v.currentTime=n.startUs/1e6;v.requestVideoFrameCallback(tick)}
 v.requestVideoFrameCallback(tick);
 let playbackId=null,entryUs=0,reviewProxy=false,autoPlay=false;
 v.onloadeddata=()=>{if(!doc || imageDoc())return;ready=true;if(entryUs>0){seekUs(entryUs);entryUs=0;}if(autoPlay){autoPlay=false;v.play().catch(e=>{if(e.name!=='AbortError')status('请点击播放：'+e.message,true)})}layout();render();status(temporary?"临时录屏：切换视频或退出后会清理。要保留视频和批注，请导出审阅包。":doc.fileName+(reviewProxy?' · 临时审阅预览':''))};
@@ -48,28 +48,18 @@ function svg(tag,attrs){
 function paint(){
  const g=$('ink'),w=overlay.clientWidth,h=overlay.clientHeight;
  const visible=editing?[editing]:imageDoc()?doc.notes:doc?.notes.filter(n=>n.endUs!==null?shown>=n.startUs-2&&shown<n.endUs:index(shown)===index(n.startUs))??[];
- const key=JSON.stringify([w,h,!!editing,activePicture,visible.map(n=>[n.id,n.number,n.color,n.shape,n.pictures])]);
+ const key=JSON.stringify([w,h,...sourceSize(),!!editing,activePicture,visible.map(n=>[n.id,n.number,n.color,n.text,n.shape,n.pictures]),visible.some(n=>n.shape?.kind==='magnifier')?shown:0]);
  if(key===inkKey)return;inkKey=key;highlight(null);g.replaceChildren();if(!w||!h)return;
  drawInk(g,visible,w,h);
 }
-function drawInk(g,visible,w,h){
+function drawInk(g,visible,w,h,pixels=sourceSize()){
+ drawLiveMagnifiers(g,visible,w,h);
  const badges=[],labels=svg('g',{class:'inkLabels'});
  for(const n of visible){
   const s=n.shape,c=noteColor(n),group=svg('g',{'data-note':n.id,color:c});
   let x=4,y=4;
   if(n.pictures?.length){const p=n.pictures[0];x=p.x*w;y=p.y*h-22;drawPictures(group,n,w,h)}
-  if(s){
-   const x1=s.x*w,y1=s.y*h,x2=s.toX*w,y2=s.toY*h,arrow=s.kind==='arrow';
-   const attrs=arrow?{x1,y1,x2,y2}:{x:Math.min(x1,x2),y:Math.min(y1,y2),width:Math.abs(x2-x1),height:Math.abs(y2-y1)};
-   const shape=svg(arrow?'line':'rect',{...attrs,fill:'none',stroke:c,'stroke-width':3});
-   group.append(shape);
-   if(arrow){
-    const angle=Math.atan2(y2-y1,x2-x1)*180/Math.PI;
-    group.append(svg('path',{d:'M0 0 L-13 -6 L-13 6 Z',transform:'translate('+x2+' '+y2+') rotate('+angle+')',fill:c}));
-   }
-   const hit=shape.cloneNode(false);hit.setAttribute('class','inkHit');group.append(hit);
-   x=(arrow?x1:attrs.x)+3;y=(arrow?y1:attrs.y)-22;
-  }
+  if(s){drawShape(group,n,w,h,pixels);x=Math.min(s.x,s.toX)*w+3;y=Math.min(s.y,s.toY)*h-22;}
   g.append(group);
   const bw=12+8*String('#'+n.number).length,bh=19;
   x=Math.max(1,Math.min(x,w-bw-1));y=Math.max(1,Math.min(y,h-bh-1));
@@ -98,23 +88,36 @@ overlay.addEventListener('click',e=>{
  if(id && (ready||imageDoc()) && !editing && !busy)select(id,{seek:false});
 });
 function pos(e){const r=overlay.getBoundingClientRect(),clamp=x=>Math.min(1,Math.max(0,x));return [clamp((e.clientX-r.x)/r.width),clamp((e.clientY-r.y)/r.height)]}
-overlay.onpointerdown=e=>{if(!tool||!editing)return;e.preventDefault();anchor=pos(e);overlay.setPointerCapture(e.pointerId)};
-overlay.onpointermove=e=>{if(!anchor||!editing)return;const [toX,toY]=pos(e);editing.shape={kind:tool,x:anchor[0],y:anchor[1],toX,toY};paint()};
-overlay.onpointerup=e=>{if(anchor){overlay.onpointermove(e);persistEdit()}anchor=null;setTool(null)};overlay.onpointercancel=()=>{anchor=null;setTool(null)};
-function setTool(t){tool=t;overlay.classList.toggle('drawing',!!t);for(const k of ['arrow','box'])$(k).classList.toggle('active',k===t);if(t)status('在画面上按住并拖动以绘制标记')}
+let anglePoints=[];
+overlay.onpointerdown=e=>{
+ if(!tool||!editing||e.button!==0)return;e.preventDefault();
+ if(tool==='angle'){
+  anglePoints.push(pos(e));
+  if(anglePoints.length===3){const [a,b,c]=anglePoints;editing.shape={kind:'angle',x:a[0],y:a[1],toX:b[0],toY:b[1],thirdX:c[0],thirdY:c[1]};persistEdit();setTool(null);paint()}
+  else status(anglePoints.length===1?'点击角度顶点':'点击第二条边的端点');
+  return;
+ }
+ anchor=pos(e);overlay.setPointerCapture(e.pointerId);
+};
+overlay.onpointermove=e=>{if(!anchor||!editing)return;const [toX,toY]=pos(e);editing.shape={kind:tool,x:anchor[0],y:anchor[1],toX,toY,thirdX:null,thirdY:null};paint()};
+overlay.onpointerup=e=>{if(anchor){overlay.onpointermove(e);persistEdit();anchor=null;setTool(null)}};
+overlay.onpointercancel=()=>{anchor=null;setTool(null);if(editing)editing.shape=structuredClone(doc.notes.find(n=>n.id===editing.id)?.shape??null);paint()};
+function setTool(t){if(imageDoc()&&['ruler','magnifier'].includes(t))imageView.ensureOriginal();tool=t;anglePoints=[];overlay.classList.toggle('drawing',!!t);for(const k of Object.keys(shapeNames))$(k==='ruler'?'toolRuler':k)?.classList.toggle('active',k===t);if(t)status(t==='angle'?'依次点击第一条边端点、顶点、第二条边端点':t==='text'?'拖出文字框，内容使用当前批注文字':t==='magnifier'?'拖出放大区域（2×），随视频实时更新':'在画面上按住并拖动以绘制标记')}
 function refreshDetails(){
+ window.refreshVoice?.();
  const n=editing??doc?.notes.find(x=>x.id===selected);
  $('emptyDetails').hidden=!!n;$('detailFields').hidden=!n;
  if(!n)return;
  $('editTitle').textContent='#'+n.number+'　'+(imageDoc()?'图片批注':(n.endUs===null?'点批注　':'区间批注　')+fmt(n.startUs)+(n.endUs===null?'':' – '+fmt(n.endUs)));
  if(!editing)$('body').value=n.text;
+ $('noteTiming').hidden=imageDoc();if(document.activeElement!==$('noteDuration'))$('noteDuration').value=n.endUs===null?'0':String((n.endUs-n.startUs)/1e6);$('noteDuration').max=(doc.durationUs-n.startUs)/1e6;
  updateColors(n);$('removePicture').hidden=!(n.pictures?.length);
 }
 function closeEditor(){
  activePicture=-1;imageDrag=null;editing=null;lastEditGroup=null;anchor=null;setTool(null);refreshDetails();paint();window.captureButtons?.();
 }
 function begin(note,focus=true){
- if(!(ready||imageDoc())||!note)return;
+ if(!(ready||imageDoc())||!note||window.voiceActive?.())return;
  if(editing?.id!==note.id){
   closeEditor();v.pause();loopId=null;editing=structuredClone(note);
   activePicture=(editing.pictures?.length??0)-1;$('body').value=note.text;refreshDetails();paint();
@@ -123,8 +126,8 @@ function begin(note,focus=true){
 }
 function persistEdit(group=null){
  if(!editing)return;
- const n=structuredClone(editing);n.text=$('body').value.trim();
- if(!n.text&&!n.pictures?.length&&!(imageDoc()&&n.shape))return;
+ editing.text=$('body').value.trim();const n=structuredClone(editing);
+
  const i=doc.notes.findIndex(x=>x.id===n.id);
  if(i>=0&&JSON.stringify(doc.notes[i])===JSON.stringify(n))return;
  const notes=doc.notes.slice();if(i<0)notes.push(n);else notes[i]=n;
@@ -133,8 +136,6 @@ function persistEdit(group=null){
 function finishEdit(){
  if(!editing)return;
  persistEdit();
- if(!$('body').value.trim()&&!editing.pictures?.length&&!(imageDoc()&&editing.shape)&&doc.notes.some(n=>n.id===editing.id))
-  status('批注不能为空，已保留上一次有效内容。要删除批注，请使用卡片上的删除按钮。');
  closeEditor();
 }
 $('detailFields').addEventListener('focusin',()=>{if(!editing)begin(doc?.notes.find(x=>x.id===selected),false)});
@@ -147,7 +148,7 @@ function leaveDetails(e){
 }
 document.addEventListener('pointerdown',leaveDetails,true);
 document.addEventListener('focusin',leaveDetails,true);
-function newNote(a,b){if(doc.lastNoteNumber>=2147483647)return status('本审阅的批注编号已用尽。',true);begin({id:crypto.randomUUID(),number:doc.lastNoteNumber+1,color:palette[doc.lastNoteNumber%palette.length][1],pictures:null,startUs:a,endUs:b,text:'',shape:null})}
+function newNote(a,b){finishEdit();if(doc.lastNoteNumber>=2147483647)return status('本审阅的批注编号已用尽。',true);begin({id:crypto.randomUUID(),number:doc.lastNoteNumber+1,color:palette[doc.lastNoteNumber%palette.length][1],pictures:null,startUs:a,endUs:b,text:'',shape:null,voice:null});persistEdit();rows.get(editing.id)?.scrollIntoView({block:'nearest'})}
 function select(id,{seek=true}={}){
  finishEdit();const n=doc.notes.find(x=>x.id===id);if(!n)return;
  selected=id;loopId=null;if(seek)seekUs(n.startUs);render();rows.get(id)?.scrollIntoView({block:'nearest'});
@@ -217,9 +218,9 @@ function noteBody(text){
  body.append(text.slice(end));return body;
 }
 let reportedCanOpen;
-function render(){refreshDetails();const notes=doc?.notes??[];rows.clear();$('count').textContent=notes.length;$('list').replaceChildren();$('markLanes').replaceChildren();
+function render(){$('exportVideo').disabled=!ready||imageDoc();refreshDetails();const notes=doc?.notes??[];rows.clear();$('count').textContent=notes.length;$('list').replaceChildren();$('markLanes').replaceChildren();
  for(const n of [...notes].sort((a,b)=>a.startUs-b.startUs||a.number-b.number)){
- const b=document.createElement('div'),t=document.createElement('button');rows.set(n.id,b);b.style.setProperty('--note',noteColor(n));b.className='note'+(n.id===selected?' selected':'');b.classList.toggle('hovered',n.id===hovered);t.className='stamp';t.textContent=imageDoc()?'':fmt(n.startUs)+(n.endUs===null?'　点':' – '+fmt(n.endUs));const badge=document.createElement('strong');badge.className='noteNumber';badge.textContent='#'+n.number;t.prepend(badge,' ');b.append(t,noteBody(n.text||(n.shape?.kind==='arrow'?'箭头':n.shape?.kind==='box'?'框选':'图片批注')));b.onclick=()=>select(n.id);const trash=document.createElement('button');trash.type='button';trash.className='noteDelete';trash.title='删除批注 #'+n.number;trash.setAttribute('aria-label',trash.title);
+ const b=document.createElement('div'),t=document.createElement('button');rows.set(n.id,b);b.style.setProperty('--note',noteColor(n));b.className='note'+(n.id===selected?' selected':'');b.classList.toggle('hovered',n.id===hovered);t.className='stamp';t.textContent=imageDoc()?'':fmt(n.startUs)+(n.endUs===null?'　点':' – '+fmt(n.endUs));const badge=document.createElement('strong');badge.className='noteNumber';badge.textContent='#'+n.number;t.prepend(badge,' ');b.append(t,noteBody(n.text||(n.voice?'语音批注':shapeNames[n.shape?.kind]||(n.pictures?.length?'图片批注':'待填写批注'))));b.onclick=()=>select(n.id);const trash=document.createElement('button');trash.type='button';trash.className='noteDelete';trash.title='删除批注 #'+n.number;trash.setAttribute('aria-label',trash.title);
  const icon=svg('svg',{width:16,height:16,'aria-hidden':'true',viewBox:'0 0 24 24'});icon.append(svg('use',{href:'#icon-trash'}));trash.append(icon);
  trash.onclick=e=>{e.stopPropagation();deleteNote(n.id)};b.append(trash);$('list').append(b);
  if(imageDoc())continue;
@@ -239,6 +240,8 @@ function render(){refreshDetails();const notes=doc?.notes??[];rows.clear();$('co
  if(reportedCanOpen!==!$('open').disabled){reportedCanOpen=!$('open').disabled;send('canOpen',{value:reportedCanOpen})}
  $('vlc').disabled=!doc;
  const n=notes.find(x=>x.id===selected);$('loop').disabled=!n||n.endUs===null;window.captureButtons?.();$('loop').classList.toggle('active',!!loopId);$('loop').setAttribute('aria-pressed',String(!!loopId));paint()}
+$('exportVideo').onclick=()=>{finishEdit();v.pause();send('exportVideo')};
+$('cancelVideoExport').onclick=()=>send('cancelVideoExport');
 $('open').onclick=$('start').onclick=()=>send('open');$('save').onclick=()=>send('save',{notes:doc.notes});
 // Pointer capture keeps the release coordinates relative to this WebView even outside its window.
 {
@@ -293,8 +296,14 @@ $('seek').oninput=e=>seekTimeline(+e.target.value);
 $('point').onclick=()=>newNote(imageDoc()?0:stamp(),null);$('inBtn').onclick=()=>{v.pause();inUs=stamp();render()};
 $('outBtn').onclick=()=>{const end=stamp();if(end<=inUs)return status('终点必须晚于起点。',true);const a=inUs;inUs=null;newNote(a,end)};
 $('loop').onclick=()=>{const n=doc.notes.find(x=>x.id===selected);if(loopId){loopId=null;v.pause()}else{loopId=n.id;v.currentTime=n.startUs/1e6;v.play().catch(e=>status(e.message,true))}render()};
+$('noteDuration').onchange=()=>{
+ if(!editing||imageDoc())return;
+ const value=$('noteDuration').value,us=Math.round(Number(value)*1e6),max=doc.durationUs-editing.startUs;
+ if(value===''||!Number.isFinite(us)||us<0||us>max||!$('noteDuration').validity.valid){status('时长须在 0 与剩余视频时长之间。',true);$('noteDuration').value=editing.endUs===null?0:(editing.endUs-editing.startUs)/1e6;return}
+ editing.endUs=us>0?editing.startUs+us:null;persistEdit();refreshDetails();
+};
 $('editor').onsubmit=e=>{e.preventDefault();finishEdit();document.activeElement?.blur()};
-for(const k of ['box','arrow'])$(k).onclick=()=>setTool(k);
+for(const k of Object.keys(shapeNames))$(k==='ruler'?'toolRuler':k).onclick=()=>setTool(k);
 $('clear').onclick=()=>{if(editing){editing.shape=null;setTool(null);persistEdit();paint()}};
 document.onkeydown=e=>{
  if(doc&&!busy&&!e.isComposing&&!e.altKey&&e.ctrlKey&&e.key.toLowerCase()==='z'&&!e.target.closest('#capturePanel')){
@@ -315,7 +324,7 @@ chrome.webview.addEventListener('message',({data:m})=>{if(m.type==='volume'){dis
  }
  if(m.type==='loaded'){$('inBtn').before($('point'));$('pointLabel').textContent='点批注';$('modeLabel').textContent='视频审阅';imageView.reset();document.body.classList.remove('imageView');$('openedImage').hidden=true;$('openedImage').removeAttribute('src');autoPlay=m.autoPlay;displayVolume(m.volume);$('duration').textContent=fmt(m.doc.durationUs);$('rate').value='1';v.defaultPlaybackRate=v.playbackRate=1;playbackId=m.playbackId;entryUs=m.us;reviewProxy=m.proxy;imageBase=m.images;temporary=!!m.temporary;doc=m.doc;frames=m.frames;shown=frames[0];ready=false;inUs=selected=loopId=null;history=[];future=[];closeEditor();$('welcome').hidden=true;$('seek').max=doc.durationUs;$('seek').value=0;$('seek').style.removeProperty('--played');v.src=m.src;render();status(m.recovered?'已恢复本地草稿':'正在打开视频…')}
  else if(m.type==='resumeReview'){seekUs(m.us);status(doc.fileName+(reviewProxy?' · 临时审阅预览':''))}
- else if(['catalog','meters','region','recording','recordShortcut','pictureStored'].includes(m.type))return;
+ else if(['voiceStarted','voiceStored','exportProgress','catalog','meters','region','recording','recordShortcut','pictureStored'].includes(m.type))return;
  else if(m.type==='busy'){busy=m.value;document.body.classList.toggle('busy',busy);if(busy)status('正在处理文件…')}
  else status(m.text,m.type==='error')});render();
 

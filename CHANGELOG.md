@@ -4,6 +4,18 @@
 
 Versions are listed newest first. Earlier entries summarize the offline release history shipped with the app; they do not imply that each version had a public GitHub installer.
 
+## 0.7.0
+
+- 进点、出点改为图标，保留 I／O 快捷键。新建批注立即出现在列表和时间线，空白批注也可保存。
+- 批注详情新增时长编辑：正数将 Mark 转为 Region，0 恢复 Mark。
+- 新增带批注的 MP4 导出：画面保留图形和参考图，下方显示完整批注文字。Mark 默认显示 3 秒，Region 按区间显示；语音批注与原声混合，支持进度显示和取消。
+- 新增语音批注：可选择本机输入设备，跟随视频录制，停止后生成 Region。支持试听、同步回放，并随审阅包保存。
+- 新增线、三点角度、像素距离标尺、2× 实时放大镜和文字框，支持图片及视频导出。
+
+MP4 使用 H.264 CRF 20 与 AAC，原画面最高 1920×1080，文字区另加高度；已高度压缩的原片不保证再次导出一定更小。单段语音上限 10 分钟。含新图形或语音附件的审阅包需要使用新版 FrameNote 打开。
+
+See [the full bilingual release notes](docs/releases/v0.7.0.md) for the English description and export limits.
+
 ## 0.6.7
 
 - 修复直接打开审阅包或 MP4 时，安装目录中的页面响应缓慢导致的约 30 秒空白。启动期间显示加载提示，录制设备改在后台枚举。见 [#1](https://github.com/Meidios/FrameNote/issues/1)。

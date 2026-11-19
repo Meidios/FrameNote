@@ -96,7 +96,10 @@ if __name__ == '__main__':
         try:
             assert notes(page)==before
             page.keyboard.press("m");assert page.locator("#editTitle").inner_text().startswith("#4")
-            page.keyboard.press("Escape");page.locator(".note").first.click()
+            page.keyboard.press("Escape")
+            # Empty notes now persist immediately; Escape finishes editing, not creation.
+            assert any(n["number"]==4 and n["text"]=="" for n in notes(page))
+            page.locator(".note.selected .noteDelete").click();page.locator(".note").first.click()
             wait(page,"Math.abs(shown-doc.notes[0].startUs)<=2")
             assert page.locator("#ink line:not(.inkHit)").count()==1
             assert notes(page)[0]["color"]=="#cfb1ff"

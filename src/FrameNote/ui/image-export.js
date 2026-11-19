@@ -14,11 +14,12 @@ const imageExport=(()=>{
   try{
    const ctx=canvas.getContext('2d');if(!ctx)throw Error('无法创建原尺寸画布。');
    ctx.drawImage(source,0,0,width,height);
+   drawMagnifiers(ctx,source,notes,width,height);
    if(notes.length){
     const unit=Math.max(1,Math.max(width,height)/1600);
     const layer=svg('svg',{width,height,viewBox:'0 0 '+(width/unit)+' '+(height/unit)});
-    drawInk(layer,notes,width/unit,height/unit);
-    layer.querySelectorAll('.inkHit,.pictureHandle,rect[pointer-events="none"]').forEach(e=>e.remove());
+    drawInk(layer,notes,width/unit,height/unit,[width,height]);
+    layer.querySelectorAll('foreignObject,.inkHit,.pictureHandle,rect[pointer-events="none"]').forEach(e=>e.remove());
     layer.querySelectorAll('.inkBadge text').forEach(e=>{e.setAttribute('fill','#15202a');e.setAttribute('font-family','Consolas, monospace');e.setAttribute('font-weight','700');e.setAttribute('font-size','13')});
     // Standalone SVG images cannot load external resources; embed only the referenced attachments.
     const assets=new Map();

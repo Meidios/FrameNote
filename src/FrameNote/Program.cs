@@ -76,7 +76,7 @@ public sealed partial class Desk : Window
             }catch(Exception e){if(!lifetime.IsCancellationRequested)MessageBox.Show(this,e.Message,"FrameNote");}
             finally{openingPlayer=false;initialOpen.TrySetResult();}
         };
-        Closing+=(_,e)=>{if(pending && !openingPlayer) {e.Cancel=true; preparing?.Cancel(); Send(new {type="status",text="请等当前操作结束后再关闭。"});} };
+        Closing+=(_,e)=>{if(voiceCapture!=null || configuring){e.Cancel=true;StopVoice();return;}if(pending && !openingPlayer) {e.Cancel=true; preparing?.Cancel();videoExportCancel?.Cancel(); Send(new {type="status",text="请等当前操作结束后再关闭。"});} };
         Closed+=(_,_)=>{StopTimeline();native?.Dispose();web.Dispose();recordings.Dispose(); try {if(Directory.Exists(scratch))Directory.Delete(scratch,true);} catch(IOException){}};
     }
     Task EnsureReviewWeb()=>webStartup??=InitializeReviewWeb();
@@ -182,6 +182,9 @@ public sealed partial class Desk : Window
     async Task Message(string raw){
         try{
             using var msg=JsonDocument.Parse(raw);var p=msg.RootElement; var op=p.GetProperty("type").GetString();
+            if(op=="voiceStop"){StopVoice();return;}
+            if(op=="cancelVideoExport"){videoExportCancel?.Cancel();return;}
+            if(op=="voiceStart"){await RecordVoice(p);return;}
             if(op=="canOpen"){reviewCanOpen=p.GetProperty("value").GetBoolean();return;}
             if(op=="previewFullscreen"){var on=p.GetProperty("on").GetBoolean();if(!on || (!viewingImage && deskLoaded && !pending && web.IsVisible))SetPreviewFullscreen(on);return;}
             if(op=="playbackVolume"){SetPlaybackVolume(p.GetProperty("value").GetInt32());return;}
@@ -222,6 +225,7 @@ public sealed partial class Desk : Window
                 await Work(()=>SendReaper(screen));return;
             }
             if(doc==null || media==null)return;
+            if(op=="exportVideo"){await ExportVideo();return;}
             if(op=="imageExport"){if(viewingImage)await Work(()=>ExportImage(p.GetProperty("save").GetBoolean()));return;}
             if(op=="snapshot"){await Snapshot(p);return;}
             if(op=="openLink"){

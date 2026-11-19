@@ -43,10 +43,11 @@ internal static class FrameDetails
             foreach(var note in notes.OrderBy(n=>n.Number)){
                 y+=11*unit;double top=y;
                 string range=time==null?"图片批注":note.EndUs is long end?$"区间批注　{Stamp(note.StartUs)} – {Stamp(end)}":$"点批注　{Stamp(note.StartUs)}";
+                string voice=note.Voice is {} audio?$"　·　语音 {audio.DurationUs/1e6:F1} 秒":"";
                 string attachment=note.Pictures is {Count:>0} pics?$"　·　参考图 ×{pics.Count}":"";
-                string shape=note.Shape?.Kind switch{"arrow"=>"　·　箭头","box"=>"　·　框选",_=>""};
+                string shape=note.Shape?.Kind switch{"arrow"=>"　·　箭头","box"=>"　·　框选","line"=>"　·　线","angle"=>"　·　角度","ruler"=>"　·　像素距离","magnifier"=>"　·　2× 放大镜","text"=>"　·　文字框",_=>""};
                 var color=new SolidColorBrush((Color)ColorConverter.ConvertFromString(note.DisplayColor()));
-                Line($"#{note.Number}　{range}{shape}{attachment}",14,Bold,muted,x);
+                Line($"#{note.Number}　{range}{shape}{attachment}{voice}",14,Bold,muted,x);
                 if(!string.IsNullOrWhiteSpace(note.Text)){
                     y+=3*unit;Line(note.Text.ReplaceLineEndings("\n"),17,Normal,Brushes.White,x);
                 }

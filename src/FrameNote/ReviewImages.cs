@@ -25,12 +25,14 @@ internal static class ReviewImages
         return (hash,width,height);
     }
     internal static void Copy(Review review,string from,string to){
+        ReviewVoice.Copy(review,from,to);
         foreach(var hash in Assets(review)){
             var dest=PathFor(to,hash);
             if(!File.Exists(dest))Packages.Atomic(dest,s=>{using var src=File.OpenRead(PathFor(from,hash));src.CopyTo(s);});
         }
     }
     internal static void Write(ZipArchive zip,Review review,string dir){
+        ReviewVoice.Write(zip,review,dir);
         foreach(var hash in Assets(review)){
             using var src=File.OpenRead(PathFor(dir,hash));
             using var dst=zip.CreateEntry("images/"+hash+".png",CompressionLevel.NoCompression).Open();src.CopyTo(dst);
@@ -38,7 +40,8 @@ internal static class ReviewImages
     }
     internal static void Read(ZipArchive zip,Review review,string? dir){
         var hashes=Assets(review);
-        if(zip.Entries.Count!=2+hashes.Length)throw new InvalidDataException("审阅包附件数量不符。");
+        if(zip.Entries.Count!=2+hashes.Length+ReviewVoice.Assets(review).Length)throw new InvalidDataException("审阅包附件数量不符。");
+        ReviewVoice.Read(zip,review,dir);
         foreach(var hash in hashes){
             var e=zip.GetEntry("images/"+hash+".png");
             if(e==null||e.Length is <33 or >MaxBytes)throw new InvalidDataException("审阅包图片缺失或无效。");

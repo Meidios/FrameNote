@@ -44,7 +44,7 @@ public sealed partial class Desk
                 displays=Recorder.GetDisplays().Select(d=>new{id=d.DeviceName,name=d.FriendlyName+"  "+d.DeviceName}).ToArray(),
                 windows=Recorder.GetWindows().Where(w=>w.Handle!=handle && w.Title!="FrameNote 选区边框").Select(w=>new{id=Handle(w.Handle),name=w.Title}).ToArray(),
                 outputs=MixerOutputs().Select(d=>new{id=d.Id,name=d.Name,preferred=d.Preferred}).ToArray(),
-                inputs=Recorder.GetSystemAudioCaptureDevices().Select(d=>new{id=d.DeviceName,name=d.FriendlyName}).ToArray()},lifetime.Token);
+                inputs=Recorder.GetSystemAudioCaptureDevices().Select(d=>new{id=d.DeviceName,name=d.FriendlyName,preferred=d.IsDefaultDevice}).ToArray()},lifetime.Token);
             Send(catalog);
         }finally{catalogPending=false;}
     }
