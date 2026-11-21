@@ -10,7 +10,8 @@ namespace FrameNote;
 public sealed partial class Desk
 {
     sealed record MixerChannel(string Id,int GainDb,bool Muted);
-    sealed record CaptureSettings(string Mode,string Source,int Fps,bool High,MixerChannel[] Outputs,MixerChannel? Mic,bool Cursor);
+    sealed record MixerSettings(MixerChannel[] Outputs,MixerChannel? Mic);
+    sealed record CaptureSettings(string Mode,string Source,int Fps,bool High,MixerSettings Mixer,bool Cursor);
     MMDeviceEnumerator? endpoints;
     readonly Dictionary<string,MMDevice> meterDevices=[];
     string regionDevice="";
@@ -59,7 +60,7 @@ public sealed partial class Desk
     }
     void ReadMeterPeaks(){
         static float Peak(MMDevice? device){try{return device?.AudioMeterInformation.MasterPeakValue??0;}catch(System.Runtime.InteropServices.COMException){return 0;}}
-        Send(new{type="meters",levels=meterDevices.ToDictionary(p=>p.Key,p=>recorder is {} session?session.RecordedPeak(p.Key):Peak(p.Value))});
+        Send(new{type="meters",levels=meterDevices.ToDictionary(p=>p.Key,p=>recorder?.RecordedPeak(p.Key)??voiceCapture?.RecordedPeak(p.Key)??Peak(p.Value))});
     }
     void InitMeters(){
         Closed+=(_,_)=>{foreach(var device in meterDevices.Values)device.Dispose();endpoints?.Dispose();ClearOutline();};
@@ -70,7 +71,7 @@ public sealed partial class Desk
         configuring=true;var previous=WindowState;
         try{
             regionOutline?.Hide();WindowState=WindowState.Minimized;
-            var crop=new CropWindow(device);
+            var crop=new CropWindow(device,shortcuts["cancel"]);
             if(crop.ShowDialog()==true && crop.Crop is {} rect){
                 ResetRegion();area=rect;regionDevice=device;regionMonitor=crop.Bounds;
                 regionOutline=new RegionOutline(regionMonitor,rect);regionOutline.Show();
@@ -95,19 +96,20 @@ public sealed partial class Desk
             }else if(s.Mode!="display")throw new InvalidDataException("采集范围无效。");
             source=display;
         }
+        return new CaptureSession(source,gif?[]:ResolveAudio(s.Mixer),s.Fps,s.High);
+    }
+    static List<CaptureInput> ResolveAudio(MixerSettings mixer){
         List<CaptureInput> audio=[];
-        if(!gif){
-            var outputs=MixerOutputs().ToDictionary(d=>d.Id);
-            foreach(var channel in s.Outputs){
-                if(!outputs.Remove(channel.Id,out var output))throw new InvalidOperationException("输出设备已断开或重复，请刷新采集来源。");
-                audio.Add(new(channel.Id,output.Loopback,channel.GainDb,channel.Muted));
-            }
-            if(s.Mic is {} mic){
-                if(audio.Any(ch=>ch.Id==mic.Id))throw new InvalidOperationException("同一设备不能同时作为系统输出和麦克风录制。");
-                if(!Recorder.GetSystemAudioCaptureDevices().Any(d=>d.DeviceName==mic.Id))throw new InvalidOperationException("麦克风已断开，请刷新采集来源。");
-                audio.Add(new(mic.Id,false,mic.GainDb,mic.Muted));
-            }
+        var outputs=MixerOutputs().ToDictionary(d=>d.Id);
+        foreach(var channel in mixer.Outputs){
+            if(!outputs.Remove(channel.Id,out var output))throw new InvalidOperationException("输出设备已断开或重复，请刷新采集来源。");
+            audio.Add(new(channel.Id,output.Loopback,channel.GainDb,channel.Muted));
         }
-        return new CaptureSession(source,audio,s.Fps,s.High);
+        if(mixer.Mic is {} mic){
+            if(audio.Any(ch=>ch.Id==mic.Id))throw new InvalidOperationException("同一设备不能同时作为系统输出和麦克风录制。");
+            if(!Recorder.GetSystemAudioCaptureDevices().Any(d=>d.DeviceName==mic.Id))throw new InvalidOperationException("麦克风已断开，请刷新采集来源。");
+            audio.Add(new(mic.Id,false,mic.GainDb,mic.Muted));
+        }
+        return audio;
     }
 }

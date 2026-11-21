@@ -14,6 +14,7 @@ sealed class TimestampedAudio : IDisposable
     const int Rate=48000;
     readonly CancellationTokenSource stop=new();
     readonly Task worker;
+    public Task Completion=>worker;
     public string Path { get; }
     public bool HasPackets { get; private set; }
     public int Channels { get; private set; }

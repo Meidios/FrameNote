@@ -14,7 +14,7 @@ DisableProgramGroupPage=yes
 UninstallDisplayIcon={app}\FrameNote.exe
 SetupIconFile=..\src\FrameNote\Assets\FrameNote.ico
 WizardStyle=modern
-Compression=lzma2/fast
+Compression=lzma2/ultra64
 SolidCompression=yes
 OutputBaseFilename=FrameNote-{#AppVer}-win-x64-Setup
 OutputDir=..\artifacts\release
@@ -29,7 +29,10 @@ Name: "zh"; MessagesFile: "ChineseSimplified.isl"
 Name: "en"; MessagesFile: "compiler:Default.isl"
 
 [Files]
-Source: "{#Stage}\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs; Excludes: "*.pdb,*.lib,*.xml"
+; Both apphosts load FrameNote.dll. Reference one source so Inno stores it once.
+Source: "{#Stage}\FrameNote.exe"; DestDir: "{app}"; Flags: ignoreversion
+Source: "{#Stage}\FrameNote.exe"; DestDir: "{app}"; DestName: "FrameNote Player.exe"; Flags: ignoreversion
+Source: "{#Stage}\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs; Excludes: "FrameNote.exe,FrameNote Player.exe,*.pdb,*.lib,*.xml"
 Source: "..\artifacts\installer-deps\MicrosoftEdgeWebview2Setup.exe"; Flags: dontcopy
 
 [Icons]

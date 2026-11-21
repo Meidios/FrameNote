@@ -29,7 +29,7 @@ public sealed partial class Desk
     }
     Probe.Info? playbackInfo;
     string? preview;
-    bool deskLoaded,needsPreview,draftRestored;
+    bool deskLoaded,needsPreview,reviewOnly;
 
     async Task PickVideo(){
         var fd=new OpenFileDialog{Multiselect=true,Filter="图片、视频与审阅包|"+string.Join(";",Review.Formats.Concat(ImageFormats).Append(".framenote").Select(ext=>"*"+ext))};
@@ -37,12 +37,20 @@ public sealed partial class Desk
     }
     NativePlayer EnsurePlayer(){
         if(native==null){
-            native=new NativePlayer(scratch,startingEngine);startingEngine=null;
+            native=new NativePlayer(scratch,startingEngine);native.SetShortcuts(shortcuts);startingEngine=null;
             PreviewKeyDown+=(_,e)=>{
-                if(e.Key==System.Windows.Input.Key.Escape && beforeFullscreen!=null && native.IsVisible){
+                if(shortcuts["cancel"].Contains(Shortcut.From(e)) && native.IsVisible && preparing!=null){
+                    e.Handled=true;preparing.Cancel();
+                }else if(shortcuts["cancel"].Contains(Shortcut.From(e)) && beforeFullscreen!=null && native.IsVisible){
                     e.Handled=true;SetPreviewFullscreen(false);
                 }
             };
+            void PlaylistChecked(object sender,RoutedEventArgs e){
+                if(native.PlaylistButton.IsChecked==expanded)return;
+                TogglePlaylist();native.PlaylistButton.IsChecked=expanded;
+            }
+            native.PlaylistButton.Checked+=PlaylistChecked;
+            native.PlaylistButton.Unchecked+=PlaylistChecked;
             native.VolumeRequested+=SetPlaybackVolume;
             native.FullscreenRequested+=on=>SetPreviewFullscreen(on);
             native.OpenRequested+=async()=>await PickVideo();
@@ -51,7 +59,7 @@ public sealed partial class Desk
             native.PlaybackEnded+=async()=>{
                 int next=playlist.Items.SelectedIndex+1;
                 if(!pending && !configuring && recorder==null && next>0 && next<playlist.Files.Count)
-                    await Work(()=>Open(playlist.Files[next].Path,viewer:true));
+                    await Work(()=>Open(playlist.Files[next].Path,mode:VideoOpenMode.Player));
             };
             surfaces.Children.Add(native);
         }
@@ -70,8 +78,9 @@ public sealed partial class Desk
         if(media==null || doc==null || native==null)return;
         var position=initialUs??native.TimeUs;
         native.Pause();
-        using var cancel=new CancellationTokenSource();preparing=cancel;
-        native.Preparing(true,needsPreview?"正在生成临时审阅预览，可取消并继续播放。":"正在打开逐帧审阅…");
+        using var cancel=CancellationTokenSource.CreateLinkedTokenSource(lifetime.Token);preparing=cancel;
+        bool generate=needsPreview && preview==null;
+        native.Preparing(true,generate?"正在生成批注预览":"正在打开逐帧审阅…",generate);
         try{
             if(!deskLoaded || needsPreview && preview==null)await LoadReview(position,cancel.Token,playOnLoad:initialUs!=null);
             else Send(new{type="resumeReview",us=position});
@@ -82,27 +91,45 @@ public sealed partial class Desk
         catch(Exception e){native.Preparing(false,"无法进入批注："+e.Message);native.ToolTip=e.Message;}
         finally{preparing=null;if(native.Visibility==Visibility.Collapsed)native.Preparing(false,"");}
     }
+    async Task<(long[] Frames,string Preview)> PrepareDeskPreview(string source,Probe.Info info){
+        using var cancel=CancellationTokenSource.CreateLinkedTokenSource(lifetime.Token);
+        preparing=cancel;Send(new{type="preparingPreview",active=true,percent=0});
+        try{
+            var frames=await Probe.Frames(source,info,cancel.Token);
+            return (frames,await CreatePreview(source,info.Duration,frames,cancel.Token));
+        }
+        catch(OperationCanceledException) when(cancel.IsCancellationRequested){throw new OperationCanceledException("已取消生成批注预览。",cancel.Token);}
+        finally{preparing=null;Send(new{type="preparingPreview",active=false});}
+    }
+    void ReportPreviewProgress(int percent){
+        if(native?.IsVisible==true)native.SetPreviewProgress(percent);
+        else Send(new{type="preparingPreview",active=true,percent});
+    }
+    async Task<string> CreatePreview(string source,long durationUs,long[] frames,CancellationToken token){
+        Directory.CreateDirectory(scratch);
+        var dest=Path.Combine(scratch,Guid.NewGuid().ToString("N")+".mp4");
+        try{
+            await Probe.EncodeWithProgress(["-nostdin","-hide_banner","-loglevel","error","-copyts","-start_at_zero","-i",source,
+                "-map","0:v:0","-map","0:a:0?","-vf","pad=ceil(iw/2)*2:ceil(ih/2)*2","-c:v","libx264","-preset","veryfast",
+                "-crf","17","-pix_fmt","yuv420p","-bf","0","-fps_mode","passthrough","-enc_time_base:v","1:1000000","-video_track_timescale","1000000",
+                "-c:a","aac","-b:a","256k","-movflags","+faststart","-avoid_negative_ts","disabled",dest],durationUs,ReportPreviewProgress,token);
+            var encoded=await Probe.Inspect(dest,token);
+            var pts=await Probe.Frames(dest,encoded,token);
+            if(pts.Length!=frames.Length || pts.Where((t,i)=>Math.Abs(t-frames[i])>2).Any())
+                throw new InvalidDataException("预览与原片的帧时间不一致，无法逐帧批注。");
+            token.ThrowIfCancellationRequested();
+            ReportPreviewProgress(100);
+            return dest;
+        }catch{File.Delete(dest);throw;}
+    }
     async Task LoadReview(long us,CancellationToken token,long[]? knownFrames=null,bool playOnLoad=false){
         if(media==null || doc==null || playbackInfo==null)return;
         await EnsureReviewWeb();
         var frames=knownFrames??await Probe.Frames(media,playbackInfo,token);
-        if(needsPreview && preview==null){
-            Directory.CreateDirectory(scratch);
-            var dest=Path.Combine(scratch,Guid.NewGuid().ToString("N")+".mp4");
-            try{
-                await Probe.Run(token,"ffmpeg","-nostdin","-hide_banner","-loglevel","error","-copyts","-start_at_zero","-i",media,
-                    "-map","0:v:0","-map","0:a:0?","-vf","pad=ceil(iw/2)*2:ceil(ih/2)*2","-c:v","libx264","-preset","veryfast",
-                    "-crf","17","-pix_fmt","yuv420p","-bf","0","-fps_mode","passthrough","-enc_time_base:v","1:1000000","-video_track_timescale","1000000",
-                    "-c:a","aac","-b:a","256k","-movflags","+faststart","-avoid_negative_ts","disabled",dest);
-                var encoded=await Probe.Inspect(dest,token);
-                var pts=await Probe.Frames(dest,encoded,token);
-                if(pts.Length!=frames.Length || pts.Where((t,i)=>Math.Abs(t-frames[i])>2).Any())
-                    throw new InvalidDataException("预览与原片的帧时间不一致，已保留 VLC 播放。");
-                preview=dest;
-            }finally{if(preview!=dest)File.Delete(dest);}
-        }
+        if(needsPreview && preview==null)preview=await CreatePreview(media,playbackInfo.Duration,frames,token);
+        token.ThrowIfCancellationRequested();
         Send(new{type="loaded",playbackId,doc,frames,src=new Uri(preview??media).AbsoluteUri,proxy=preview!=null,autoPlay=knownFrames!=null || playOnLoad,volume,us,
-            images=new Uri(ImageDirectory+Path.DirectorySeparatorChar).AbsoluteUri,recovered=draftRestored,temporary=activeRecording!=null});
+            images=new Uri(ImageDirectory+Path.DirectorySeparatorChar).AbsoluteUri,temporary=activeRecording!=null});
         deskLoaded=true;
         _=BuildTimeline(playbackId,media,playbackInfo);
     }

@@ -22,7 +22,8 @@ def until(fn,timeout=12):
 with sync_playwright() as pw:
     proc,page=launch(pw,fixtures/"vfr.mp4")
     try:
-        window=Desktop(backend="uia").window(process=proc.pid,title_re=".*FrameNote$",control_type="Window",found_index=0)
+        handle=Desktop(backend="win32").window(process=proc.pid,title_re=".*FrameNote$",found_index=0).handle
+        window=Desktop(backend="uia").window(handle=handle)
         def btn(name):return window.child_window(auto_id=name,control_type="Button")
         at(page,7)
         page.locator("#vlc").click()

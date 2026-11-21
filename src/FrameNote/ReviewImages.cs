@@ -24,13 +24,6 @@ internal static class ReviewImages
         var dest=PathFor(dir,hash);if(!File.Exists(dest))Packages.Atomic(dest,s=>s.Write(data));
         return (hash,width,height);
     }
-    internal static void Copy(Review review,string from,string to){
-        ReviewVoice.Copy(review,from,to);
-        foreach(var hash in Assets(review)){
-            var dest=PathFor(to,hash);
-            if(!File.Exists(dest))Packages.Atomic(dest,s=>{using var src=File.OpenRead(PathFor(from,hash));src.CopyTo(s);});
-        }
-    }
     internal static void Write(ZipArchive zip,Review review,string dir){
         ReviewVoice.Write(zip,review,dir);
         foreach(var hash in Assets(review)){

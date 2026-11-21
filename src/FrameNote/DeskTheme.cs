@@ -20,7 +20,8 @@ internal static class DeskTheme
         ("card","#252628","#F8FAFC"), ("canvas","#18181A","#EEF2F6"), ("hover","#2A2B2E","#EBEFF4"),
         ("pressed","#18181A","#E2E7ED"), ("edge","#34373C","#AEB7C2"), ("border","#44484E","#929EAB"),
         ("ink","#ECEEF1","#1C232A"), ("muted","#A5AAB2","#495766"), ("disabled","#6E747C","#7B8794"),
-        ("danger","#E04F4F","#C23D43"), ("scroll","#4E5258","#4957664D")];
+        ("danger","#E04F4F","#C23D43"), ("scroll","#4E5258","#4957664D"),
+        ("shortcutSet","#A2D68D","#365E29"), ("shortcutEdge","#587849","#759669")];
 
     internal static void Start(Application app)
     {

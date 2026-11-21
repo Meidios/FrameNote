@@ -25,7 +25,7 @@ public record EditTimeline(long SourceDurationUs,List<EditClip> Clips,bool Linke
 internal static class MediaEdits
 {
     static string N(double n)=>n.ToString("0.######",CultureInfo.InvariantCulture);
-    internal static async Task Compose(string input,Review review,string assets,string output,CancellationToken token){
+    internal static async Task Compose(string input,Review review,string assets,string output,CancellationToken token,Action<int>? report=null){
         review.Check();var timeline=review.Timeline!;
         var info=await Probe.Inspect(input,token);
         using var meta=JsonDocument.Parse(await Probe.Run(token,"ffprobe","-v","error","-select_streams","v:0","-show_entries","stream=width,height,avg_frame_rate,sample_aspect_ratio:stream_side_data=rotation","-of","json",input));
@@ -51,7 +51,12 @@ internal static class MediaEdits
         filters.Add(string.Concat(mix)+$"amix=inputs={mix.Count}:duration=first:normalize=0,alimiter=limit=0.95:level=0:latency=1[audio]");
         // A script avoids Windows command-line limits on large edit lists.
         string script=output+".filters";
-        try{await File.WriteAllTextAsync(script,string.Join(';',filters),token);args.AddRange(["-filter_complex_script",script,"-map","[video]","-map","[audio]","-t",N(review.DurationUs/1e6),"-c:v","libx264","-preset","veryfast","-crf","16","-pix_fmt","yuv420p","-c:a","aac","-b:a","256k","-movflags","+faststart",output]);await Probe.Run(token,"ffmpeg",args.ToArray());}
+        try{
+            await File.WriteAllTextAsync(script,string.Join(';',filters),token);
+            args.AddRange(["-filter_complex_script",script,"-map","[video]","-map","[audio]","-t",N(review.DurationUs/1e6),"-c:v","libx264","-preset","veryfast","-crf","16","-pix_fmt","yuv420p","-c:a","aac","-b:a","256k","-movflags","+faststart",output]);
+            if(report==null)await Probe.Run(token,"ffmpeg",args.ToArray());
+            else await Probe.EncodeWithProgress(args,review.DurationUs,report,token);
+        }
         catch{File.Delete(output);throw;}
         finally{File.Delete(script);}
     }
@@ -60,12 +65,13 @@ internal static class MediaEdits
 public sealed partial class Desk
 {
     string? composedKey,composedMedia;
-    async Task<string> EditedMedia(CancellationToken token){
-        if(doc?.Timeline==null)return media!;
-        string key=media+JsonSerializer.Serialize(new{doc.DurationUs,doc.Timeline},Review.Json);
+    async Task<string> EditedMedia(CancellationToken token,Action<int>? report=null,Review? review=null){
+        review??=doc;
+        if(review?.Timeline==null)return media!;
+        string key=media+JsonSerializer.Serialize(new{review.DurationUs,review.Timeline},Review.Json);
         if(composedKey==key&&composedMedia!=null&&File.Exists(composedMedia))return composedMedia;
         Send(new{type="status",text="正在合成剪辑后的媒体…"});Directory.CreateDirectory(scratch);
-        string output=Path.Combine(scratch,Guid.NewGuid()+".mp4");await MediaEdits.Compose(media!,doc,ImageDirectory,output,token);
+        string output=Path.Combine(scratch,Guid.NewGuid()+".mp4");await MediaEdits.Compose(media!,review,ImageDirectory,output,token,report);
         composedKey=key;composedMedia=output;return output;
     }
 }

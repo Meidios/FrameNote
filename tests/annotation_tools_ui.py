@@ -18,8 +18,7 @@ with sync_playwright() as pw:
     try:
         at(p,0)
         assert p.title()=='FrameNote'
-        for id in ['inBtn','outBtn']:
-            assert p.locator('#'+id+' svg use').count()==1 and not p.locator('#'+id).inner_text()
+        assert p.locator('#inBtn').is_hidden() and p.locator('#outBtn').is_hidden()
         p.locator('#point').click()
         assert len(notes(p))==1 and p.locator('.noteBody').inner_text()=='待填写批注'
         assert p.locator('#marks .point').count()==1
@@ -43,34 +42,64 @@ with sync_playwright() as pw:
             if kind=='magnifier':assert p.locator('#ink foreignObject canvas').count()==1
             p.locator('#point').click();p.locator('#body').fill(kind+' 验证')
         p.keyboard.press('Escape');at(p,0)
-        p.locator('#inBtn').click();at(p,30);p.locator('#outBtn').click()
+        p.locator('#stage').press('i');at(p,30);p.keyboard.press('o')
         assert notes(p)[-1]['endUs']>notes(p)[-1]['startUs']
         p.keyboard.press('Escape')
         # Only a virtual input receives a generated test signal; never capture a physical microphone.
-        wait(p,"$('voiceDevice').options.length>0",timeout=15000)
+        wait(p,"catalog && catalog.inputs.length>0",timeout=15000)
+        assert p.locator('#voiceDevice').count()==0
+        while p.locator('#outputStrips .removeChannel').count():p.locator('#outputStrips .removeChannel').first.click()
+        assert p.locator('#voiceRecord').is_disabled()
         # Also exercise native recording while the independent project clock is active.
         if os.environ.get('FRAMENOTE_TEST_EDITS'):
             p.evaluate("()=>{window.audioProbes=[];window.Audio=class extends Audio{constructor(...args){super(...args);audioProbes.push(this)}}}");p.locator('#linkTracks').click();p.locator('#linkTracks').click()
-        devices=p.locator('#voiceDevice option').evaluate_all('(els)=>els.map(e=>({id:e.value,name:e.textContent}))')
-        p.locator('#voiceDevice').evaluate("el=>{el.add(new Option('Disconnected test input','missing-test-device'));el.value='missing-test-device'}")
+        devices=p.evaluate("catalog.inputs")
+        p.evaluate("""()=>{catalog.inputs.push({id:'missing-test-device',name:'Disconnected test input'});renderMixer()}""")
+        p.locator('#mic').select_option('missing-test-device')
+        before_voice=notes(p)
         p.locator('#voiceRecord').click()
         wait(p,"!voicePending && $('voiceStatus').textContent==='录音失败'",timeout=15000)
+        assert notes(p)==before_voice
         assert not p.locator('header').evaluate('el=>el.inert')
         assert '语音录制失败' in p.locator('#status').text_content()
         cable=next((d for d in devices if d['name'].startswith('CABLE Output')),None)
         if cable:
+            p.locator('#mic').select_option(cable['id'])
+            stage=p.locator('#stage').bounding_box()
+            p.mouse.click(stage['x']+stage['width']*.9,stage['y']+stage['height']*.85,button="right")
+            p.locator('[data-action="voice"]').click()
+            wait(p,'!!voiceRecording')
+            stop_button=p.locator('#annotationTools').get_by_role('button',name='停止语音录制',exact=True)
+            assert stop_button.is_enabled() and stop_button.locator('use').get_attribute('href')=='#icon-stop'
+            assert p.locator('#arrow').evaluate("el=>!!el.closest('[inert]')")
+            p.keyboard.press('Escape')
+            wait(p,'!voicePending && !voiceRecording')
+            assert p.locator('#voiceRecord use').get_attribute('href')=='#icon-mic'
+            assert notes(p)==before_voice
             render=p.evaluate("catalog.outputs.find(d=>d.name.startsWith('CABLE Input'))?.id")
             helper=Path(__file__).resolve().parents[1]/'artifacts/voice-test-helper/CaptureCheck.exe'
             if render and helper.exists():
                 tone=subprocess.Popen([str(helper),'--mixer-tones',render,render],stdin=subprocess.PIPE,stdout=subprocess.PIPE,text=True)
                 assert tone.stdout.readline().strip()=='ready'
-            at(p,0);p.locator('#point').click();p.locator('#body').fill('虚拟输入语音测试')
-            p.locator('#voiceDevice').select_option(cable['id']);p.locator('#voiceRecord').click()
+            at(p,3);record_start=p.evaluate("annotationTime()")
+            p.locator('#voiceRecord').click()
             wait(p,'voiceRecording!==null && !v.paused')
-            time.sleep(1.2);p.locator('#voiceRecord').click();wait(p,'!voicePending && !voiceRecording',timeout=20000)
+            time.sleep(1.2);stop_button.click();wait(p,'!voicePending && !voiceRecording',timeout=20000)
             assert notes(p)[-1]['voice']['durationUs']>100_000
             assert notes(p)[-1]['endUs']>notes(p)[-1]['startUs']
             assert notes(p)[-1]['voice']['durationUs']>1_000_000
+            assert notes(p)[:-1]==before_voice and notes(p)[-1]['startUs']==record_start
+            original=notes(p)[-1]
+            at(p,3)
+            p.locator('.inkBadge[data-note="'+original["id"]+'"]').click(button="right")
+            p.locator('[data-action="duplicate"]').click()
+            copied=notes(p)[-1]
+            assert copied["id"]!=original["id"] and copied["voice"]==original["voice"]
+            p.locator('.inkBadge[data-note="'+copied["id"]+'"]').click(button="right")
+            p.locator('[data-action="delete"]').click()
+            assert notes(p)==before_voice+[original]
+            assert p.evaluate("id=>!doc.timeline?.clips.some(c=>c.noteId===id)",copied["id"])
+            p.locator(".note .stamp").last.click()
             p.locator('#voicePreview').click();wait(p,'voicePreview && !voicePreview.paused')
             p.evaluate('voicePreview.pause()')
             at(p,0);p.locator('#play').click()
@@ -115,8 +144,8 @@ with sync_playwright() as pw:
     try:
         assert notes(p)==expected
         p.locator('#exportVideo').click();cancelled=work/'cancelled.mp4';save_dialog(proc,cancelled)
-        wait(p,"!$('exportProgress').hidden")
-        p.locator('#cancelVideoExport').click();wait(p,'!busy',timeout=20000)
+        wait(p,"$('taskProgress').open")
+        p.locator('#cancelProgress').click();wait(p,'!busy',timeout=20000)
         assert not cancelled.exists() and not list(work.glob('cancelled.mp4.*.tmp.mp4'))
     finally:stop(proc)
 print('PASS: immediate notes, duration conversion, five tools, voice/package roundtrip, MP4 decode and cancellation.',work)

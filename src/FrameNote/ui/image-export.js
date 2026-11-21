@@ -19,7 +19,7 @@ const imageExport=(()=>{
     const unit=Math.max(1,Math.max(width,height)/1600);
     const layer=svg('svg',{width,height,viewBox:'0 0 '+(width/unit)+' '+(height/unit)});
     drawInk(layer,notes,width/unit,height/unit,[width,height]);
-    layer.querySelectorAll('foreignObject,.inkHit,.pictureHandle,rect[pointer-events="none"]').forEach(e=>e.remove());
+    layer.querySelectorAll('.inkHit').forEach(e=>e.remove());
     layer.querySelectorAll('.inkBadge text').forEach(e=>{e.setAttribute('fill','#15202a');e.setAttribute('font-family','Consolas, monospace');e.setAttribute('font-weight','700');e.setAttribute('font-size','13')});
     // Standalone SVG images cannot load external resources; embed only the referenced attachments.
     const assets=new Map();

@@ -25,7 +25,7 @@ public record Review(int Version, Guid Id, string FileName, long DurationUs, Lis
     public static readonly string[] Formats = [".mp4", ".m4v", ".mov", ".webm", ".mkv", ".avi", ".wmv", ".asf", ".mpg", ".mpeg", ".ts", ".m2ts", ".mts", ".flv", ".mxf", ".vob", ".ogv", ".3gp"];
     public string Extension => Path.GetExtension(FileName).ToLowerInvariant();
     // Old v1 documents have no numbers. Assign them once in timeline order;
-    // break ties by identity so package and draft readers agree.
+    // break ties by identity to keep numbers stable when reopening a package.
     public Review WithLegacyNumbers(){
         if(LastNoteNumber!=0 || Notes is not {Count:>0} || !Notes.All(n=>n?.Number==0))return this;
         var numbers=Notes.OrderBy(n=>n.StartUs).ThenBy(n=>n.Id).Select((n,i)=>(n.Id,Number:i+1)).ToDictionary(n=>n.Id,n=>n.Number);

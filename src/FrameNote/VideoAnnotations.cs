@@ -16,22 +16,23 @@ internal sealed class VideoAnnotations
     readonly double unit;
     readonly Dictionary<string,BitmapSource> images=[];
     readonly Dictionary<string,DrawingGroup> layers=[];
-    readonly WriteableBitmap source;
+    WriteableBitmap? source;
     readonly RenderTargetBitmap target;
-    readonly byte[] output;
+    byte[]? output;
     readonly string assets;
     internal int OutputHeight{get;}
     static readonly Typeface Font=new("Microsoft YaHei UI");
-    internal static long End(Note n,long duration)=>Math.Min(duration,n.EndUs??n.StartUs+3_000_000);
+    internal static long End(Note n,long duration)=>Math.Min(duration,n.EndUs??n.StartUs+1_000_000);
     Note[] Active(long us)=>review.Notes.Where(n=>us>=n.StartUs && us<End(n,review.DurationUs)).OrderBy(n=>n.Number).ToArray();
     FormattedText Text(string text,double size,Brush brush,double maxWidth)=>new(text,CultureInfo.GetCultureInfo("zh-CN"),FlowDirection.LeftToRight,Font,size,brush,1){MaxTextWidth=Math.Max(1,maxWidth)};
-    internal VideoAnnotations(Review review,int width,int height,int sourceWidth,int sourceHeight,string assets){
+    internal VideoAnnotations(Review review,int width,int height,int sourceWidth,int sourceHeight,string assets,bool showFooter=true){
         this.review=review;this.width=width;this.height=height;this.sourceWidth=sourceWidth;this.sourceHeight=sourceHeight;this.assets=assets;unit=Math.Max(1,Math.Max(width,height)/1600d);
         double footer=0;
-        foreach(long time in review.Notes.SelectMany(n=>new[]{n.StartUs,End(n,review.DurationUs)}).Append(0).Distinct())footer=Math.Max(footer,Footer(null,Active(time)));
+        if(showFooter)
+            foreach(long time in review.Notes.SelectMany(n=>new[]{n.StartUs,End(n,review.DurationUs)}).Append(0).Distinct())footer=Math.Max(footer,Footer(null,Active(time)));
         if(footer>4096 || (height+footer)*width>32_000_000)throw new InvalidDataException("同时显示的批注文字过多，请缩短文字或拆分批注时间后再导出。");
         OutputHeight=(int)Math.Ceiling((height+footer)/2)*2;
-        source=new(width,height,96,96,PixelFormats.Bgra32,null);target=new(width,OutputHeight,96,96,PixelFormats.Pbgra32);output=new byte[width*OutputHeight*4];
+        target=new(width,OutputHeight,96,96,PixelFormats.Pbgra32);
     }
     double Footer(DrawingContext? dc,Note[] notes){
         if(review.Notes.Count==0)return 0;
@@ -111,18 +112,65 @@ internal sealed class VideoAnnotations
                 labels.Add(()=>{dc.DrawRoundedRectangle(brush,null,badge,3*unit,3*unit);dc.DrawText(tag,new Point(badge.X+4*unit,badge.Y+unit));});
             }
             foreach(var label in labels)label();
-            Footer(dc,notes);
+            if(OutputHeight>height)Footer(dc,notes);
         }
         layer.Freeze();if(layers.Count>128)layers.Clear();layers[key]=layer;return layer;
     }
+    // Each PNG starts on the first output frame whose rounded timestamp reaches the boundary.
+    // FFmpeg holds it over the moving source until the next change.
+    internal async Task<string> WriteOverlayTimeline(string directory,double fps,string rate,CancellationToken token,Action<int> report){
+        long Timestamp(long frame)=>(long)Math.Round(frame*1e6/fps);
+        long FrameAt(long us){
+            long frame=(long)Math.Floor(us*fps/1e6);
+            return Timestamp(frame)<us?frame+1:frame;
+        }
+        var changes=review.Notes.SelectMany(n=>new[]{n.StartUs,End(n,review.DurationUs)})
+            .Append(0L).Where(t=>t<review.DurationUs).Select(FrameAt).Distinct().Order().ToArray();
+        var playlist=new StringBuilder("ffconcat version 1.0\n");
+        bool savedEmpty=false;
+        for(int i=0;i<changes.Length;i++){
+            token.ThrowIfCancellationRequested();
+            var notes=Active(Timestamp(changes[i]));
+            string name=notes.Length==0?"empty.png":$"layer-{i}.png";
+            if(notes.Length!=0 || !savedEmpty){
+                WriteLayerPng(Path.Combine(directory,name),notes);
+                if(notes.Length==0)savedEmpty=true;
+            }
+            playlist.AppendLine($"file {name}").AppendLine($"option framerate {rate}");
+            if(i+1<changes.Length){
+                var duration=(Timestamp(changes[i+1])-Timestamp(changes[i]))/1e6;
+                playlist.AppendLine("duration "+duration.ToString("F6",CultureInfo.InvariantCulture));
+            }
+            // Yield to the WPF dispatcher between rasterizations for progress and cancellation.
+            int percent=(i+1)*100/changes.Length;
+            if(percent>i*100/changes.Length)report(percent);
+            await System.Windows.Threading.Dispatcher.Yield(System.Windows.Threading.DispatcherPriority.Background);
+        }
+        string path=Path.Combine(directory,"layers.ffconcat");
+        await File.WriteAllTextAsync(path,playlist.ToString(),new UTF8Encoding(false),token);
+        return path;
+    }
+    internal void WriteLayerPng(string path,Note[] notes){
+        var visual=new DrawingVisual();
+        using(var context=visual.RenderOpen())context.DrawDrawing(Layer(notes));
+        target.Clear();target.Render(visual);
+        var png=new PngBitmapEncoder();png.Frames.Add(BitmapFrame.Create(target));
+        using var file=File.Create(path);png.Save(file);
+    }
+    internal static (Rect Target,Int32Rect Source) LensBounds(Drawing s,int width,int height){
+        var rect=new Rect(new Point(s.X*width,s.Y*height),new Point(s.ToX*width,s.ToY*height));
+        int x=Math.Clamp((int)(rect.X+rect.Width/4),0,width-1),y=Math.Clamp((int)(rect.Y+rect.Height/4),0,height-1);
+        return (rect,new Int32Rect(x,y,Math.Clamp((int)(rect.Width/2),1,width-x),Math.Clamp((int)(rect.Height/2),1,height-y)));
+    }
     internal byte[] Render(byte[] pixels,long us){
+        source??=new(width,height,96,96,PixelFormats.Bgra32,null);
+        output??=new byte[width*OutputHeight*4];
         source.WritePixels(new Int32Rect(0,0,width,height),pixels,width*4,0);var notes=Active(us);var visual=new DrawingVisual();
         using(var dc=visual.RenderOpen()){
             dc.DrawImage(source,new Rect(0,0,width,height));
             foreach(var n in notes.Where(n=>n.Shape?.Kind=="magnifier")){
-                var s=n.Shape!;var rect=new Rect(new Point(s.X*width,s.Y*height),new Point(s.ToX*width,s.ToY*height));
-                int x=Math.Clamp((int)(rect.X+rect.Width/4),0,width-1),y=Math.Clamp((int)(rect.Y+rect.Height/4),0,height-1);
-                var crop=new CroppedBitmap(source,new Int32Rect(x,y,Math.Clamp((int)(rect.Width/2),1,width-x),Math.Clamp((int)(rect.Height/2),1,height-y)));dc.DrawImage(crop,rect);
+                var (rect,bounds)=LensBounds(n.Shape!,width,height);
+                dc.DrawImage(new CroppedBitmap(source,bounds),rect);
             }
             dc.DrawDrawing(Layer(notes));
         }

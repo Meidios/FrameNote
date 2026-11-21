@@ -8,21 +8,33 @@ function drawMagnifiers(ctx,source,notes,w,h){
   ctx.drawImage(source,(r.x+r.width/4)*sw/w,(r.y+r.height/4)*sh/h,r.width*sw/w/2,r.height*sh/h/2,r.x,r.y,r.width,r.height);
  }
 }
+let liveMagnifiers=[];
+function refreshLiveMagnifiers(){
+ for(const {ctx,rect,w,h} of liveMagnifiers){
+  const source=imageDoc()?$('openedImage'):v;
+  const sw=source.videoWidth||source.naturalWidth,sh=source.videoHeight||source.naturalHeight;
+  const {x,y,width,height}=rect,canvas=ctx.canvas;
+  ctx.clearRect(0,0,canvas.width,canvas.height);
+  if(!imageDoc()&&v.style.visibility==='hidden'){ctx.fillRect(0,0,canvas.width,canvas.height);continue}
+  if(sw&&sh)ctx.drawImage(source,(x+width/4)*sw/w,(y+height/4)*sh/h,width*sw/w/2,height*sh/h/2,0,0,canvas.width,canvas.height);
+ }
+}
 function drawLiveMagnifiers(group,notes,w,h){
  for(const n of notes){
   if(n.shape?.kind!=='magnifier')continue;
   const r=lensRect(n.shape,w,h),foreign=svg('foreignObject',r),canvas=document.createElement('canvas');
-  canvas.width=Math.max(1,Math.ceil(w));canvas.height=Math.max(1,Math.ceil(h));
-  // Draw only source pixels; reference pictures and other annotations stay above lenses.
-  try{if(!imageDoc()&&v.style.visibility==='hidden'){canvas.getContext('2d').fillRect(0,0,w,h);}else drawMagnifiers(canvas.getContext('2d'),imageDoc()?$('openedImage'):v,[n],w,h)}catch{}
-  canvas.style.cssText=`position:absolute;left:${-r.x}px;top:${-r.y}px;width:${w}px;height:${h}px`;
+  canvas.width=Math.ceil(r.width);canvas.height=Math.ceil(r.height);
+  canvas.style.cssText='width:100%;height:100%;display:block';
+  liveMagnifiers.push({ctx:canvas.getContext('2d'),rect:r,w,h});
   foreign.append(canvas);group.append(foreign);
  }
+ refreshLiveMagnifiers();
 }
 function drawShape(group,n,w,h,pixels=sourceSize()){
  const s=n.shape,c=noteColor(n),x1=s.x*w,y1=s.y*h,x2=s.toX*w,y2=s.toY*h;
  const r=lensRect(s,w,h),base={fill:'none',stroke:c,'stroke-width':3,'stroke-linecap':'round','stroke-linejoin':'round'};
  const line=(a,b,d,e)=>{const el=svg('line',{x1:a,y1:b,x2:d,y2:e,...base});group.append(el);return el};
+ function addHitArea(shape){const hit=shape.cloneNode(false);hit.setAttribute('class','inkHit');hit.setAttribute('fill','none');group.append(hit)}
  function label(text,x,y){const el=svg('text',{x,y,fill:c,stroke:'#17191d','stroke-width':3,'paint-order':'stroke','font-family':'Microsoft YaHei UI, sans-serif','font-size':14,'font-weight':600});el.textContent=text;group.append(el)}
  let shape;
  if(['arrow','line','ruler','angle'].includes(s.kind)){
@@ -34,7 +46,7 @@ function drawShape(group,n,w,h,pixels=sourceSize()){
    const [sw,sh]=pixels;label(Math.hypot((s.toX-s.x)*sw,(s.toY-s.y)*sh).toFixed(1)+' px',(x1+x2)/2+4,(y1+y2)/2-8);
   }
   if(s.kind==='angle'&&s.thirdX!=null){
-   const x3=s.thirdX*w,y3=s.thirdY*h;line(x2,y2,x3,y3);
+   const x3=s.thirdX*w,y3=s.thirdY*h;addHitArea(line(x2,y2,x3,y3));
    const a=Math.atan2(y1-y2,x1-x2),b=Math.atan2(y3-y2,x3-x2),delta=Math.atan2(Math.sin(b-a),Math.cos(b-a));
    const radius=Math.min(24,Math.hypot(x1-x2,y1-y2)/2,Math.hypot(x3-x2,y3-y2)/2);
    group.append(svg('path',{d:`M${x2+radius*Math.cos(a)} ${y2+radius*Math.sin(a)} A${radius} ${radius} 0 0 ${delta>=0?1:0} ${x2+radius*Math.cos(b)} ${y2+radius*Math.sin(b)}`,...base}));
@@ -54,5 +66,5 @@ function drawShape(group,n,w,h,pixels=sourceSize()){
    group.append(text);
   }
  }
- if(shape){const hit=shape.cloneNode(false);hit.setAttribute('class','inkHit');hit.setAttribute('fill','none');group.append(hit)}
+ if(shape){shape.classList.add('inkShape');addHitArea(shape)}
 }

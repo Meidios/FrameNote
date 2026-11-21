@@ -1,0 +1,90 @@
+<Window x:Class="FrameNote.ShortcutDialog" x:ClassModifier="internal"
+ xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+ xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+ Title="设置 · FrameNote" Width="680" FontSize="14" MinWidth="500" MinHeight="390" WindowStartupLocation="CenterOwner">
+ <Window.Resources>
+  <ResourceDictionary>
+   <ResourceDictionary.MergedDictionaries><ResourceDictionary Source="ShortcutIcons.xaml"/></ResourceDictionary.MergedDictionaries>
+   <Style x:Key="ActionRow" TargetType="Button" BasedOn="{StaticResource {x:Type Button}}">
+    <Setter Property="HorizontalContentAlignment" Value="Stretch"/><Setter Property="Padding" Value="12,5"/>
+    <Setter Property="Background" Value="{DynamicResource bg}"/><Setter Property="BorderBrush" Value="{DynamicResource edge}"/>
+    <Setter Property="Margin" Value="0,0,4,5"/><Setter Property="MinHeight" Value="38"/>
+   </Style>
+   <Style x:Key="ModifierChip" TargetType="CheckBox">
+    <Setter Property="Foreground" Value="{DynamicResource muted}"/>
+    <Setter Property="Margin" Value="0,0,6,0"/>
+    <Setter Property="MinWidth" Value="52"/>
+    <Setter Property="Template">
+     <Setter.Value><ControlTemplate TargetType="CheckBox">
+      <Border x:Name="Face" Padding="8,3" CornerRadius="4" BorderThickness="1" Background="{DynamicResource bg}" BorderBrush="{DynamicResource border}">
+       <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
+      </Border>
+      <ControlTemplate.Triggers>
+       <Trigger Property="IsChecked" Value="True">
+        <Setter TargetName="Face" Property="Background" Value="{DynamicResource selection}"/>
+        <Setter TargetName="Face" Property="BorderBrush" Value="{DynamicResource link}"/>
+        <Setter Property="Foreground" Value="{DynamicResource link}"/>
+       </Trigger>
+       <Trigger Property="IsMouseOver" Value="True"><Setter TargetName="Face" Property="BorderBrush" Value="{DynamicResource link}"/></Trigger>
+       <Trigger Property="IsKeyboardFocused" Value="True"><Setter TargetName="Face" Property="BorderBrush" Value="{DynamicResource ink}"/></Trigger>
+      </ControlTemplate.Triggers>
+     </ControlTemplate></Setter.Value>
+    </Setter>
+   </Style>
+  </ResourceDictionary>
+ </Window.Resources>
+ <Grid>
+  <DockPanel x:Name="SettingsPage" Margin="20,14,16,14">
+   <DockPanel DockPanel.Dock="Top" Margin="0,0,4,12">
+    <Button DockPanel.Dock="Right" Content="打开默认应用设置" Padding="12,5" Click="OpenDefaultApps"/>
+    <TextBlock VerticalAlignment="Center" FontSize="16" FontWeight="SemiBold" Text="默认应用"/>
+   </DockPanel>
+   <DockPanel DockPanel.Dock="Top" Margin="0,0,4,2">
+    <TextBlock FontSize="21" FontWeight="SemiBold" Text="快捷键"/>
+   </DockPanel>
+   <DockPanel DockPanel.Dock="Bottom" Margin="0,10,4,0">
+    <StackPanel DockPanel.Dock="Right" Orientation="Horizontal">
+     <Button Content="取消" MinWidth="64" Margin="0,0,6,0" Click="CancelSettings"/>
+     <Button Content="保存" MinWidth="68" Click="SaveSettings"/>
+    </StackPanel>
+    <Button Content="恢复默认" Padding="10,4" HorizontalAlignment="Left" Click="ResetAll"/>
+   </DockPanel>
+   <TextBlock x:Name="SaveError" DockPanel.Dock="Bottom" Foreground="{DynamicResource danger}" TextWrapping="Wrap" Visibility="Collapsed"/>
+   <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
+    <StackPanel x:Name="Groups"/>
+   </ScrollViewer>
+  </DockPanel>
+  <Grid x:Name="Overlay" Visibility="Collapsed" Background="#99000000" KeyboardNavigation.TabNavigation="Cycle" KeyboardNavigation.ControlTabNavigation="Cycle">
+   <Border MaxWidth="460" VerticalAlignment="Center" Margin="20" Padding="18,15" CornerRadius="9"
+    Background="{DynamicResource panel}" BorderBrush="{DynamicResource border}" BorderThickness="1">
+    <DockPanel>
+     <DockPanel DockPanel.Dock="Top" Margin="0,0,0,12">
+      <Button x:Name="CloseEditorButton" DockPanel.Dock="Right" Width="28" Height="26" Padding="0" ToolTip="关闭" AutomationProperties.Name="关闭配置" Click="CancelEditor"/>
+      <TextBlock x:Name="EditorTitle" FontSize="16" FontWeight="SemiBold" VerticalAlignment="Center" TextWrapping="Wrap"/>
+     </DockPanel>
+     <StackPanel DockPanel.Dock="Bottom" Margin="0,14,0,0">
+      <TextBlock x:Name="EditorError" Foreground="{DynamicResource danger}" TextWrapping="Wrap" Margin="0,0,0,8" Visibility="Collapsed"/>
+      <StackPanel Orientation="Horizontal" HorizontalAlignment="Right">
+       <Button Content="取消" AutomationProperties.AutomationId="cancelBinding" Width="64" Margin="0,0,6,0" Click="CancelEditor"/>
+       <Button x:Name="ApplyBinding" Content="确定" Width="72" Background="{DynamicResource selection}" BorderBrush="{DynamicResource link}" Click="ConfirmEditor"/>
+      </StackPanel>
+     </StackPanel>
+     <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
+      <StackPanel>
+       <StackPanel x:Name="BindingRows"/>
+       <StackPanel x:Name="GestureOptions" Visibility="Collapsed" Margin="0,4,0,10">
+        <TextBlock Text="修饰键" Foreground="{DynamicResource muted}" Margin="0,0,0,5"/>
+        <StackPanel x:Name="ModifierChoices" Orientation="Horizontal"/>
+        <TextBlock x:Name="GestureCaption" Text="鼠标操作" Foreground="{DynamicResource muted}" Margin="0,9,0,5"/>
+        <ComboBox x:Name="MouseChoice" SelectionChanged="GestureChanged" AutomationProperties.Name="鼠标操作"/>
+       </StackPanel>
+       <Button x:Name="AddBinding" Click="AddKey" Padding="8,5" AutomationProperties.Name="添加快捷键">
+        <StackPanel Orientation="Horizontal"><ContentControl x:Name="PlusIcon" Margin="0,0,6,0"/><TextBlock Text="添加快捷键"/></StackPanel>
+       </Button>
+      </StackPanel>
+     </ScrollViewer>
+    </DockPanel>
+   </Border>
+  </Grid>
+ </Grid>
+</Window>

@@ -21,7 +21,7 @@ with zipfile.ZipFile(package,"w") as z:
 with sync_playwright() as pw:
     proc,page=launch(pw,package)
     try:
-        wait(page,"document.querySelector('#filmstrip img[src]')?.naturalWidth>0 && document.querySelector('#waveform path').hasAttribute('d')",timeout=15000)
+        wait(page,"document.querySelector('#sourceFrames image[href]') && document.querySelector('#sourceWave').hasAttribute('d')",timeout=15000)
         assert not page.locator("#zoom").count()
         page.evaluate("v.pause()")
         # Click the real ruler, film and waveform while paused and while playing.
@@ -34,7 +34,9 @@ with sync_playwright() as pw:
                 wait(page,"playing=>!v.seeking && v.paused!==playing && v.currentTime<0.8",playing)
                 track=page.locator(selector)
                 bounds=track.bounding_box()
-                track.click(position={"x":int(bounds["width"]*.6),"y":int(bounds["height"]/2)})
+                # The clip body selects/drags the clip. The exposed track margin scrubs.
+                y=int(bounds["height"]/2) if selector=="#seek" else 0
+                track.click(position={"x":int(bounds["width"]*.6),"y":y})
                 wait(page,"playing=>!v.seeking && v.paused!==playing && v.currentTime>1.5 && v.currentTime<2.2",playing)
                 position=page.evaluate("v.currentTime")
                 if playing:
@@ -131,7 +133,15 @@ with sync_playwright() as pw:
             page.mouse.move(*spot(.9,.5))
             assert selected_number()==f"#{num}" and page.locator(".note.hovered").count()==0
             assert page.locator('#marks [aria-pressed=true]').inner_text()==f"#{num}"
-        page.locator(".inkBadge").filter(has_text="#21").click()
+        # Changing focus while editing used to redraw the pressed badge before click.
+        for i,number in enumerate((21,22,19,21)):
+            if i:
+                page.locator("#body").focus()
+            page.locator(".inkBadge").filter(has_text=f"#{number}").click()
+            assert selected_number()==f"#{number}"
+            assert page.locator('#marks [aria-pressed=true]').inner_text()==f"#{number}"
+            assert page.locator("#body").input_value()==notes[number-1]["text"]
+            assert page.evaluate("v.currentTime")==position
         page.mouse.move(*spot(.705,.5))
         assert page.locator(".note.hovered .noteNumber").inner_text()=="#20"
         assert selected_number()=="#21"

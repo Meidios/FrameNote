@@ -13,16 +13,42 @@ public sealed partial class Desk
     readonly DispatcherTimer gifLimit=new(){Interval=TimeSpan.FromSeconds(29)};
     [System.Runtime.InteropServices.DllImport("user32.dll")]static extern bool RegisterHotKey(IntPtr hwnd,int id,uint mods,uint vk);
     [System.Runtime.InteropServices.DllImport("user32.dll")]static extern bool UnregisterHotKey(IntPtr hwnd,int id);
+    readonly Dictionary<int,Shortcut> recordHotkeys=new();
+    void UpdateRecordHotkey(Shortcut[] bindings,Shortcut[]? previouslyConfigured=null){
+        var hwnd=new WindowInteropHelper(this).Handle;
+        if(hwnd==IntPtr.Zero)return;
+        var added=new List<int>();
+        int id=0x464e;
+        foreach(var binding in bindings.Except(recordHotkeys.Values).ToArray()){
+            while(recordHotkeys.ContainsKey(id))id++;
+            if(id<0xc000 && RegisterHotKey(hwnd,id,0x4000u|(uint)binding.Mods,(uint)binding.Vk)){
+                recordHotkeys.Add(id,binding);added.Add(id);
+            }else if(previouslyConfigured!=null && !previouslyConfigured.Contains(binding)){
+                foreach(int fresh in added){UnregisterHotKey(hwnd,fresh);recordHotkeys.Remove(fresh);}
+                throw new InvalidOperationException($"无法注册全局录屏快捷键 {binding.Label(InputKind.Keyboard)}，请换一个。");
+            }
+        }
+        foreach(var old in recordHotkeys.Where(p=>!bindings.Contains(p.Value)).ToArray()){
+            UnregisterHotKey(hwnd,old.Key);recordHotkeys.Remove(old.Key);
+        }
+    }
     void InitCapture(){
         InitMeters();
         SourceInitialized+=(_,_)=>{
             IntPtr hwnd=new WindowInteropHelper(this).Handle;
-            bool registered=RegisterHotKey(hwnd,0x464e,0x4000|2|1,0x78);
+            UpdateRecordHotkey(shortcuts["record"]);
             HwndSource.FromHwnd(hwnd).AddHook((IntPtr h,int m,IntPtr wp,IntPtr lp,ref bool handled)=>{
-                if(m==0x0312 && wp.ToInt32()==0x464e && web.CoreWebView2!=null && !pending && !configuring){handled=true;if(recorder!=null)StopCapture();else Send(new{type="recordShortcut"});}
+                if(m==0x0312 && recordHotkeys.TryGetValue(wp.ToInt32(),out var pressed)){
+                    handled=true;
+                    var latest=shortcutStore.Read();
+                    if(!latest["record"].Contains(pressed)){ApplyShortcuts(latest);return IntPtr.Zero;}
+                    if(web.CoreWebView2!=null && IsEnabled && OwnedWindows.Count==0 && !pending && !configuring){
+                        if(recorder!=null)StopCapture();else Send(new{type="recordShortcut"});
+                    }
+                }
                 return IntPtr.Zero;
             });
-            if(registered)Closed+=(_,_)=>UnregisterHotKey(hwnd,0x464e);
+            Closed+=(_,_)=>{foreach(int id in recordHotkeys.Keys)UnregisterHotKey(hwnd,id);};
         };
         gifLimit.Tick+=(_,_)=>StopCapture();
         Closing+=(_,e)=>{if(recorder!=null){e.Cancel=true;StopCapture();}};
@@ -36,7 +62,8 @@ public sealed partial class Desk
             string title="录屏 "+DateTime.Now.ToString("yyyy-MM-dd HH-mm-ss")+".mp4";
             var r=Session(settings,gif);recorder=r;stopping=false;
             r.Start(clip);_=CompleteCapture(r,clip,title,gif);Send(new{type="recording",value=true,gif});
-            Send(new{type="status",text="录制中　·　点击「停止录制」或按 Ctrl+Alt+F9 结束"});if(gif)gifLimit.Start();
+            var keys=shortcuts["record"];
+            Send(new{type="status",text="录制中　·　点击「停止录制」"+(keys.Length==0?"":$"或按 {keys.Label(InputKind.Keyboard)} 结束")});if(gif)gifLimit.Start();
         }catch(Exception e){Release();Send(new{type="error",text=e.Message});}
         finally{if(recorder==null)ClearOutline();configuring=false;}
     }

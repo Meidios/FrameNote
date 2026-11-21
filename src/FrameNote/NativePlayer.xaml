@@ -2,17 +2,51 @@
  <UserControl.Resources>
   <ResourceDictionary>
    <ResourceDictionary.MergedDictionaries><ResourceDictionary Source="TransportIcons.xaml"/></ResourceDictionary.MergedDictionaries>
+   <Style x:Key="HoverLight" TargetType="Border">
+    <Setter Property="IsHitTestVisible" Value="False"/><Setter Property="CornerRadius" Value="5"/>
+    <Setter Property="Margin" Value="2"/>
+    <Setter Property="Background" Value="{DynamicResource ink}"/>
+    <Setter Property="OpacityMask"><Setter.Value><RadialGradientBrush MappingMode="Absolute" Center="-100,-100" GradientOrigin="-100,-100" RadiusX="64" RadiusY="64"><GradientStop Color="#2BFFFFFF"/><GradientStop Color="#00FFFFFF" Offset="1"/></RadialGradientBrush></Setter.Value></Setter>
+   </Style>
    <Style TargetType="Button" BasedOn="{StaticResource {x:Type Button}}"><Setter Property="Padding" Value="12,6"/><Setter Property="Margin" Value="4,0"/></Style>
    <Style x:Key="ToolButton" TargetType="Button" BasedOn="{StaticResource {x:Type Button}}">
     <Setter Property="Width" Value="35"/><Setter Property="Height" Value="34"/><Setter Property="Padding" Value="0"/><Setter Property="Margin" Value="1,0"/>
+    <Setter Property="ToolTipService.IsEnabled" Value="False"/>
     <Setter Property="AutomationProperties.Name" Value="{Binding ToolTip,RelativeSource={RelativeSource Self}}"/>
     <Setter Property="ContentTemplate"><Setter.Value><DataTemplate><Canvas Width="20" Height="20"><Path Data="{Binding}" Fill="{Binding Foreground,RelativeSource={RelativeSource AncestorType=Button}}"/></Canvas></DataTemplate></Setter.Value></Setter>
+    <Setter Property="Template"><Setter.Value><ControlTemplate TargetType="Button">
+     <Grid Background="Transparent">
+      <Border x:Name="face" CornerRadius="5" Background="{TemplateBinding Background}" BorderBrush="{TemplateBinding BorderBrush}" BorderThickness="1" IsHitTestVisible="False"/>
+      <Border x:Name="light" Style="{StaticResource HoverLight}"/>
+      <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center" IsHitTestVisible="False"/>
+     </Grid>
+     <ControlTemplate.Triggers>
+      <Trigger Property="IsMouseOver" Value="True"><Setter TargetName="face" Property="Margin" Value="-1"/><Setter TargetName="light" Property="Margin" Value="-1"/><Setter TargetName="face" Property="Background" Value="{DynamicResource hover}"/><Setter TargetName="face" Property="BorderBrush" Value="{DynamicResource muted}"/></Trigger>
+      <Trigger Property="IsPressed" Value="True"><Setter TargetName="face" Property="Background" Value="{DynamicResource pressed}"/></Trigger>
+      <Trigger Property="IsEnabled" Value="False"><Setter Property="Foreground" Value="{DynamicResource disabled}"/><Setter TargetName="face" Property="Background" Value="{DynamicResource bg}"/><Setter TargetName="face" Property="BorderBrush" Value="{DynamicResource edge}"/><Setter TargetName="light" Property="Visibility" Value="Hidden"/></Trigger>
+     </ControlTemplate.Triggers>
+    </ControlTemplate></Setter.Value></Setter>
    </Style>
   </ResourceDictionary>
  </UserControl.Resources>
+ <Grid>
  <DockPanel>
   <DockPanel x:Name="Header" DockPanel.Dock="Top" Margin="16,10">
    <StackPanel DockPanel.Dock="Right" Orientation="Horizontal"><Button x:Name="OpenButton" Content="打开文件"/><Button x:Name="ReviewButton" Content="进入批注"/></StackPanel>
+   <ToggleButton x:Name="PlaylistButton" DockPanel.Dock="Left" Width="34" Height="34" Margin="-8,-4,8,-4" Visibility="Collapsed"
+                 ToolTip="播放列表（Alt+L）" ToolTipService.IsEnabled="False" AutomationProperties.Name="播放列表" AutomationProperties.AcceleratorKey="Alt+L">
+    <ToggleButton.Template><ControlTemplate TargetType="ToggleButton">
+     <Border x:Name="face" CornerRadius="5" BorderThickness="1" BorderBrush="{DynamicResource border}" Background="{DynamicResource panel}" Opacity="0.15">
+      <!-- Lucide ListVideo (ui/icons/LUCIDE-LICENSE.txt), shared design with the image viewer. -->
+      <Grid><Border x:Name="light" Style="{StaticResource HoverLight}"/><Viewbox Width="22" Height="22"><Canvas Width="24" Height="24"><Path Data="M3 6H16 M3 12H12 M3 18H12 M16 12L21 15 16 18Z" Stroke="{DynamicResource ink}" StrokeThickness="2" StrokeStartLineCap="Round" StrokeEndLineCap="Round" StrokeLineJoin="Round"/></Canvas></Viewbox></Grid>
+     </Border>
+     <ControlTemplate.Triggers>
+      <Trigger Property="IsChecked" Value="True"><Setter TargetName="face" Property="BorderBrush" Value="{DynamicResource accent}"/></Trigger>
+      <Trigger Property="IsKeyboardFocused" Value="True"><Setter TargetName="face" Property="Opacity" Value="0.5"/></Trigger>
+      <Trigger Property="IsMouseOver" Value="True"><Setter TargetName="face" Property="Opacity" Value="0.5"/></Trigger>
+     </ControlTemplate.Triggers>
+    </ControlTemplate></ToggleButton.Template>
+   </ToggleButton>
    <TextBlock x:Name="Caption" FontSize="17" VerticalAlignment="Center" TextTrimming="CharacterEllipsis"/>
   </DockPanel>
   <StackPanel DockPanel.Dock="Bottom" Margin="16,8">
@@ -24,7 +58,7 @@
      <Button x:Name="Next" Style="{StaticResource ToolButton}" Content="{StaticResource next}" ToolTip="下一帧（→）"/>
      <TextBlock x:Name="Clock" FontFamily="{DynamicResource MonoFont}" Margin="8,0" VerticalAlignment="Center"/>
     </StackPanel>
-    <DockPanel Grid.Column="1"><Button x:Name="CancelButton" DockPanel.Dock="Right" Visibility="Collapsed" Content="取消准备"/><TextBlock x:Name="Hint" Margin="8,0" VerticalAlignment="Center" TextTrimming="CharacterEllipsis"/></DockPanel>
+    <TextBlock x:Name="Hint" Grid.Column="1" Margin="8,0" VerticalAlignment="Center" TextTrimming="CharacterEllipsis"/>
     <StackPanel x:Name="Output" Grid.Column="2" Orientation="Horizontal">
      <Button x:Name="CopyFrame" Style="{StaticResource ToolButton}" Content="{StaticResource image_copy}" ToolTip="复制当前帧"/>
      <Button x:Name="SaveFrame" Style="{StaticResource ToolButton}" Content="{StaticResource save_image}" ToolTip="另存当前帧为 PNG"/>
@@ -34,6 +68,21 @@
     </StackPanel>
    </Grid>
   </StackPanel>
-  <Grid><local:VideoSurface x:Name="Surface"/><Image x:Name="Still" Stretch="Uniform" Visibility="Collapsed"/></Grid>
+  <Grid x:Name="VideoArea"><local:VideoSurface x:Name="Surface"/><Image x:Name="Still" Stretch="Uniform" Visibility="Collapsed"/></Grid>
  </DockPanel>
+ <Popup x:Name="ButtonHint" Placement="Custom" AllowsTransparency="True" PopupAnimation="{DynamicResource {x:Static SystemParameters.ToolTipPopupAnimationKey}}" Focusable="False" IsHitTestVisible="False">
+  <Border Padding="7,2" CornerRadius="4" Background="{DynamicResource panel}" Opacity=".96">
+   <TextBlock Text="{Binding PlacementTarget.ToolTip,ElementName=ButtonHint}" Foreground="{DynamicResource ink}" FontSize="12"/>
+  </Border>
+ </Popup>
+ <Grid x:Name="LoadingOverlay" Visibility="Collapsed" Background="#6B000000">
+  <Border x:Name="LoadingCard" HorizontalAlignment="Center" VerticalAlignment="Center" Width="344" Padding="24,22,24,20" Background="{DynamicResource panel}" BorderBrush="{DynamicResource border}" BorderThickness="1" CornerRadius="8">
+   <StackPanel>
+    <DockPanel><TextBlock x:Name="PreviewPercent" DockPanel.Dock="Right" FontFamily="{DynamicResource MonoFont}" FontSize="14" Foreground="{DynamicResource link}"/><TextBlock x:Name="LoadingTitle" FontSize="14" FontWeight="SemiBold"/></DockPanel>
+    <ProgressBar x:Name="PreviewBar" AutomationProperties.LabeledBy="{Binding ElementName=LoadingTitle}" Minimum="0" Maximum="100" Height="8" Margin="0,10,0,0"/>
+    <Button x:Name="CancelButton" Content="取消加载" HorizontalAlignment="Center" Margin="0,16,0,0"/>
+   </StackPanel>
+  </Border>
+ </Grid>
+ </Grid>
 </UserControl>

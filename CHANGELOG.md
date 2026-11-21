@@ -4,6 +4,22 @@
 
 Versions are listed newest first. Earlier entries summarize the offline release history shipped with the app; they do not imply that each version had a public GitHub installer.
 
+## 0.9.3
+
+新增带批注的 GIF 导出和多组快捷键配置，调整图片查看器侧栏与按钮悬浮效果，修复时间标尺上的分割快捷键。[0.9.3 更新说明](docs/releases/v0.9.3.md)
+
+## 0.9.2
+
+修复剪短视频后 MP4 的导出时长，新增按起始时间重排批注编号，统一导出进度条，并将播放列表移到查看区左上角。[0.9.2 更新说明](docs/releases/v0.9.2.md)
+
+## 0.9.1
+
+新增向前、向后贴齐片段及自定义快捷键。裁剪时缩略图和波形维持原有时间比例，联动轨道实时预览。修复同帧多个批注编号的点选问题。详见 [0.9.1 更新说明](docs/releases/v0.9.1.md)。
+
+## 0.9.0
+
+新增 Excel 批注清单、画面右键快速批注和可自定义快捷键，语音批注与录屏共用混音器。Windows x64 安装包改用共享媒体库。详见[本版更新记录](docs/releases/v0.9.0.md)。
+
 ## 0.8.0
 
 - 新增视频、原声、录音批注和批注轨的非破坏性剪辑，支持分割、两端裁剪、移动、删除与撤销/重做。

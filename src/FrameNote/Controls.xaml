@@ -15,15 +15,23 @@
   </Style>
 
   <Style TargetType="Menu"><Setter Property="Background" Value="{DynamicResource chrome}"/><Setter Property="Foreground" Value="{DynamicResource ink}"/></Style>
+  <Geometry x:Key="MenuCheck">M13.8639 3.65511C14.0533 3.85606 14.0439 4.17251 13.8429 4.36191L5.91309 11.8358C5.67573 12.0595 5.30311 12.0526 5.07417 11.8203L2.39384 9.09995C2.20003 8.90325 2.20237 8.58667 2.39907 8.39286C2.59578 8.19905 2.91235 8.2014 3.10616 8.3981L5.51192 10.8398L13.1571 3.63419C13.358 3.44479 13.6745 3.45416 13.8639 3.65511Z</Geometry>
   <ControlTemplate x:Key="MenuHeader" TargetType="MenuItem">
     <Border x:Name="face" Background="Transparent" CornerRadius="4" Padding="6,0">
-      <Grid><ContentPresenter ContentSource="Header" RecognizesAccessKey="True" VerticalAlignment="Center"/>
+      <Grid>
+        <StackPanel Orientation="Horizontal">
+          <Path x:Name="check" Visibility="Collapsed" Margin="0,0,4,0" VerticalAlignment="Center" Fill="{DynamicResource ink}" Data="{StaticResource MenuCheck}"/>
+          <ContentPresenter ContentSource="Header" RecognizesAccessKey="True" VerticalAlignment="Center"/>
+        </StackPanel>
         <Popup x:Name="PART_Popup" Placement="Bottom" IsOpen="{Binding IsSubmenuOpen,RelativeSource={RelativeSource TemplatedParent}}" AllowsTransparency="True" Focusable="False">
           <Border Background="{DynamicResource card}" BorderBrush="{DynamicResource border}" BorderThickness="1" Padding="4" CornerRadius="6"><ScrollViewer HorizontalScrollBarVisibility="Disabled" VerticalScrollBarVisibility="Auto" CanContentScroll="True"><ItemsPresenter KeyboardNavigation.DirectionalNavigation="Cycle" KeyboardNavigation.TabNavigation="Cycle"/></ScrollViewer></Border>
         </Popup>
       </Grid>
     </Border>
-    <ControlTemplate.Triggers><Trigger Property="IsHighlighted" Value="True"><Setter Property="Background" TargetName="face" Value="{DynamicResource hover}"/></Trigger></ControlTemplate.Triggers>
+    <ControlTemplate.Triggers>
+      <Trigger Property="IsChecked" Value="True"><Setter TargetName="check" Property="Visibility" Value="Visible"/></Trigger>
+      <Trigger Property="IsHighlighted" Value="True"><Setter Property="Background" TargetName="face" Value="{DynamicResource hover}"/></Trigger>
+    </ControlTemplate.Triggers>
   </ControlTemplate>
   <Style TargetType="MenuItem">
     <Setter Property="Foreground" Value="{DynamicResource ink}"/><Setter Property="FocusVisualStyle" Value="{StaticResource KeyboardFocus}"/>
@@ -31,13 +39,17 @@
       <Border x:Name="face" CornerRadius="4" MinHeight="22" MinWidth="168" Padding="4,2,12,2" Background="Transparent"><Grid>
         <Grid.ColumnDefinitions><ColumnDefinition Width="20"/><ColumnDefinition/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
         <ContentPresenter ContentSource="Icon" VerticalAlignment="Center"/>
-        <Path x:Name="check" Visibility="Collapsed" HorizontalAlignment="Left" VerticalAlignment="Center" Fill="{DynamicResource ink}" Data="M13.8639 3.65511C14.0533 3.85606 14.0439 4.17251 13.8429 4.36191L5.91309 11.8358C5.67573 12.0595 5.30311 12.0526 5.07417 11.8203L2.39384 9.09995C2.20003 8.90325 2.20237 8.58667 2.39907 8.39286C2.59578 8.19905 2.91235 8.2014 3.10616 8.3981L5.51192 10.8398L13.1571 3.63419C13.358 3.44479 13.6745 3.45416 13.8639 3.65511Z"/>
+        <Path x:Name="check" Visibility="Collapsed" HorizontalAlignment="Left" VerticalAlignment="Center" Fill="{DynamicResource ink}" Data="{StaticResource MenuCheck}"/>
         <ContentPresenter Grid.Column="1" VerticalAlignment="Center" ContentSource="Header" RecognizesAccessKey="True"/>
         <TextBlock Grid.Column="2" Margin="8,0,0,0" Foreground="{DynamicResource muted}" Text="{TemplateBinding InputGestureText}"/>
       </Grid></Border>
       <ControlTemplate.Triggers><Trigger Property="IsChecked" Value="True"><Setter TargetName="check" Property="Visibility" Value="Visible"/></Trigger><Trigger Property="IsHighlighted" Value="True"><Setter TargetName="face" Property="Background" Value="{DynamicResource selection}"/></Trigger></ControlTemplate.Triggers>
     </ControlTemplate></Setter.Value></Setter>
-    <Style.Triggers><Trigger Property="Role" Value="TopLevelHeader"><Setter Property="Template" Value="{StaticResource MenuHeader}"/></Trigger><Trigger Property="IsEnabled" Value="False"><Setter Property="Foreground" Value="{DynamicResource disabled}"/></Trigger></Style.Triggers>
+    <Style.Triggers>
+      <Trigger Property="Role" Value="TopLevelHeader"><Setter Property="Template" Value="{StaticResource MenuHeader}"/></Trigger>
+      <Trigger Property="Role" Value="TopLevelItem"><Setter Property="Template" Value="{StaticResource MenuHeader}"/><Setter Property="MinHeight" Value="22"/></Trigger>
+      <Trigger Property="IsEnabled" Value="False"><Setter Property="Foreground" Value="{DynamicResource disabled}"/></Trigger>
+    </Style.Triggers>
   </Style>
 
   <ControlTemplate x:Key="ClearRepeat" TargetType="RepeatButton"><Border Background="Transparent"/></ControlTemplate>

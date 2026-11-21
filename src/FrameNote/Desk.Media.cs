@@ -17,7 +17,7 @@ public sealed partial class Desk
         if(imageFile is not {} source){Send(new{type="status",text=openedPackage?"审阅包中的图片没有可切换的所在文件夹。":"剪贴板图片没有所在文件夹。"});return;}
         if(playlist.Files.Count>1 && playlist.Items.SelectedIndex>=0){
             int target=playlist.Items.SelectedIndex+direction;
-            if(target>=0 && target<playlist.Files.Count)await Open(playlist.Files[target].Path,viewer:true);
+            if(target>=0 && target<playlist.Files.Count)await Open(playlist.Files[target].Path,mode:PlaylistOpenMode);
             return;
         }
         var files=await Task.Run(()=>Directory.EnumerateFiles(Path.GetDirectoryName(source)!)
@@ -50,7 +50,7 @@ public sealed partial class Desk
         if(web.CoreWebView2!=null)Send(new{type="volume",value=volume});
         volumeWrite.Stop();volumeWrite.Start();
     }
-    async Task ShowImage(string path,string name,bool fromClipboard=false,string? nextDraft=null,Review? review=null,bool package=false){
+    async Task ShowImage(string path,string name,bool fromClipboard=false,string? nextKey=null,Review? review=null,bool package=false){
         var source=path;
         var browser=EnsureReviewWeb();
         review??=new Review(2,Guid.NewGuid(),fromClipboard?"剪贴板图片.png":name,0,[]);
@@ -74,7 +74,7 @@ public sealed partial class Desk
         var previous=activeRecording;activeRecording=null;
         if(native!=null){native.Stop();native.Visibility=Visibility.Collapsed;}
         web.Visibility=Visibility.Visible;
-        SetPreviewFullscreen(false);StopTimeline();displayImagePath=path;media=source;draft=nextDraft;preview=null;doc=review;deskLoaded=false;openedPackage=package;playbackInfo=null;playbackId=Guid.NewGuid();
+        SetPreviewFullscreen(false);StopTimeline();displayImagePath=path;media=source;sessionKey=nextKey;preview=null;doc=review;deskLoaded=false;openedPackage=package;playbackInfo=null;playbackId=Guid.NewGuid();
         fullTiffSource=scaled?source:null;viewingImage=true;imageFile=originalFile;Title=name+" · FrameNote";Send(new{type="image",src,name,doc,scaled,images=new Uri(ImageDirectory+Path.DirectorySeparatorChar).AbsoluteUri,folder=imageFile!=null});
         if(previous!=null)recordings.Discard(previous);
     }
@@ -102,6 +102,17 @@ public sealed partial class Desk
     string StorePreview(BitmapSource source){
         Directory.CreateDirectory(scratch);var file=Path.Combine(scratch,Guid.NewGuid().ToString("N")+".png");
         var png=new PngBitmapEncoder();png.Frames.Add(BitmapFrame.Create(source));using var stream=File.Create(file);png.Save(stream);return file;
+    }
+    void SendClipboardPicture(Guid documentId,long at){
+        using var data=new MemoryStream();
+        if(Clipboard.GetData("PNG") is Stream png){
+            if(png.CanSeek){if(png.Length>ReviewImages.MaxBytes)throw new InvalidDataException("图片过大。");png.Position=0;}
+            png.CopyTo(data);
+        }else if(Clipboard.GetImage() is {} image){
+            var encoder=new PngBitmapEncoder();encoder.Frames.Add(BitmapFrame.Create(image));encoder.Save(data);
+        }else throw new InvalidDataException("剪贴板中没有图片。");
+        if(data.Length>ReviewImages.MaxBytes)throw new InvalidDataException("图片过大。");
+        Send(new{type="clipboardPicture",documentId,at,data=Convert.ToBase64String(data.GetBuffer(),0,(int)data.Length)});
     }
     async Task PasteAsImage(){
         if(doc!=null||viewingImage)return;

@@ -3,7 +3,7 @@
 Arguments: FrameNote.exe, fixtures directory, CaptureCheck.exe, two device name prefixes.
 Never changes Windows routing or endpoint volume.
 """
-import array, math, os, subprocess, sys, time
+import array, math, os, shutil, subprocess, sys, time
 from pathlib import Path
 from urllib.parse import urlsplit
 from urllib.request import url2pathname
@@ -16,9 +16,19 @@ def measure(path):
     data=subprocess.check_output(["ffmpeg","-v","error","-ss","0.6","-i",str(path),"-t","1","-map","0:a:0","-ac","1","-ar","48000","-f","f32le","-"])
     x=array.array("f");x.frombytes(data);assert len(x)==48000
     def db(f):
-        a=sum(v*math.cos(i*2*math.pi*f/48000) for i,v in enumerate(x))
-        b=sum(v*math.sin(i*2*math.pi*f/48000) for i,v in enumerate(x))
-        return 20*math.log10(max(1e-12,2*math.hypot(a,b)/len(x)))
+        # Measure power in short windows. Independent WASAPI clocks can move
+        # phase across a second even when a continuous tone keeps its gain.
+        size=4800
+        window=[.5-.5*math.cos(2*math.pi*i/size) for i in range(size)]
+        cosine=[w*math.cos(i*2*math.pi*f/48000) for i,w in enumerate(window)]
+        sine=[w*math.sin(i*2*math.pi*f/48000) for i,w in enumerate(window)]
+        power=[]
+        for start in range(0,len(x),size):
+            block=x[start:start+size]
+            a=sum(v*c for v,c in zip(block,cosine))
+            b=sum(v*s for v,s in zip(block,sine))
+            power.append((2*math.hypot(a,b)/sum(window))**2)
+        return 10*math.log10(max(1e-24,sum(power)/len(power)))
     return [db(619),db(1423)]
 
 try:
@@ -83,6 +93,47 @@ try:
             print("619 / 1423 Hz amplitudes in three recorded MP4s (dB):",baseline,adjusted,muted,flush=True)
             assert abs(adjusted[0]-baseline[0])<1 and abs(adjusted[1]-baseline[1]+12)<1
             assert muted[0]<baseline[0]-45 and abs(muted[1]-adjusted[1])<1
+            # Keep playback of the newly recorded tones out of the next measurement.
+            page.evaluate("v.volume=0")
+            def voice():
+                count=page.evaluate("doc.notes.length")
+                page.evaluate("()=>{transport.pause();transport.currentTime=0}")
+                wait(page,"!v.seeking && transport.currentTime<.05")
+                page.locator("#voiceRecord").click()
+                wait(page,"!!voiceRecording && !transport.paused")
+                assert panel.evaluate("el=>el.inert")
+                time.sleep(1.9)
+                page.locator("#voiceRecord").click()
+                wait(page,"!voicePending && !voiceRecording")
+                assert page.evaluate("doc.notes.length")==count+1,page.locator("#status").inner_text()
+                uri=page.evaluate("imageBase+doc.notes.at(-1).voice.asset+'.m4a'")
+                sample=work/f"voice-mix-{count+1}.m4a"
+                shutil.copyfile(Path(url2pathname(urlsplit(uri).path)),sample)
+                return measure(sample)
+
+            page.locator("#mic").select_option("")
+            voice_muted=voice()
+            rows.first.locator(".muteChannel").click()
+            voice_adjusted=voice()
+            print("Voice levels with matching mixer settings (dB):",voice_muted,voice_adjusted,flush=True)
+            assert voice_muted[0]<baseline[0]-45 and abs(voice_muted[1]-muted[1])<1
+            assert all(abs(a-b)<1 for a,b in zip(voice_adjusted,adjusted))
+            if mic and page.evaluate("catalog.outputs.find(d=>d.name.startsWith('CABLE Input'))?.id")==ids[0]:
+                rows.first.locator(".removeChannel").click()
+                page.locator("#mic").select_option(mic['id'])
+                combined=voice()
+                assert combined[0]>-65 and abs(combined[1]-voice_adjusted[1])<1,(combined,voice_adjusted,work)
+                mic_gain=page.locator("#micStrip input")
+                for _ in range(6):mic_gain.press("ArrowLeft")
+                quieter=voice()
+                assert abs(quieter[0]-combined[0]+6)<1 and abs(quieter[1]-combined[1])<1,(quieter,combined,work)
+                print("Voice levels with optional mic at 0 and -6 dB:",combined,quieter,flush=True)
+                page.locator("#micStrip .muteChannel").click()
+            unmuted=rows.locator('.muteChannel[aria-pressed="false"]')
+            while unmuted.count():unmuted.first.click()
+            assert page.locator("#voiceRecord").is_disabled()
+            page.locator("#stage").click(button="right",position={"x":12,"y":12})
+            assert page.locator('[data-action="voice"]').is_disabled()
             print("Verified mixer selection, meter activity, gain, mute and recording lock. Screenshot:",work/"horizontal-mixer.png")
         finally:
             if tone:tone.communicate("\n",timeout=5)

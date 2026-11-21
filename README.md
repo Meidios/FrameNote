@@ -14,17 +14,26 @@
 
 在资源管理器多选照片和视频，右键选 **用 FrameNote Player 打开**，即可在同一个窗口浏览。左侧播放列表显示缩略图和文件名，单个文件默认收起，多个文件默认展开。向窗口拖入更多文件会追加到列表，不打断当前播放。
 
+在审阅画面按住 **Ctrl**，左键拖动画框，右键拖动画箭头，中键点击可在落点创建文字框并直接输入。每次操作都在当前播放头新建独立批注。
+
+在 **文件 → 设置** 的快捷键列表中，点一项操作即可编辑。键盘快捷键可以直接按下录入，鼠标手势可以选择修饰键和鼠标键。同一操作可添加多组组合，也可以删除全部绑定。点「确定」返回列表，再点「保存」即可在 FrameNote 和 Player 中使用。每个分组标题右侧的按钮可恢复该组默认值。设置中也可以打开 Windows 默认应用设置。
+
 录制设置和混音器在左侧，批注列表和编辑器在右侧。中间时间线从上到下显示视频缩略图、混合音频波形和批注；选中一个区间后，可在播放栏开启循环。下次打开时会恢复窗口大小或最大化状态。
 
 1. 在[最新版本](https://github.com/Meidios/FrameNote/releases/latest)的 **Assets** 下载以 `win-x64-Setup.exe` 结尾的安装包。安装包包含 .NET 运行时、VLC、FFmpeg 和 FFprobe；如果电脑缺少 Microsoft Edge WebView2，首次安装需要联网。Windows 的默认视频播放器不会被替换。
-2. 拖入视频，用 **空格** 播放／暂停、**← / →** 逐帧移动。按 **M** 添加点批注，或在不同帧按 **I** 和 **O** 标记区间；在右栏底部编辑，修改自动保存。卡片右上角可删除该条批注；**Ctrl+Z** 撤销，**Ctrl+Shift+Z** 重做。
+2. 拖入视频，用 **空格** 播放／暂停、**← / →** 逐帧移动。直接选框选、箭头等工具在画面上绘制，就会在播放头位置新建点批注。选图和录音也各自新建批注。右键画面可选工具，右键已有批注可编辑、换色、复制或删除。**M** 可添加纯文字点批注，**I** 和 **O** 可标记区间。批注和剪辑只保留到窗口关闭，需要留存时请先导出 `.framenote` 审阅包。卡片右上角可删除该条批注；**Ctrl+Z** 撤销，**Ctrl+Shift+Z** 重做。
 3. 点击 **导出审阅包** 交付可编辑版本；只想发一张图时，选择 **复制当前帧** 或 **复制批注图**，直接粘贴到聊天里。可用[示例审阅包](examples/SampleReview.framenote)体验。
 
 | 任务 | 在 FrameNote 中怎么做 |
 |---|---|
+| 对齐时间线片段 | 选中 Clip，点击 **贴到上一片段** 将开头贴到同轨上一段的结尾，或点击 **贴到下一片段** 将尾部贴到同轨下一段的开头。首段向左贴到零点，末段向右贴到时间线末尾。拖动时片段限于当前时间线，片段和批注块的头尾都可吸附到时间指针。默认按住 Alt 可暂时关闭吸附。 |
+| 调整已有批注 | 在画面上拖动图形或附图即可移动。选中后拖端点调整线长和方向，拖顶点改变角度，拖角点调整框或图片大小。双击文字框可修改文字。 |
+| 移动批注区间和调整时长 | 拖住 Region 标签中间可整体移动区间，关联语音会一起移动。拖动非语音批注标签的左边缘改起点，拖右边缘改终点。点批注可直接拉成区间，两端合拢可恢复成点。 |
+| 录制语音批注 | 在左侧音频混音器选择系统输出或麦克风，按需调节每一路的增益和静音。点击批注工具栏的麦克风，按当前混音设置开始录音。 |
+| Excel 批注清单 | 在视频审阅页点 **导出 Excel**，选择保存位置。新文件夹里有工作簿和 `media` 文件夹，每条批注一行，点 **打开 PNG** 查看 Mark 所在帧，点 **播放 GIF** 查看完整 Region。转发时带上整个文件夹。 |
 | 录屏与 GIF | 选择显示器、窗口或框选区域。在横向混音器中添加多个系统输出和一个可选麦克风；录制前按路调节增益、静音，成片为立体声混音；停止录制视频后直接进入审阅。临时录屏要在换片或退出前导出审阅包。GIF 最长 30 秒，无音频。 |
 | 图片批注 | 空界面按 Ctrl+V 打开剪贴板图片；已有视频时，同一快捷键会添加图片批注。可缩放、平移，按原图分辨率复制或导出带批注 PNG；动图导出静态首帧。 |
-| 播放与兼容 | 兼容的视频可直接逐帧审阅。其他编码可用内置 VLC 播放原片，进入批注时按需生成临时预览；导出审阅包仍保留原始媒体。 |
+| 播放与兼容 | 欢迎页点“打开文件”并选择视频后直接进入批注。需要生成批注预览时，FrameNote 和 Player 都会在窗口中央显示百分比进度，点下方的“取消加载”可中止。可手动切换到内置 VLC 播放原片；导出审阅包保留原始媒体。 |
 | 发送到 REAPER | 首次单击安装脚本；之后单击会检查更新，并发送到所选轨道的编辑光标处。也可将按钮直接拖到 REAPER 编排区，按落点插入。审阅包的 Marker 和 Region 保留批注颜色。 |
 
 在原片播放器中，使用底部走带逐帧定位、复制当前帧或另存 PNG。图片查看器的画布直接位于菜单下方；按 **Ctrl+O** 打开文件，按 **Ctrl+S** 导出审阅包。
@@ -51,14 +60,19 @@ After installation, right-click a video and choose **Open with**. **FrameNote Pl
 Recording settings and the mixer are on the left; the annotation list and editor are on the right. The central timeline stacks video thumbnails, the mixed audio waveform, and annotations. Select a range to loop it from the playback bar. FrameNote remembers the window size and maximized state between sessions.
 
 1. Under **Assets** on the [latest release](https://github.com/Meidios/FrameNote/releases/latest), download the file ending in `win-x64-Setup.exe`. Setup includes .NET, VLC, FFmpeg and FFprobe. If Microsoft Edge WebView2 is missing, setup needs an internet connection. Your default video player is unchanged.
-2. Drop in a video. Press **Space** to play or pause and **Left / Right** to step by frame. Press **M** for a point, or **I** and **O** on different frames for a range. Edit in the pinned details panel. Changes save automatically. Use the trash icon on a card to delete it, **Ctrl+Z** to undo, or **Ctrl+Shift+Z** to redo.
+2. Drop in a video. Press **Space** to play or pause and **Left / Right** to step by frame. Select a drawing tool, choose a picture or start a voice recording to create a note at the playhead. Right-click the canvas for tools or right-click an annotation to edit, recolor, duplicate or delete it. **M** adds a text Mark. **I** and **O** set a Region. Use **Ctrl+Z** to undo and **Ctrl+Shift+Z** to redo. Export a review package before closing to keep your changes.
 3. Choose **导出审阅包** to share an editable review. To send a still instead, use **复制当前帧** (copy the current video frame) or **复制批注图** (copy the annotated image), then paste it into chat. A [sample review package](examples/SampleReview.framenote) is included.
 
 | Task | How it works |
 |---|---|
+| Align timeline clips | Select a clip and click **贴到上一片段** to align its start with the previous clip’s end, or **贴到下一片段** to align its end with the next clip’s start on the same track. The first clip can align to zero and the last clip can align to the timeline end. Clips stay within the timeline when dragged. Clip and annotation edges snap to the playhead. Hold Alt to suspend snapping by default. |
+| Adjust existing annotations | Drag a drawing or picture to move it. Drag an endpoint to change a line, a vertex to change an angle, or a corner to resize a box or picture. Double-click a text box to edit its text. |
+| Move a Region or adjust its duration | Drag the middle of a Region label to move the whole interval and its attached voice clips. For a note without a voice recording, drag either edge to adjust the interval. Drag a Mark into a Region, or bring the edges together to restore a Mark. |
+| Record a voice annotation | Choose system outputs or a microphone in the left audio mixer. Adjust gain and mute for each source, then click the microphone in the annotation toolbar to record that mix. |
+| Excel review sheet | In video review, click **导出 Excel** and choose a parent folder. The workbook includes a preview per note and links to a PNG for each Mark and a silent GIF for each Region. Share the entire generated folder so those links travel with the workbook. |
 | Screen capture and GIF | Record a display, window or selected region. Add multiple Windows outputs and an optional microphone in the horizontal mixer. Set gain and mute per source before recording one stereo mix. Stopping a video opens it for review; export the temporary recording before switching files or quitting. GIFs are silent and limited to 30 seconds. |
 | Image annotation | Paste into an empty desk to open a clipboard image; paste while reviewing a video to attach a picture note. Zoom or pan without changing the dimensions of an exported PNG. Animated images export as a still of the first frame. |
-| Playback compatibility | Compatible media opens directly in frame review. Other codecs can play in the built-in VLC player; entering review creates a temporary preview if needed. Packages keep the original media. |
+| Playback compatibility | Opening a video from the welcome screen starts frame review. FrameNote prepares a temporary preview in the same window when needed. You can switch to VLC to play the original. Packages keep the original media. |
 | REAPER handoff | The first click installs the action. Later clicks check for updates and send to the selected track at the edit cursor. Drag the button onto the arrange view to choose a track and time instead. Review packages preserve marker and region colors. |
 
 In the original-media player, use the bottom transport to step by frame, copy the current frame, or save it as PNG. In the image viewer, the canvas starts directly below the menus. Use **Ctrl+O** to open a file and **Ctrl+S** to export a review package.
@@ -69,7 +83,7 @@ Select images and videos together in Explorer and choose **用 FrameNote Player 
 
 On Windows x64, install an SDK that targets .NET 8, the Windows Desktop Runtime, WebView2 and the x64 Visual C++ runtime. Put FFmpeg and FFprobe on PATH or in a `tools` folder beside the app. Run the two PowerShell commands above from the repository root. Keep the resulting executable with its adjacent DLLs and folders.
 
-For a self-contained installer, follow the [Windows packaging instructions](docs/windows-setup.md) and run `pwsh -File scripts/setup.ps1`. The installer and SHA-256 sidecar are written to `artifacts/release/`. See the [detailed user guide](docs/user-guide.en.md) for media compatibility, draft recovery, keyboard shortcuts and REAPER behavior, and the [verification notes](docs/verification.md) for tested scenarios and limitations.
+For a self-contained installer, follow the [Windows packaging instructions](docs/windows-setup.md) and run `pwsh -File scripts/setup.ps1`. The installer and SHA-256 sidecar are written to `artifacts/release/`. See the [detailed user guide](docs/user-guide.en.md) for media compatibility, saving editable review packages, keyboard shortcuts and REAPER behavior, and the [verification notes](docs/verification.md) for tested scenarios and limitations.
 
 ### 第三方资源 / Third-party assets
 

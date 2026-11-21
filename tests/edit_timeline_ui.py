@@ -1,27 +1,134 @@
 """Real WebView2 timeline edits, persistence, gaps, decoded export and audio timing."""
 import array,hashlib,json,math,os,subprocess,time,uuid,zipfile,io
-from PIL import Image
+from pathlib import Path
+from urllib.parse import urlsplit
+from urllib.request import url2pathname
+from PIL import Image,ImageChops,ImageStat
 from playwright.sync_api import sync_playwright
 from pywinauto import Desktop
 from review_ui import launch,stop,wait,work
 profile=work/'profile';profile.mkdir();(profile/'updates.json').write_text('{"automatic":false}');os.environ['FRAMENOTE_DATA_DIR']=str(profile)
 source=work/'source.mp4';voice=work/'voice.m4a';package=work/'input.framenote';saved=work/'edited.framenote';out=work/'edited.mp4'
-subprocess.run(['ffmpeg','-v','error','-f','lavfi','-i','testsrc2=size=320x180:rate=30:duration=10','-f','lavfi','-i','sine=frequency=440:duration=10','-c:v','libx264','-c:a','aac','-shortest',str(source)],check=True)
+subprocess.run(['ffmpeg','-v','error','-f','lavfi','-i','testsrc2=size=320x180:rate=30:duration=14','-f','lavfi','-i','sine=frequency=440:duration=14','-af',"volume='if(between(t,3,4),0.01,1)':eval=frame",'-c:v','libx264','-c:a','aac','-shortest',str(source)],check=True)
 subprocess.run(['ffmpeg','-v','error','-f','lavfi','-i','sine=frequency=1100:duration=3','-c:a','aac',str(voice)],check=True)
 hash=hashlib.sha256(voice.read_bytes()).hexdigest()
-doc={'version':1,'id':str(uuid.uuid4()),'fileName':'source.mp4','durationUs':10000000,'lastNoteNumber':1,'notes':[{'id':str(uuid.uuid4()),'number':1,'startUs':6000000,'endUs':9000000,'text':'voice region','shape':None,'voice':{'asset':hash,'durationUs':3000000}}]}
+doc={'version':1,'id':str(uuid.uuid4()),'fileName':'source.mp4','durationUs':14000000,'lastNoteNumber':1,'notes':[{'id':str(uuid.uuid4()),'number':1,'startUs':6000000,'endUs':9000000,'text':'voice region','shape':None,'voice':{'asset':hash,'durationUs':3000000}}]}
 with zipfile.ZipFile(package,'w') as z:z.writestr('review.json',json.dumps(doc));z.write(source,'media/source.mp4');z.write(voice,'voice/'+hash+'.m4a')
 def dialog(proc,path):
     d=Desktop(backend='win32').window(process=proc.pid,class_name='#32770');d.wait('ready',timeout=15);time.sleep(.3);d.child_window(class_name='Edit',found_index=0).set_edit_text(str(path));d.child_window(control_id=1).click()
     if not path.exists() and d.exists(timeout=.5) and d.is_visible():d.child_window(class_name='Edit',found_index=0).type_keys('{ENTER}')
-def drag(p,selector,delta,edge=None):
+def drag(p,selector,delta,edge=None,preview_start=None,while_held=None,cancel=False):
     el=p.locator(selector);box=el.bounding_box();axis=p.locator('#ticks').bounding_box();duration=p.evaluate('doc.durationUs');x=box['x']+(box['width']-3 if edge=='right' else 3 if edge=='left' else box['width']/2);y=box['y']+box['height']/2
-    p.mouse.move(x,y);p.mouse.down();p.mouse.move(x+delta/duration*axis['width'],y,steps=8);p.mouse.up();time.sleep(.15)
+    p.mouse.move(x,y);p.mouse.down();p.mouse.move(x+delta/duration*axis['width'],y,steps=8)
+    if preview_start is not None:
+        preview=el.evaluate("el=>parseFloat(el.style.left)*doc.durationUs/100")
+        assert abs(preview-preview_start)<duration*1e-6,(preview,preview_start)
+    if while_held:while_held()
+    if cancel:p.keyboard.press('Escape')
+    p.mouse.up();time.sleep(.15)
+
+def media_images(p):
+    return [Image.open(io.BytesIO(p.locator('#'+track+'Clips').screenshot())).convert('RGB') for track in ('video','audio')]
+
+def check_trim_preview(p,before,first,last):
+    video=p.locator('#videoClips .editClip').bounding_box()
+    audio=p.locator('#audioClips .editClip').bounding_box()
+    assert abs(video['x']-audio['x'])<1 and abs(video['width']-audio['width'])<1,(video,audio)
+    for old,shown in zip(before,media_images(p)):
+        box=(round(first*old.width),5,round(last*old.width),old.height-5)
+        retained=old.crop(box)
+        assert len(retained.getcolors(retained.width*retained.height))>2
+        difference=ImageChops.difference(retained,shown.crop(box))
+        # Ignore the playhead and the uniform tint change under a pressed clip.
+        for channel in difference.split():
+            tint=ImageStat.Stat(channel).median[0]
+            matching=sum(channel.histogram()[max(0,tint-2):tint+3])
+            assert matching>.98*channel.width*channel.height,(tint,matching,box)
 with sync_playwright() as pw:
     proc,p=launch(pw,package);errors=[];p.on('pageerror',lambda e:errors.append(str(e)))
     try:
+        images=Path(url2pathname(urlsplit(p.evaluate('imageBase')).path))
+        assert (images/(hash+'.m4a')).read_bytes()==voice.read_bytes()
         assert p.locator('#videoClips .editClip').count()==1
         assert p.locator('#voiceClips .editClip').count()==1
+        tools=p.get_by_role('group',name='片段剪辑')
+        for name,icon in [('联动所有轨道','link'),('分割片段','scissors'),('贴到上一片段','arrow-left-to-line'),('贴到下一片段','arrow-right-to-line'),('删除片段','trash')]:
+            button=tools.get_by_role('button',name=name,exact=True)
+            assert button.is_visible() and not button.inner_text().strip()
+            assert button.locator('use').get_attribute('href')=='#icon-'+icon
+        assert tools.get_by_role('button',name='删除片段').is_disabled()
+        for track,name in [('video','视频'),('audio','原声'),('voice','语音批注')]:
+            clip=p.locator('#'+track+'Clips').get_by_role('button',name=name,exact=True)
+            assert clip.is_visible() and not clip.inner_text().strip()
+        wait(p,"""()=>{const images=[...document.querySelectorAll('#sourceFrames image')];
+            return images.length>0 && images.every(im=>im.hasAttribute('href')) && $('sourceWave').hasAttribute('d')}""",timeout=15000)
+        assert '#1' in p.locator('#markLanes').inner_text()
+        p.locator('#trackDesk').screenshot(path=str(work/'timeline-clips.png'))
+        join=tools.get_by_role('button',name='贴到上一片段')
+        join_next=tools.get_by_role('button',name='贴到下一片段')
+        video='#videoClips .editClip'
+        assert join.is_disabled() and join_next.is_disabled()
+        p.evaluate('seekUs(0)')
+        wait(p,'!v.seeking && transport.paused')
+        original_media=media_images(p)
+        drag(p,video,-4000000,'right',while_held=lambda:check_trim_preview(p,original_media,.10,.67))
+        check_trim_preview(p,original_media,.10,.67)
+        state=p.evaluate('doc.timeline')
+        drag(p,video,2000000,'left',while_held=lambda:check_trim_preview(p,original_media,.18,.67),cancel=True)
+        assert p.evaluate('doc.timeline')==state
+        drag(p,video,2000000,'left')
+        drag(p,video,-3000000,'left',while_held=lambda:check_trim_preview(p,original_media,.03,.67))
+        check_trim_preview(p,original_media,.03,.67)
+        # A split on the video track alone leaves a longer original-audio clip.
+        # Trimming inside that audio clip must preview both surviving pieces.
+        baseline=p.evaluate('doc.timeline')
+        p.locator('#linkTracks').click()
+        p.locator(video).click()
+        p.evaluate('seekUs(5000000)')
+        wait(p,'shown>4800000 && shown<5100000')
+        p.locator('#splitClip').click()
+        p.locator('#linkTracks').click()
+        assert p.locator(video).count()==2 and p.locator('#audioClips .editClip').count()==1
+        audio=p.locator('#audioClips .editClip:visible')
+        def spans():
+            return audio.evaluate_all("els=>els.map(el=>[el.style.left,el.style.width])")
+        preview=[]
+        def partial_trim():
+            assert audio.count()==2
+            assert audio.nth(1).bounding_box()['x']==p.locator(video).nth(1).bounding_box()['x']
+            preview.extend(spans())
+        drag(p,video+':nth-child(2)',1000000,'left',while_held=partial_trim)
+        assert spans()==preview
+        for _ in range(4):p.keyboard.press('Control+z')
+        assert p.evaluate('doc.timeline')==baseline
+        p.locator(video).click()
+        assert join.is_disabled()
+        limit=p.evaluate('doc.durationUs-doc.timeline.clips.find(c=>c.track==="video").durationUs')
+        join_next.click()
+        assert p.evaluate('EditModel.end(doc.timeline.clips.find(c=>c.track==="video"))===doc.durationUs')
+        assert join_next.is_disabled()
+        p.keyboard.press('Control+z')
+        assert join_next.is_enabled()
+        drag(p,video,-1000000,preview_start=0)
+        def linked_move():
+            v=p.locator(video).bounding_box()
+            a=p.locator('#audioClips .editClip').bounding_box()
+            assert abs(v['x']-a['x'])<1 and abs(v['width']-a['width'])<1,(v,a)
+            assert p.evaluate('doc.timeline.clips.find(c=>c.track==="audio").startUs')==0
+        drag(p,video,limit+1000000,preview_start=limit,while_held=linked_move)
+        assert p.evaluate('doc.timeline.clips.find(c=>c.track==="video").startUs')==limit
+        p.keyboard.press('Control+z')
+        p.evaluate('transport.currentTime=12.125')
+        duration=p.evaluate('doc.timeline.clips.find(c=>c.track==="video").durationUs')
+        drag(p,video,12125000-duration+15000)
+        assert p.evaluate('EditModel.end(doc.timeline.clips.find(c=>c.track==="video"))')==12125000
+        p.keyboard.press('Control+z')
+        p.evaluate('transport.currentTime=2.125')
+        drag(p,video,2140000)
+        assert p.evaluate('doc.timeline.clips.find(c=>c.track==="video").startUs')==2125000
+        join.click()
+        assert p.evaluate('doc.timeline.clips.find(c=>c.track==="video").startUs')==0
+        assert join.is_disabled()
         p.evaluate('seekUs(5000000)');time.sleep(.2);p.locator('#splitClip').click()
         assert p.evaluate('doc.timeline.clips.filter(c=>c.track==="video").length')==2
         # SeekUs presents midpoint of source frame; split exactly at requested clock for deterministic test.
@@ -32,17 +139,33 @@ with sync_playwright() as pw:
         assert state['notes'][0]['startUs']==6000000+moved
         assert next(c for c in state['timeline']['clips'] if c['track']=='voice')['startUs']==6000000+moved
         assert next(c for c in state['timeline']['clips'] if c['track']=='audio' and c['startUs']>0)['startUs']==second['startUs']
+        p.locator(video).first.click()
+        join_next.click()
+        aligned=p.evaluate('doc.timeline.clips.filter(c=>c.track==="video")')
+        assert aligned[0]['startUs']+aligned[0]['durationUs']==aligned[1]['startUs']==second['startUs']
+        assert join_next.is_disabled()
+        p.keyboard.press('Control+z')
+        p.locator(video).nth(1).click()
         p.evaluate('seekUs(6000000)');wait(p,"v.style.visibility==='hidden'")
         p.locator('#play').click();time.sleep(.25);assert p.evaluate('transport.currentTime')>6.1;p.locator('#play').click()
         p.keyboard.press('Control+z');assert p.evaluate('doc.notes[0].startUs')==6000000
         p.keyboard.press('Control+Shift+z');assert p.evaluate('doc.notes[0].startUs')==6000000+moved
+        join.click()
+        assert p.evaluate('doc.timeline.clips.filter(c=>c.track==="video")[1].startUs')==split
+        assert p.evaluate('doc.notes[0].startUs')==6000000 and join.is_disabled()
+        p.keyboard.press('Control+z')
         # Snap the second video segment back to the first segment's tail.
         drag(p,'#videoClips .editClip:nth-child(2)',-moved+10000)
         assert p.evaluate('doc.timeline.clips.filter(c=>c.track==="video")[1].startUs')==split,(split,moved,p.evaluate('doc.timeline'),p.locator('#status').inner_text())
         # Move again, then detach original audio without moving other tracks.
         drag(p,'#videoClips .editClip:nth-child(2)',2000000)
         p.locator('#linkTracks').click();before=p.evaluate('doc.notes')
-        drag(p,'#audioClips .editClip:nth-child(2)',1000000)
+        assert tools.get_by_role('button',name='联动所有轨道',pressed=False).locator('use').get_attribute('href')=='#icon-unlink'
+        still=p.locator(video).nth(1).bounding_box()
+        def detached_move():
+            assert p.locator(video).nth(1).bounding_box()==still
+            assert p.locator('#audioClips .editClip').nth(1).bounding_box()['x']>still['x']+5
+        drag(p,'#audioClips .editClip:nth-child(2)',1000000,while_held=detached_move)
         assert p.evaluate('doc.notes')==before
         # Trim the voice by one second, leaving source offset intact.
         drag(p,'#voiceClips .editClip',1000000,'left')
@@ -64,6 +187,13 @@ with sync_playwright() as pw:
         expected=p.evaluate('doc');p.screenshot(path=str(work/'timeline.png'))
         p.locator('#exportVideo').click();dialog(proc,out);wait(p,"!busy && $('status').textContent.startsWith('带批注的 MP4 已保存')",timeout=180000)
         assert not errors,errors
+    finally:stop(proc)
+    assert not images.parent.exists(),images.parent
+    assert not (profile/'Drafts').exists()
+    proc,p=launch(pw,package)
+    try:
+        assert p.evaluate('doc.timeline == null && doc.notes[0].startUs===6000000')
+        assert p.locator('#videoClips .editClip').count()==1
     finally:stop(proc)
     proc,p=launch(pw,saved)
     try:

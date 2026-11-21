@@ -16,13 +16,11 @@ if(!(Test-Path "$CrtDirectory/vcruntime140.dll")){throw 'Missing redistributable
 $stage=Join-Path $art ('setup-'+[guid]::NewGuid().ToString('N'))
 dotnet publish $project -c Release -r win-x64 --self-contained true -o $stage -p:DebugType=None -p:DebugSymbols=false
 if($LASTEXITCODE){throw 'Publish failed.'}
-$bin=Split-Path (Get-Command ffmpeg.exe).Source
-New-Item "$stage/tools" -ItemType Directory | Out-Null
-Copy-Item "$bin/ffmpeg.exe","$bin/ffprobe.exe","$bin/../LICENSE","$bin/../README.txt" "$stage/tools/"
+$deps=New-Item (Join-Path $art 'installer-deps') -ItemType Directory -Force
+& (Join-Path $PSScriptRoot 'stage-ffmpeg.ps1') -Cache $deps.FullName -Destination (Join-Path $stage 'tools')
 Copy-Item "$CrtDirectory/*.dll" "$stage/"
 $cacheJob=Start-Process -FilePath (Join-Path $stage 'FrameNote.exe') -ArgumentList '--prepare-vlc-cache' -WindowStyle Hidden -Wait -PassThru
 if($cacheJob.ExitCode -ne 0){throw 'Failed to prepare VLC plugin cache.'}
-$deps=New-Item (Join-Path $art 'installer-deps') -ItemType Directory -Force
 $bootstrap=Join-Path $deps 'MicrosoftEdgeWebview2Setup.exe'
 if(!(Test-Path $bootstrap)){Invoke-WebRequest 'https://go.microsoft.com/fwlink/p/?LinkId=2124703' -OutFile $bootstrap}
 $sig=Get-AuthenticodeSignature $bootstrap

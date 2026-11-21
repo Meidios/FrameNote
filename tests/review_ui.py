@@ -1,6 +1,8 @@
 """Exercise the release WebView2 UI. Requires playwright and pywinauto; see README."""
 import hashlib, json, os, shutil, socket, subprocess, sys, tempfile, time, zipfile
 from pathlib import Path
+from urllib.parse import urlsplit
+from urllib.request import url2pathname
 from playwright.sync_api import sync_playwright
 from pywinauto import Desktop
 
@@ -45,7 +47,16 @@ def at(page,i):
     page.locator("#seek").evaluate("(el,i)=>{el.value=frames[i];el.dispatchEvent(new Event('input'))}",i)
     wait(page,"i=>Math.abs(shown-frames[i])<=2",arg=i,timeout=5000)
 def notes(page):return page.evaluate("doc.notes")
+def switch_file(proc,page,path):
+    page.keyboard.press("Control+o")
+    dlg=Desktop(backend="win32").window(process=proc.pid,class_name="#32770")
+    dlg.wait("ready",timeout=10)
+    dlg.child_window(class_name="Edit",found_index=0).set_edit_text(str(path))
+    dlg.child_window(control_id=1).click()
+    wait(page,"name=>!busy && doc.fileName===name && (ready || imageDoc())",path.name,timeout=20000)
 if __name__ == '__main__':
+    profile=work/"profile"
+    os.environ["FRAMENOTE_DATA_DIR"]=str(profile)
     with sync_playwright() as pw:
         for label in ["2997","60","vfr"]:
             shutil.copyfile(fixtures/(label+".mp4"),sample)
@@ -58,9 +69,10 @@ if __name__ == '__main__':
                     page.locator("#next").click();wait(page,"i=>Math.abs(shown-frames[i])<=2",arg=i)
                 print(label,n,"first/middle/end presentation timestamps OK",flush=True)
                 if label!="vfr":continue
-                at(page,7);page.keyboard.press("m");page.locator("#body").fill("撞击声偏晚");page.get_by_role("button",name="紫藤").click();page.locator("#arrow").click()
+                at(page,7);page.locator("#arrow").click()
                 box=page.locator("#overlay").bounding_box()
                 page.mouse.move(box['x']+20,box['y']+20);page.mouse.down();page.mouse.move(box['x']+110,box['y']+80);page.mouse.up()
+                page.locator("#body").fill("撞击声偏晚");page.locator('#colors').get_by_role("button",name="紫藤").click()
                 page.keyboard.press("Control+Enter");assert len(notes(page))==1 and notes(page)[0]["shape"]["kind"]=="arrow"
                 at(page,11);page.keyboard.press("i");at(page,n-1);page.keyboard.press("o")
                 page.locator("#body").fill("压低环境声");page.keyboard.press("Control+Enter")
@@ -86,16 +98,48 @@ if __name__ == '__main__':
                     filename.type_keys("{ENTER}")
                 wait(page,"document.querySelector('#status').textContent.startsWith('审阅包已保存')")
                 before=notes(page);page.screenshot(path=str(work/"review.png"))
-            finally:stop(proc)
+                at(page,7);page.locator("#splitClip").click()
+                assert page.locator("#videoClips .editClip").count()==2
+                page.locator("#pictureFile").set_input_files(work/"review.png")
+                wait(page,"editing?.pictures?.length===1")
+                images=Path(url2pathname(urlsplit(page.evaluate("imageBase")).path))
+                picture=images/(page.evaluate("editing.pictures[0].asset")+".png")
+                assert picture.is_file()
+                page.keyboard.press("Control+Enter")
+                in_session=notes(page)
+                timeline=page.evaluate("doc.timeline")
+                switch_file(proc,page,fixtures/"60.mp4")
+                assert notes(page)==[]
+                switch_file(proc,page,sample)
+                actual=notes(page)
+                assert len(actual)==len(in_session)
+                for restored,original in zip(actual,in_session):
+                    for key,value in original.items():assert restored[key]==value,(key,restored,original)
+                restored_timeline=page.evaluate("doc.timeline")
+                assert restored_timeline["linked"]==timeline["linked"]
+                assert len(restored_timeline["clips"])==len(timeline["clips"])
+                for restored,original in zip(restored_timeline["clips"],timeline["clips"]):
+                    for key,value in original.items():assert restored[key]==value,(key,restored,original)
+                assert not (profile/"Drafts").exists()
+                # Model a decoder that releases its attachment shortly after WM_CLOSE.
+                from win32con import WM_CLOSE
+                window=Desktop(backend="win32").window(process=proc.pid,title_re=".*FrameNote$",found_index=0)
+                with picture.open("rb"):
+                    window.post_message(WM_CLOSE)
+                    time.sleep(.35)
+                proc.wait(timeout=8)
+            finally:
+                if proc.poll() is None:stop(proc)
+        assert not images.parent.exists(),images.parent
         proc,page=launch(pw,sample)
-        try:assert notes(page)==before
+        try:assert notes(page)==[] and page.evaluate("doc.timeline == null")
         finally:stop(proc)
         digest=hashlib.sha256(sample.read_bytes()).hexdigest();sample.rename(sample.with_suffix(".moved"))
         with zipfile.ZipFile(package) as z:assert hashlib.sha256(z.read("media/source.mp4")).hexdigest()==digest
         proc,page=launch(pw,package)
         try:
             assert notes(page)==before
-            page.keyboard.press("m");assert page.locator("#editTitle").inner_text().startswith("#4")
+            page.keyboard.press("m");assert page.locator(".note.selected .noteNumber").inner_text()=="#4"
             page.keyboard.press("Escape")
             # Empty notes now persist immediately; Escape finishes editing, not creation.
             assert any(n["number"]==4 and n["text"]=="" for n in notes(page))
@@ -109,8 +153,12 @@ if __name__ == '__main__':
             page.locator("#body").fill("复核");page.keyboard.press("Control+Enter")
             assert notes(page)[0]["text"]=="复核" or notes(page)[1]["text"]=="复核"
         finally:stop(proc)
+        proc,page=launch(pw,package)
+        try:assert notes(page)==before
+        finally:stop(proc)
+    assert not (profile/"Drafts").exists()
     (fixtures/"latest.txt").write_text(str(package),encoding="utf8")
-    print("Draft, portable reopen, editable notes, media SHA-256 OK:",package,flush=True)
+    print("Fresh source on restart, portable reopen, editable notes, media SHA-256 OK:",package,flush=True)
     
     
     

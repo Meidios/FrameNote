@@ -38,8 +38,8 @@ with sync_playwright() as pw:
     proc,page=launch(pw,video)
     try:
         at(page,4)
-        action=page.locator("#timelineTools #outBtn + #startPicture")
-        assert action.is_visible() and page.locator("#reviewPanel #startPicture").count()==0
+        action=page.locator("#annotationTools #addPicture")
+        assert action.is_visible() and page.locator("#startPicture").count()==0
         with page.expect_file_chooser() as chooser:action.click()
         chooser.value.set_files([])
         assert page.evaluate("!editing")
@@ -58,10 +58,13 @@ with sync_playwright() as pw:
         moved=ink(page,(212,37,94));assert moved["x"]<after["x"]-30
         page.keyboard.press("Control+Enter");wait(page,"doc.notes.length===1")
         at(page,5);assert page.locator("#ink image").count()==0
-        at(page,8);page.keyboard.press("i");at(page,22);page.keyboard.press("o")
+        at(page,8)
         # Put a generated PNG on the OS clipboard using the browser clipboard API.
         set_clipboard_picture(page)
         page.keyboard.press("Control+v");wait(page,"editing?.pictures?.length===1")
+        assert page.evaluate("editing.startUs===frames[8] && editing.endUs===null")
+        page.locator("#noteDuration").fill(str(page.evaluate("(frames[22]-frames[8])/1e6")))
+        page.locator("#noteDuration").press("Tab")
         b=ink(page,(39,169,89));assert abs(b["width"]/b["height"]-1/3)<.01
         page.locator("#body").fill("参考竖图");page.keyboard.press("Control+Enter")
         at(page,12);ink(page,(39,169,89))
@@ -71,8 +74,8 @@ with sync_playwright() as pw:
     png.unlink()
     proc,page=launch(pw,video)
     try:
-        assert page.evaluate("doc.notes")==expected
-        at(page,4);ink(page,(212,37,94))
+        assert page.evaluate("doc.notes")==[]
+        at(page,4);assert page.locator("#ink image").count()==0
     finally:stop(proc)
     os.environ["FRAMENOTE_DATA_DIR"]=str(work/"clean-profile");video.unlink()
     with zipfile.ZipFile(package) as z:assert len([e for e in z.namelist() if e.startswith("images/")])==2
@@ -87,4 +90,4 @@ with sync_playwright() as pw:
         assert page.evaluate("editing.startUs===frames[27] && editing.endUs===null")
         page.keyboard.press("Control+z");assert page.evaluate("doc.notes.length")==2
     finally:stop(proc)
-    print("PASS: file and clipboard, image-only point, range, placement, locked aspect, draft and standalone package",flush=True)
+    print("PASS: file and clipboard, image-only point, range, placement, locked aspect, clean reopen and standalone package",flush=True)

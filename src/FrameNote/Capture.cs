@@ -44,7 +44,8 @@ public sealed class CropWindow:Window
     static extern bool EnumDisplaySettings(string name,int mode,IntPtr settings);
     public ScreenRect? Crop{get;private set;}
     internal Int32Rect Bounds{get;}
-    public CropWindow(string device){
+    public CropWindow(string device):this(device,[new Shortcut(0,27)]){}
+    internal CropWindow(string device,Shortcut[] cancel){
         Title="框选录制区域";WindowStyle=WindowStyle.None;AllowsTransparency=true;ResizeMode=ResizeMode.NoResize;Topmost=true;ShowInTaskbar=false;
         Background=new SolidColorBrush(Color.FromArgb(32,0,0,0));Cursor=Cursors.Cross;
         // DEVMODEW display union: use physical pixels, including desktops with negative origins.
@@ -60,7 +61,7 @@ public sealed class CropWindow:Window
         // Once WPF has rendered there, fit the client to the physical monitor bounds.
         SourceInitialized+=(_,_)=>FitMonitor();
         ContentRendered+=(_,_)=>FitMonitor();
-        var canvas=new Canvas();Content=canvas;var label=new TextBlock{Text="拖动选择录制区域　·　Esc 取消",Padding=new Thickness(10,5,10,5),FontSize=16};label.SetResourceReference(TextBlock.ForegroundProperty,"ink");label.SetResourceReference(TextBlock.BackgroundProperty,"card");label.SetResourceReference(TextBlock.FontFamilyProperty,"UiFont");Canvas.SetTop(label,18);Canvas.SetLeft(label,24);canvas.Children.Add(label);
+        var canvas=new Canvas();Content=canvas;var label=new TextBlock{Text="拖动选择录制区域"+(cancel.Length==0?"":$"　·　{cancel.Label(InputKind.Keyboard)} 取消"),Padding=new Thickness(10,5,10,5),FontSize=16};label.SetResourceReference(TextBlock.ForegroundProperty,"ink");label.SetResourceReference(TextBlock.BackgroundProperty,"card");label.SetResourceReference(TextBlock.FontFamilyProperty,"UiFont");Canvas.SetTop(label,18);Canvas.SetLeft(label,24);canvas.Children.Add(label);
         var box=new System.Windows.Shapes.Rectangle{StrokeThickness=3};box.SetResourceReference(System.Windows.Shapes.Shape.StrokeProperty,"accent");canvas.Children.Add(box);
         Point Pixel(MouseEventArgs e){
             var p=canvas.PointToScreen(e.GetPosition(canvas));
@@ -80,7 +81,7 @@ public sealed class CropWindow:Window
         MouseLeftButtonUp+=(_,e)=>{if(from is not Point a)return;var b=End(a,e);from=null;ReleaseMouseCapture();
             var width=Math.Abs(b.X-a.X);var height=Math.Abs(b.Y-a.Y);
             if(width<4||height<4)return;Crop=new ScreenRect(Math.Min(a.X,b.X),Math.Min(a.Y,b.Y),width,height);DialogResult=true;};
-        KeyDown+=(_,e)=>{if(e.Key==Key.Escape)DialogResult=false;};
+        KeyDown+=(_,e)=>{if(cancel.Contains(Shortcut.From(e)))DialogResult=false;};
     }
     [System.Runtime.InteropServices.DllImport("user32.dll")]static extern bool SetWindowPos(IntPtr hwnd,IntPtr insert,int x,int y,int w,int h,uint flags);
 }

@@ -13,14 +13,14 @@ public sealed class CaptureSession : IDisposable
 {
     readonly Recorder video;
     readonly List<CaptureInput> sources;
-    readonly List<(TimestampedAudio Track,int GainDb)> audio=[];
+    CaptureAudioMix? audio;
     readonly TaskCompletionSource videoDone=new(TaskCreationOptions.RunContinuationsAsynchronously);
     readonly TaskCompletionSource completed=new(TaskCreationOptions.RunContinuationsAsynchronously);
     string? directory;
-    long epoch,firstFrame;
+    long firstFrame;
     internal long VideoEpoch100ns=>Interlocked.Read(ref firstFrame);
     public Task Completion=>completed.Task;
-    internal float RecordedPeak(string deviceId)=>audio.FirstOrDefault(t=>t.Track.DeviceId==deviceId).Track?.RecordedPeak??0;
+    internal float RecordedPeak(string deviceId)=>audio?.RecordedPeak(deviceId)??0;
     public CaptureSession(RecordingSourceBase source,List<CaptureInput> sources,int fps,bool high){
         if(sources.Any(s=>s.GainDb is < -60 or > 0))throw new ArgumentOutOfRangeException(nameof(sources));
         this.sources=sources;
@@ -33,28 +33,20 @@ public sealed class CaptureSession : IDisposable
         if(directory!=null)throw new InvalidOperationException();
         directory=Path.Combine(Path.GetDirectoryName(Path.GetFullPath(destination))!,".framenote-"+Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(directory);
-        epoch=TimestampedAudio.Now100ns();
         try{
-            foreach(var source in sources.Where(s=>!s.Muted)){
-                audio.Add((new TimestampedAudio(source.Id,source.Loopback,Path.Combine(directory,$"audio-{audio.Count}.mka"),epoch),source.GainDb));
-            }
+            audio=new CaptureAudioMix(sources,directory);
             video.Record(Path.Combine(directory,"video.mp4"));
-            _=Finish(destination);
-        }catch{try{StopAudio();}finally{Clean();}throw;}
+            _=Finish(destination,audio);
+        }catch{try{audio?.Dispose();}finally{Clean();}throw;}
     }
-    void StopAudio(){
-        Exception? error=null;
-        foreach(var (track,_) in audio){try{track.Dispose();}catch(Exception e){error??=e;}}
-        if(error!=null)throw new IOException("采集音频失败。",error);
-    }
-    async Task Finish(string destination){
+    async Task Finish(string destination,CaptureAudioMix mix){
         try{
-            try{await videoDone.Task.ConfigureAwait(false);}finally{StopAudio();}
+            try{await videoDone.Task.ConfigureAwait(false);}finally{mix.Dispose();}
             var file=Path.Combine(directory!,"video.mp4");
             if(sources.Count>0){
                 if(firstFrame==0)throw new IOException("缺少视频起点时间。");
                 var withSound=Path.Combine(directory!,"complete.mp4");
-                await Mux(file,withSound,(firstFrame-epoch)/1e7,audio.Where(t=>t.Track.HasPackets).Select(t=>(t.Track.Path,t.GainDb))).ConfigureAwait(false);file=withSound;
+                await Mux(file,withSound,(firstFrame-mix.Epoch)/1e7,mix.Tracks).ConfigureAwait(false);file=withSound;
             }
             File.Move(file,destination,true);Clean();completed.TrySetResult();
         }catch(Exception e){
@@ -68,18 +60,8 @@ public sealed class CaptureSession : IDisposable
         var duration=double.Parse(doc.RootElement.GetProperty("streams")[0].GetProperty("duration").GetString()!,CultureInfo.InvariantCulture);
         if(!double.IsFinite(duration)||duration<=0)throw new InvalidDataException("无有效视频时长。");
         var args=new List<string>{"-hide_banner","-loglevel","error","-nostdin","-copyts","-i",file};
-        var filters=new List<string>();var labels=new List<string>();
-        // A completely idle loopback endpoint may legitimately deliver no packets.
-        foreach(var (track,gainDb) in tracks){
-            args.AddRange(["-i",track]);int n=labels.Count+1;var label=$"[a{n}]";labels.Add(label);
-            // first_pts=0 trims preroll or inserts missing leading silence. Later gaps
-            // and clock skew are recovered from packet PTS, not from callback arrival.
-            var start=videoStart.ToString("F7",CultureInfo.InvariantCulture);
-            filters.Add($"[{n}:a]asetpts=PTS-{start}/TB,aresample=48000:async=1000:first_pts=0:min_hard_comp=0.04,aformat=channel_layouts=stereo,volume={gainDb.ToString(CultureInfo.InvariantCulture)}dB{label}");
-        }
-        if(labels.Count==0)filters.Add("anullsrc=sample_rate=48000:channel_layout=stereo[mix]");
-        else filters.Add(string.Concat(labels)+(labels.Count==1?"anull":$"amix=inputs={labels.Count}:normalize=0")+ ",apad[mix]");
-        args.AddRange(["-filter_complex",string.Join(';',filters),"-map","0:v:0","-map","[mix]","-c:v","copy","-c:a","aac","-b:a","192k","-t",duration.ToString("F7",CultureInfo.InvariantCulture),"-movflags","+faststart",output]);
+        CaptureAudioMix.AppendMix(args,1,videoStart,tracks);
+        args.AddRange(["-map","0:v:0","-map","[mix]","-c:v","copy","-c:a","aac","-b:a","192k","-t",duration.ToString("F7",CultureInfo.InvariantCulture),"-movflags","+faststart",output]);
         await Probe.Run("ffmpeg",args.ToArray()).ConfigureAwait(false);
     }
     public void Stop()=>video.Stop();

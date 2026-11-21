@@ -38,13 +38,14 @@ const imageView=(()=>{
   if(prepared && prepared.src===src){img.replaceWith(prepared);img=prepared;prepared=null;}
   img.hidden=false;if(img.src!==src)img.src=src;reset();
   $('imageNav').hidden=!folder;
-  $('imageHelp').textContent='滚轮缩放　放大后左键拖动'+(folder?'　← → 切图':'');
+  hint();
   stage.focus({preventScroll:true});
  }
  async function upgrade(src){
   const old=img,next=old.cloneNode(false);next.src=src;
   try{await next.decode();if(img===old&&!old.hidden){old.replaceWith(next);img=next;scaled=false;draw();}}catch{}
  }
+ function hint(){$('imageHelp').textContent='滚轮缩放　放大后左键拖动'+($('imageNav').hidden?'':bindingText(['prev','next'],'　',' 切图'))}
  function adjacent(direction){if(!busy&&!imagePending&&!img.hidden)send('adjacentImage',{direction})}
  $('prevImage').onclick=()=>adjacent(-1);
  $('nextImage').onclick=()=>adjacent(1);
@@ -61,7 +62,7 @@ const imageView=(()=>{
   if(scale>1 && scaled && !busy)send('fullImage',{id:doc.id});
  },{passive:false});
  stage.addEventListener('pointerdown',e=>{
-  if(img.hidden || tool || e.target.closest("#imageNav,[data-note],[data-picture]") || scale<=1 || e.button!==0 || !e.isPrimary)return;
+  if(img.hidden || tool || e.target.closest("button,[data-note],[data-picture]") || scale<=1 || e.button!==0 || !e.isPrimary)return;
   e.preventDefault();stage.focus({preventScroll:true});stage.setPointerCapture(e.pointerId);
   drag={id:e.pointerId,lastX:e.clientX,lastY:e.clientY};stage.classList.add('dragging');
  });
@@ -73,5 +74,5 @@ const imageView=(()=>{
   stage.addEventListener(event,e=>{if(drag?.id===e.pointerId)stopDrag()});
  img.addEventListener("load",draw);
  new ResizeObserver(()=>{if(!img.hidden)draw()}).observe(stage);
- return {prepare,show,reset,adjacent,upgrade,ensureOriginal(){if(scaled&&!busy)send('fullImage',{id:doc.id})}};
+ return {prepare,show,reset,adjacent,upgrade,hint,ensureOriginal(){if(scaled&&!busy)send('fullImage',{id:doc.id})}};
 })();

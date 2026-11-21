@@ -16,6 +16,7 @@ const outputs=new Map();
 let microphone=null;
 function newChannel(device){return {id:device.id,name:device.name,gainDb:0,muted:false,peak:0,offline:false}}
 function settingsFor({id,gainDb,muted}){return {id,gainDb,muted}}
+function mixerSettings(){return {outputs:Array.from(outputs.values(),settingsFor),mic:microphone?settingsFor(microphone):null}}
 function channels(){return [...outputs.values(),...(microphone?[microphone]:[])]}
 let meterRows=[],meterVisible=false,meterFrame=0,meterPending=false,latestLevels=null;
 function scheduleMeters(){
@@ -63,7 +64,7 @@ function strip(ch,isMic){
   slider.value=ch.gainDb;value.textContent=ch.gainDb+' dB';slider.setAttribute('aria-valuetext',value.textContent);paintPeak(ch);
  }
  slider.oninput=()=>{ch.gainDb=Number(slider.value);update()};
- mute.onclick=()=>{ch.muted=!ch.muted;update()};update();return row;
+ mute.onclick=()=>{ch.muted=!ch.muted;update();window.refreshVoice?.()};update();return row;
 }
 function renderMixer(){
  const available=catalog.outputs.filter(d=>!outputs.has(d.id)&&d.id!==microphone?.id);
@@ -75,13 +76,13 @@ function renderMixer(){
  populate('mic',inputs,microphone?.id??'');
  $('micStrip').replaceChildren(...(microphone?[strip(microphone,true)]:[]));
  meterRows=channels().filter(ch=>!ch.offline);
- send('meterSources',{ids:meterRows.map(ch=>ch.id)});scheduleMeters();window.captureButtons();
+ send('meterSources',{ids:meterRows.map(ch=>ch.id)});scheduleMeters();window.captureButtons();window.refreshVoice?.();
 }
 window.captureButtons=()=>{
  const usable=!!catalog && !!$('source').value && ($('mode').value!=='region'||region?.device===$('source').value);
  for(const [id,kind,label] of [['record','video','录制视频'],['recordGif','gif','录制 GIF']]){
   const stopping=recording===kind, action=stopping?'停止录制':label;
-  const hint=kind==='video'?'（Ctrl+Alt+F9）':stopping?' GIF':'（最长 30 秒）';
+  const hint=kind==='video'?bindingText('record','（','）'):stopping?' GIF':'（最长 30 秒）';
   setIconAction(id,stopping?'stop':kind==='video'?'video_recording':'gif',action,action+hint);
   $(id).disabled=starting||(recording?recording!==kind:(!usable||!!editing||(kind==='video'&&channels().some(ch=>ch.offline))));
   $(id).classList.toggle('active',recording===kind);
@@ -93,7 +94,7 @@ function capture(gif){
  if(recording){send('stop');return}
  if($(gif?'recordGif':'record').disabled)return;
  starting=true;window.captureButtons();send('record',{gif,settings:{mode:$('mode').value,source:$('source').value,
- fps:+$('fps').value,high:$('quality').value==='high',outputs:Array.from(outputs.values(),settingsFor),mic:microphone?settingsFor(microphone):null,cursor:$('cursor').checked}});
+ fps:+$('fps').value,high:$('quality').value==='high',mixer:mixerSettings(),cursor:$('cursor').checked}});
 }
 $('record').onclick=()=>capture(false);$('recordGif').onclick=()=>capture(true);
 $('mode').onchange=()=>{sources(false);send('catalog')};$('source').onchange=()=>{clearRegion();window.captureButtons()};

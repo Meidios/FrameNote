@@ -15,9 +15,6 @@ internal static class ReviewVoice
         if(expected!=null && expected!=hash)throw new InvalidDataException("语音附件校验失败。");
         string dest=PathFor(dir,hash);if(!File.Exists(dest))Packages.Atomic(dest,s=>s.Write(bytes));return hash;
     }
-    internal static void Copy(Review doc,string from,string to){
-        foreach(string hash in Assets(doc)){string dest=PathFor(to,hash);if(!File.Exists(dest))Store(to,File.ReadAllBytes(PathFor(from,hash)),hash);}
-    }
     internal static void Write(ZipArchive zip,Review doc,string dir){
         foreach(string hash in Assets(doc)){
             using var input=File.OpenRead(PathFor(dir,hash));using var output=zip.CreateEntry("voice/"+hash+".m4a",CompressionLevel.NoCompression).Open();input.CopyTo(output);

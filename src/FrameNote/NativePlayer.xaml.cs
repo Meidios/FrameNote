@@ -2,8 +2,11 @@ using System.IO;
 using System.Globalization;
 using System.Windows;
 using System.Windows.Controls;
+using System.Windows.Controls.Primitives;
 using System.Windows.Input;
 using System.Windows.Threading;
+using RadialGradientBrush = System.Windows.Media.RadialGradientBrush;
+using System.Windows.Media.Animation;
 using System.Windows.Media.Imaging;
 using LibVLCSharp.Shared;
 
@@ -37,6 +40,17 @@ public partial class NativePlayer : UserControl, IDisposable
     }
     public NativePlayer(string scratch,Task<LibVLC>? warming=null){
         this.scratch=scratch;InitializeComponent();
+        ButtonHint.CustomPopupPlacementCallback=(tip,button,offset)=>[
+            new(new Point((button.Width-tip.Width)/2,-tip.Height-6),PopupPrimaryAxis.Horizontal),
+            new(new Point((button.Width-tip.Width)/2,button.Height+6),PopupPrimaryAxis.Horizontal)
+        ];
+        BindToolbarHover(Shuttle,Previous,Toggle,Next);
+        BindToolbarHover(Output,CopyFrame,SaveFrame,Mute,Full);
+        BindToolbarHover(PlaylistButton,PlaylistButton);
+        Window? host=null;
+        void HideHint(object? sender,EventArgs e)=>ButtonHint.IsOpen=false;
+        Loaded+=(_,_)=>{host=Window.GetWindow(this);if(host!=null)host.Deactivated+=HideHint;};
+        Unloaded+=(_,_)=>{if(host!=null)host.Deactivated-=HideHint;ButtonHint.IsOpen=false;};
         engine=warming?.GetAwaiter().GetResult()??CreateEngine();
         player=new MediaPlayer(engine){EnableMouseInput=false,EnableKeyInput=false};
         player.EndReached+=(_,_)=>Dispatcher.BeginInvoke(()=>{
@@ -58,15 +72,61 @@ public partial class NativePlayer : UserControl, IDisposable
         Mute.Click+=(_,_)=>VolumeRequested?.Invoke(volume==0?audibleVolume:0);
         Full.Click+=(_,_)=>FullscreenRequested?.Invoke(!fullscreen);
         PreviewKeyDown+=async (_,e)=>{
-            if(e.Key==Key.Escape && fullscreen){e.Handled=true;FullscreenRequested?.Invoke(false);}
-            else if(Shuttle.IsEnabled && e.Key==Key.Space && e.OriginalSource is not Button){e.Handled=true;TogglePlay();}
-            else if(Shuttle.IsEnabled && (e.Key is Key.Left or Key.Right) && !VolumeSlider.IsKeyboardFocusWithin && !Timeline.IsKeyboardFocusWithin){
-                e.Handled=true;await Step(e.Key==Key.Left?-1:1);
+            var key=Shortcut.From(e);
+            if(bindings["cancel"].Contains(key) && fullscreen){e.Handled=true;FullscreenRequested?.Invoke(false);}
+            else if(bindings["open"].Contains(key) && OpenButton.IsEnabled){e.Handled=true;OpenRequested?.Invoke();}
+            else if(Shuttle.IsEnabled && bindings["play"].Contains(key) && !(key.Vk==32 && e.OriginalSource is System.Windows.Controls.Primitives.ButtonBase)){e.Handled=true;TogglePlay();}
+            else if(Shuttle.IsEnabled && (bindings["prev"].Contains(key) || bindings["next"].Contains(key)) && !VolumeSlider.IsKeyboardFocusWithin && !Timeline.IsKeyboardFocusWithin){
+                e.Handled=true;await Step(bindings["prev"].Contains(key)?-1:1);
             }
         };
         OpenButton.Click+=(_,_)=>OpenRequested?.Invoke();
         ReviewButton.Click+=(_,_)=>ReviewRequested?.Invoke();
         CancelButton.Click+=(_,_)=>CancelRequested?.Invoke();
+    }
+    ShortcutMap bindings=Shortcuts.Defaults();
+    void BindToolbarHover(FrameworkElement group,params ButtonBase[] buttons){
+        void Show(ButtonBase button){
+            if(!button.IsEnabled||!button.IsVisible)return;
+            ButtonHint.PlacementTarget=button;
+            ButtonHint.IsOpen=true;
+        }
+        void Hide(ButtonBase button){
+            if(ButtonHint.PlacementTarget==button)ButtonHint.IsOpen=false;
+        }
+        foreach(var button in buttons){
+            button.MouseEnter+=(_,_)=>Show(button);
+            button.MouseLeave+=(_,_)=>Hide(button);
+            button.GotKeyboardFocus+=(_,_)=>{if(InputManager.Current.MostRecentInputDevice is KeyboardDevice)Show(button);};
+            button.LostKeyboardFocus+=(_,_)=>Hide(button);
+            button.PreviewMouseDown+=(_,_)=>Hide(button);
+            button.IsVisibleChanged+=(_,_)=>{if(!button.IsVisible)Hide(button);};
+            button.IsEnabledChanged+=(_,_)=>{if(!button.IsEnabled)Hide(button);};
+            button.PreviewKeyDown+=(_,e)=>{if(e.Key==Key.Escape)Hide(button);};
+        }
+        group.MouseMove+=(_,e)=>{
+            foreach(var button in buttons){
+                if(button.Template?.FindName("light",button) is not Border light ||
+                   light.OpacityMask is not RadialGradientBrush brush)continue;
+                if(brush.IsFrozen){brush=brush.Clone();light.OpacityMask=brush;}
+                var point=e.GetPosition(light);
+                brush.Center=brush.GradientOrigin=point;
+            }
+        };
+        void Fade(double value){
+            foreach(var button in buttons){
+                if(button.Template?.FindName("light",button) is Border light)
+                    light.BeginAnimation(OpacityProperty,new DoubleAnimation(value,TimeSpan.FromMilliseconds(SystemParameters.ClientAreaAnimation?120:0)));
+            }
+        }
+        group.MouseEnter+=(_,_)=>Fade(1);
+        group.MouseLeave+=(_,_)=>Fade(0);
+    }
+    string ShortcutHint(string label,string id)=>bindings[id].Length==0?label:label+"（"+bindings[id].Label(InputKind.Keyboard)+"）";
+    internal void SetShortcuts(ShortcutMap map){
+        bindings=map;Previous.ToolTip=ShortcutHint("上一帧","prev");Next.ToolTip=ShortcutHint("下一帧","next");
+        OpenButton.ToolTip=ShortcutHint("打开文件","open");Toggle.ToolTip=ShortcutHint(player.IsPlaying?"暂停":"播放","play");
+        Full.ToolTip=fullscreen?ShortcutHint("退出全屏","cancel"):"全屏预览";
     }
     void Icon(Button button,string key,string label){
         var asset=FindResource(key);
@@ -80,7 +140,7 @@ public partial class NativePlayer : UserControl, IDisposable
     }
     public void SetFullscreen(bool on){
         fullscreen=on;Header.Visibility=on?Visibility.Collapsed:Visibility.Visible;
-        Icon(Full,on?"full_screen_minimize":"full_screen_maximize",on?"退出全屏（Esc）":"全屏预览");
+        Icon(Full,on?"full_screen_minimize":"full_screen_maximize",on?ShortcutHint("退出全屏","cancel"):"全屏预览");
         Full.Focus();
     }
     static string Stamp(long ms){
@@ -92,7 +152,7 @@ public partial class NativePlayer : UserControl, IDisposable
         Timeline.Maximum=Math.Max(1,player.Length);
         if(!Timeline.IsMouseCaptureWithin)Timeline.Value=TimeMs;
         syncing=false;
-        Icon(Toggle,player.IsPlaying?"pause":"play",player.State==VLCState.Ended?"重播":player.IsPlaying?"暂停（空格）":"播放（空格）");
+        Icon(Toggle,player.IsPlaying?"pause":"play",ShortcutHint(player.State==VLCState.Ended?"重播":player.IsPlaying?"暂停":"播放","play"));
         Clock.Text=Stamp(TimeMs)+" / "+Stamp(player.Length);
         if(player.State==VLCState.Error)Hint.Text="无法播放此文件；可尝试进入批注。";
     }
@@ -189,9 +249,21 @@ public partial class NativePlayer : UserControl, IDisposable
         timer.Start();Focus();
     }
     public void Pause()=>player.SetPause(true);
-    public void Preparing(bool preparing,string message){
+    public void Preparing(bool preparing,string message,bool showProgress=false){
         OpenButton.IsEnabled=ReviewButton.IsEnabled=Shuttle.IsEnabled=Output.IsEnabled=Timeline.IsEnabled=!preparing;
-        CancelButton.Visibility=preparing?Visibility.Visible:Visibility.Collapsed;Hint.Text=message;
+        // The VLC child HWND would otherwise cover the WPF loading panel.
+        VideoArea.Visibility=preparing?Visibility.Hidden:Visibility.Visible;
+        LoadingOverlay.Visibility=preparing?Visibility.Visible:Visibility.Collapsed;
+        Hint.Text=preparing?"":message;
+        if(preparing){
+            LoadingTitle.Text=message;
+            PreviewBar.Visibility=PreviewPercent.Visibility=showProgress?Visibility.Visible:Visibility.Collapsed;
+            SetPreviewProgress(0);
+            CancelButton.Focus();
+        }
+    }
+    public void SetPreviewProgress(int percent){
+        PreviewBar.Value=percent;PreviewPercent.Text=$"{percent}%";
     }
     public void Stop(){
         timer.Stop();session?.Cancel();session?.Dispose();session=null;

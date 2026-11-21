@@ -1,42 +1,99 @@
 'use strict';
-// The project clock is independent of decoder time, so gaps and detached audio remain playable.
-const transport=(()=>{
- let paused=true,time=0,rate=1,last=0,sourceFrames=[],sourceUrl='',videoId=null;
- const sounds=new Map(),active=()=>!!doc?.timeline;
- function icon(){const stop=api.paused;setIconAction('play',stop?'play':'pause',stop?'播放':'暂停',(stop?'播放':'暂停')+'（空格）')}
- function audio(c,us,live){
-  let a=sounds.get(c.id);const url=c.track==='voice'?imageBase+c.asset+'.m4a':sourceUrl;
-  if(!a||a.src!==url){a?.pause();a=new Audio(url);sounds.set(c.id,a)}
-  const offset=(c.sourceUs+us-c.startUs)/1e6;
-  if(Math.abs(a.currentTime-offset)>.07)a.currentTime=offset;
-  a.volume=v.volume;a.muted=v.volume===0;a.playbackRate=rate;
-  if(live&&a.paused)a.play().catch(()=>{});else if(!live)a.pause();
+// Do not interrupt the audio device to chase normal decoder startup or output latency.
+const mediaSyncState=new WeakMap();
+function syncClipMedia(a,offset,rate,volume,playing,reposition){
+ let state=mediaSyncState.get(a);
+ if(!state){state={driftSince:null,checkAfter:0,starting:false};mediaSyncState.set(a,state);reposition=true}
+ if(a.volume!==volume)a.volume=volume;
+ if(a.playbackRate!==rate)a.playbackRate=rate;
+ const now=performance.now(),error=Math.abs(a.currentTime-offset);
+ if(playing&&!reposition&&!a.paused&&!a.seeking&&a.readyState>=3&&now>=state.checkAfter&&error>.18*rate){
+  state.driftSince??=now;
+  reposition=now-state.driftSince>=400;
+ }else state.driftSince=null;
+ if(reposition){
+  if(error>.000001)a.currentTime=offset;
+  state.driftSince=null;state.checkAfter=now+1000;
  }
- function sync(){
+ if(!playing){if(!a.paused)a.pause();return}
+ if(a.paused&&!a.ended&&!a.error&&!state.starting){
+  state.starting=true;
+  a.play().catch(()=>{}).finally(()=>{state.starting=false});
+ }
+}
+function releaseAudio(a){
+ a.pause();a.removeAttribute('src');a.load();
+}
+const transport=(()=>{
+ let paused=true,time=0,rate=1,last=0,sourceFrames=[],sourceUrl='',videoClip=null;
+ let clockMedia=null,clockClip=null;
+ const sounds=new Map(),active=()=>!!doc?.timeline;
+ function icon(){const stop=api.paused;setIconAction('play',stop?'play':'pause',stop?'播放':'暂停',shortcutHint(stop?'播放':'暂停','play'))}
+ function audio(c,us,live,reposition){
+  let a=sounds.get(c.id);const url=c.track==='voice'?imageBase+c.asset+'.m4a':sourceUrl;
+  if(a&&a.getAttribute('src')!==url){releaseAudio(a);sounds.delete(c.id);a=null}
+  if(!a){if(!live)return;a=new Audio(url);sounds.set(c.id,a)}
+  syncClipMedia(a,(c.sourceUs+us-c.startUs)/1e6,rate,v.volume,live,reposition);
+ }
+ function sync(reposition=false){
   if(!active())return;
-  const us=time*1e6,c=doc.timeline.clips.find(c=>c.track==='video'&&us>=c.startUs&&us<EditModel.end(c));
-  v.muted=true;v.style.visibility=c?'visible':'hidden';
-  if(c){const offset=(c.sourceUs+us-c.startUs)/1e6;if(videoId!==c.id||Math.abs(v.currentTime-offset)>.12){v.currentTime=offset;videoId=c.id;}v.playbackRate=rate;if(!paused&&v.paused)v.play().catch(()=>{});if(paused)v.pause();}
-  else{videoId=null;v.pause()}
-  const ids=new Set();for(const clip of doc.timeline.clips)if(clip.track!=='video'&&us>=clip.startUs&&us<EditModel.end(clip)){ids.add(clip.id);audio(clip,us,!paused&&(clip.track==='audio'||!window.voiceActive?.()))}
-  for(const [id,a] of sounds)if(!ids.has(id)){a.pause();sounds.delete(id)}
-  shown=Math.round(us);$('clock').textContent=fmt(shown);$('seek').value=shown;$('timeline').style.setProperty('--position',100*shown/doc.durationUs+'%');paint();icon();
+  const us=Math.round(time*1e6),clips=doc.timeline.clips;
+  const c=clips.find(c=>c.track==='video'&&us>=c.startUs&&us<EditModel.end(c));
+  // Keep an independent audio decoder for a clip spanning a video cut or gap.
+  const original=clips.find(a=>a.track==='audio'&&a.startUs<=us&&us<EditModel.end(a));
+  const embedded=!!(c&&original&&original.startUs>=c.startUs&&EditModel.end(original)<=EditModel.end(c)&&
+   original.sourceUs-original.startUs===c.sourceUs-c.startUs);
+  const muteVideo=!embedded;
+  if(v.muted!==muteVideo)v.muted=muteVideo;
+  if(c){
+   const offset=(c.sourceUs+us-c.startUs)/1e6;
+   const cut=!videoClip||c.sourceUs-c.startUs!==videoClip.sourceUs-videoClip.startUs;
+   syncClipMedia(v,offset,rate,v.volume,!paused,reposition||cut);
+  }else if(!v.paused)v.pause();
+  if(!!videoClip!==!!c)v.style.visibility=c?'visible':'hidden';
+  videoClip=c;
+  const ids=new Set();
+  clockMedia=c?v:null;clockClip=c;
+  if(original&&!embedded){
+   ids.add(original.id);audio(original,us,!paused,reposition);
+   const a=sounds.get(original.id);
+   if(a&&!a.error){clockMedia=a;clockClip=original}
+  }
+  const live=!paused&&!window.voiceActive?.()&&(!clockMedia||(!clockMedia.seeking&&clockMedia.readyState>=3));
+  for(const clip of clips)if(clip.track==='voice'&&us>=clip.startUs&&us<EditModel.end(clip)){
+   ids.add(clip.id);audio(clip,us,live,reposition);
+  }
+  for(const [id,a] of sounds)if(!ids.has(id)){releaseAudio(a);sounds.delete(id)}
+  shown=Math.round(us);$('clock').textContent=fmt(shown);$('seek').value=shown;$('timeline').style.setProperty('--position',100*shown/doc.durationUs+'%');paintPlayback();icon();
  }
  function step(now){
   if(active()&&ready){
-   if(!paused){time=Math.min(doc.durationUs/1e6,time+Math.max(0,(now-last)/1000)*rate);const n=doc.notes.find(n=>n.id===loopId);if(n&&time*1e6>=n.endUs)time=n.startUs/1e6;if(time>=doc.durationUs/1e6)paused=true;}
-   sync();window.syncNoteVoices?.();
+   if(!paused){
+    // Detached source audio can run uninterrupted across video cuts and black frames.
+    if(clockMedia&&!clockMedia.ended&&!clockMedia.error){
+     if(!clockMedia.paused&&!clockMedia.seeking)time=Math.max(time,Math.min(EditModel.end(clockClip)/1e6,clockMedia.currentTime+(clockClip.startUs-clockClip.sourceUs)/1e6));
+    }else time+=Math.max(0,(now-last)/1000)*rate;
+    const n=loopId&&doc.notes.find(n=>n.id===loopId),loop=n&&time*1e6>=n.endUs;
+    if(loop)time=n.startUs/1e6;
+    if(time>=doc.durationUs/1e6){time=doc.durationUs/1e6;paused=true}
+    sync(!!loop);window.syncNoteVoices?.();
+   }
   }
   last=now;requestAnimationFrame(step);
  }
  requestAnimationFrame(step);
  const api={
-  get currentTime(){return active()?time:v.currentTime},set currentTime(x){if(active()){time=Math.max(0,Math.min(doc.durationUs/1e6,x));videoId=null;sync()}else v.currentTime=x},
+  get currentTime(){return active()?time:v.currentTime},set currentTime(x){if(active()){time=Math.max(0,Math.min(doc.durationUs/1e6,x));sync(true)}else v.currentTime=x},
   get paused(){return active()?paused:v.paused},get ended(){return active()?time>=doc.durationUs/1e6:v.ended},
   get playbackRate(){return active()?rate:v.playbackRate},set playbackRate(x){rate=x;v.playbackRate=x},
-  play(){if(!active())return v.play();if(api.ended)time=0;paused=false;last=performance.now();sync();return Promise.resolve()},
-  pause(){paused=true;v.pause();for(const a of sounds.values())a.pause();if(active())icon()},
-  configure(m){paused=true;time=(m?.us??shown??0)/1e6;videoId=null;for(const a of sounds.values())a.pause();sounds.clear();if(m){sourceFrames=m.frames;sourceUrl=m.src;}v.style.visibility='visible';v.muted=false;
+  play(){window.stopVoicePreview?.();if(!active())return v.play();const restart=api.ended;if(restart)time=0;paused=false;last=performance.now();sync(restart);return Promise.resolve()},
+  pause(){
+   window.stopVoicePreview?.();paused=true;v.pause();
+   if(active()){for(const a of sounds.values())a.pause();icon()}
+   else{for(const a of sounds.values())releaseAudio(a);sounds.clear()}
+   window.syncNoteVoices?.();
+  },
+  configure(m){paused=true;time=(m?.us??shown??0)/1e6;videoClip=null;for(const a of sounds.values())releaseAudio(a);sounds.clear();if(m){sourceFrames=m.frames;sourceUrl=m.src;}v.style.visibility=active()?'hidden':'visible';if(v.muted)v.muted=false;
    if(active()){
     const projected=new Set([0]);for(const c of doc.timeline.clips.filter(c=>c.track==='video')){projected.add(c.startUs);projected.add(EditModel.end(c));for(const t of sourceFrames)if(t>=c.sourceUs&&t<c.sourceUs+c.durationUs)projected.add(c.startUs+t-c.sourceUs)}
     // Frame stepping also works across silent/black gaps.
