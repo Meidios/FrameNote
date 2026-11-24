@@ -28,7 +28,7 @@ const transport=(()=>{
  let paused=true,time=0,rate=1,last=0,sourceFrames=[],sourceUrl='',videoClip=null;
  let clockMedia=null,clockClip=null;
  const sounds=new Map(),active=()=>!!doc?.timeline;
- function icon(){const stop=api.paused;setIconAction('play',stop?'play':'pause',stop?'播放':'暂停',shortcutHint(stop?'播放':'暂停','play'))}
+ function icon(){const stop=api.paused;setIconAction('play',stop?'play':'pause',stop?tr('播放'):tr('暂停'),shortcutHint(stop?tr('播放'):tr('暂停'),'play'))}
  function audio(c,us,live,reposition){
   let a=sounds.get(c.id);const url=c.track==='voice'?imageBase+c.asset+'.m4a':sourceUrl;
   if(a&&a.getAttribute('src')!==url){releaseAudio(a);sounds.delete(c.id);a=null}
@@ -64,7 +64,7 @@ const transport=(()=>{
    ids.add(clip.id);audio(clip,us,live,reposition);
   }
   for(const [id,a] of sounds)if(!ids.has(id)){releaseAudio(a);sounds.delete(id)}
-  shown=Math.round(us);$('clock').textContent=fmt(shown);$('seek').value=shown;$('timeline').style.setProperty('--position',100*shown/doc.durationUs+'%');paintPlayback();icon();
+  shown=Math.round(us);if(!scrubber.active())showPlayhead(shown);paintPlayback();icon();
  }
  function step(now){
   if(active()&&ready){
@@ -86,14 +86,14 @@ const transport=(()=>{
   get currentTime(){return active()?time:v.currentTime},set currentTime(x){if(active()){time=Math.max(0,Math.min(doc.durationUs/1e6,x));sync(true)}else v.currentTime=x},
   get paused(){return active()?paused:v.paused},get ended(){return active()?time>=doc.durationUs/1e6:v.ended},
   get playbackRate(){return active()?rate:v.playbackRate},set playbackRate(x){rate=x;v.playbackRate=x},
-  play(){window.stopVoicePreview?.();if(!active())return v.play();const restart=api.ended;if(restart)time=0;paused=false;last=performance.now();sync(restart);return Promise.resolve()},
+  play(){if(!active())return v.play();const restart=api.ended;if(restart)time=0;paused=false;last=performance.now();sync(restart);return Promise.resolve()},
   pause(){
-   window.stopVoicePreview?.();paused=true;v.pause();
+   paused=true;v.pause();
    if(active()){for(const a of sounds.values())a.pause();icon()}
    else{for(const a of sounds.values())releaseAudio(a);sounds.clear()}
    window.syncNoteVoices?.();
   },
-  configure(m){paused=true;time=(m?.us??shown??0)/1e6;videoClip=null;for(const a of sounds.values())releaseAudio(a);sounds.clear();if(m){sourceFrames=m.frames;sourceUrl=m.src;}v.style.visibility=active()?'hidden':'visible';if(v.muted)v.muted=false;
+  configure(m){scrubber.reset();paused=true;time=(m?.us??shown??0)/1e6;videoClip=null;for(const a of sounds.values())releaseAudio(a);sounds.clear();if(m){sourceFrames=m.frames;sourceUrl=m.src;}v.style.visibility=active()?'hidden':'visible';if(v.muted)v.muted=false;
    if(active()){
     const projected=new Set([0]);for(const c of doc.timeline.clips.filter(c=>c.track==='video')){projected.add(c.startUs);projected.add(EditModel.end(c));for(const t of sourceFrames)if(t>=c.sourceUs&&t<c.sourceUs+c.durationUs)projected.add(c.startUs+t-c.sourceUs)}
     // Frame stepping also works across silent/black gaps.
@@ -101,6 +101,17 @@ const transport=(()=>{
     frames=[...projected].filter(t=>t<doc.durationUs).sort((a,b)=>a-b);time=Math.min(time,(doc.durationUs-1)/1e6);sync();
    }else if(sourceFrames.length){frames=sourceFrames;if(v.readyState)v.currentTime=time;}
    $('duration').textContent=fmt(doc?.durationUs??0);$('seek').max=doc?.durationUs??0;window.refreshTimeline?.();
-  },active
+  },active,
+  sourceFrameAt(us){
+   if(imageDoc())return 0;
+   if(active()){
+    const clip=doc.timeline.clips.find(c=>c.track==='video'&&us>=c.startUs&&us<EditModel.end(c));
+    if(!clip)return -1-(frames[index(us)]??us);
+    us=clip.sourceUs+us-clip.startUs;
+   }
+   let lo=0,hi=sourceFrames.length;
+   while(lo<hi){const mid=(lo+hi)>>>1;if(sourceFrames[mid]<=us+2)lo=mid+1;else hi=mid}
+   return sourceFrames[Math.max(0,lo-1)]??0;
+  }
  };return api;
 })();

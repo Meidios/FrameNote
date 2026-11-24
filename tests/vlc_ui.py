@@ -3,7 +3,7 @@ import os, subprocess, time, zipfile, json, hashlib
 from PIL import ImageStat, Image
 from playwright.sync_api import sync_playwright
 from pywinauto import Desktop
-from review_ui import fixtures, work, launch, stop, wait, at
+from review_ui import exported_file, fixtures, work, launch, stop, wait, at
 
 os.environ["FRAMENOTE_DATA_DIR"]=str(work/"profile")
 mkv=work/"变帧率 PCM.mkv"
@@ -54,7 +54,7 @@ with sync_playwright() as pw:
         png=work/"review.png";page.locator("#saveFrame").click(no_wait_after=True);file_dialog(proc,png)
         until(png.exists);wait(page,"!busy")
         with Image.open(png) as image:assert image.width==page.evaluate("v.videoWidth")
-        package=work/"兼容性.framenote";page.locator("#save").click(no_wait_after=True);file_dialog(proc,package)
+        package=work/"兼容性.framenote";page.locator("#save").click(no_wait_after=True);package=exported_file(proc)
         until(package.exists);wait(page,"!busy")
         with zipfile.ZipFile(package) as z:
             assert hashlib.sha256(z.read("media/source.mkv")).digest()==hashlib.sha256(mkv.read_bytes()).digest()

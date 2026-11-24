@@ -17,7 +17,7 @@ internal sealed class RegionOutline : Window
     [DllImport("user32.dll")] static extern bool SetWindowPos(IntPtr hwnd,IntPtr after,int x,int y,int w,int h,uint flags);
 
     internal RegionOutline(Int32Rect monitor,ScreenRect region){
-        Title="FrameNote 选区边框";WindowStyle=WindowStyle.None;AllowsTransparency=true;
+        Title=L.Text("FrameNote 选区边框");WindowStyle=WindowStyle.None;AllowsTransparency=true;
         ResizeMode=ResizeMode.NoResize;ShowActivated=false;Focusable=false;Topmost=true;
         ShowInTaskbar=false;Background=Brushes.Transparent;IsHitTestVisible=false;
         // A one-pixel dark outer keyline keeps the blue visible on light desktops.

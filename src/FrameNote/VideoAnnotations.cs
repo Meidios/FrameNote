@@ -7,8 +7,7 @@ using System.Windows.Media.Imaging;
 
 namespace FrameNote;
 
-// Source-pixel geometry is shared with the browser: normalized points, 2x lenses,
-// three-point angles and source-pixel rulers. The footer never covers source pixels.
+// Geometry uses the same normalized coordinates and per-frame ruler scales as the browser.
 internal sealed class VideoAnnotations
 {
     readonly Review review;
@@ -19,18 +18,21 @@ internal sealed class VideoAnnotations
     WriteableBitmap? source;
     readonly RenderTargetBitmap target;
     byte[]? output;
-    readonly string assets;
+    readonly string assets,defaultRulerUnit;
     internal int OutputHeight{get;}
-    static readonly Typeface Font=new("Microsoft YaHei UI");
+    static readonly Typeface Font=new(DeskTheme.UiFont,FontStyles.Normal,FontWeights.Normal,FontStretches.Normal);
     internal static long End(Note n,long duration)=>Math.Min(duration,n.EndUs??n.StartUs+1_000_000);
     Note[] Active(long us)=>review.Notes.Where(n=>us>=n.StartUs && us<End(n,review.DurationUs)).OrderBy(n=>n.Number).ToArray();
-    FormattedText Text(string text,double size,Brush brush,double maxWidth)=>new(text,CultureInfo.GetCultureInfo("zh-CN"),FlowDirection.LeftToRight,Font,size,brush,1){MaxTextWidth=Math.Max(1,maxWidth)};
-    internal VideoAnnotations(Review review,int width,int height,int sourceWidth,int sourceHeight,string assets,bool showFooter=true){
+    FormattedText Text(string text,double size,Brush brush,double maxWidth)=>new(text,CultureInfo.CurrentUICulture,FlowDirection.LeftToRight,Font,size,brush,1){MaxTextWidth=Math.Max(1,maxWidth)};
+    internal VideoAnnotations(Review review,int width,int height,int sourceWidth,int sourceHeight,string assets,string defaultRulerUnit,bool showFooter=true,int footerBottomInset=0){
+        this.defaultRulerUnit=defaultRulerUnit;
         this.review=review;this.width=width;this.height=height;this.sourceWidth=sourceWidth;this.sourceHeight=sourceHeight;this.assets=assets;unit=Math.Max(1,Math.Max(width,height)/1600d);
         double footer=0;
         if(showFooter)
             foreach(long time in review.Notes.SelectMany(n=>new[]{n.StartUs,End(n,review.DurationUs)}).Append(0).Distinct())footer=Math.Max(footer,Footer(null,Active(time)));
-        if(footer>4096 || (height+footer)*width>32_000_000)throw new InvalidDataException("同时显示的批注文字过多，请缩短文字或拆分批注时间后再导出。");
+        // Caption layout already leaves 12 units below its last line.
+        if(footer>0)footer+=Math.Max(0,footerBottomInset-12*unit);
+        if(footer>4096 || (height+footer)*width>32_000_000)throw new InvalidDataException(L.Text("同时显示的批注文字过多，请缩短文字或拆分批注时间后再导出。"));
         OutputHeight=(int)Math.Ceiling((height+footer)/2)*2;
         target=new(width,OutputHeight,96,96,PixelFormats.Pbgra32);
     }
@@ -39,7 +41,8 @@ internal sealed class VideoAnnotations
         double pad=12*unit,y=height+pad;
         foreach(var n in notes){
             var color=new SolidColorBrush((Color)ColorConverter.ConvertFromString(n.DisplayColor()));
-            string body=string.IsNullOrWhiteSpace(n.Text)?n.Voice!=null?"语音批注":n.Shape!=null?"图形批注":n.Pictures is {Count:>0}?"图片批注":"待填写批注":n.Text;
+            string body=n.DisplayMeasurementText(review.RulerScales,sourceWidth,sourceHeight,defaultRulerUnit);
+            if(string.IsNullOrWhiteSpace(body))body=n.Voice!=null?L.Text("语音批注"):n.Shape!=null?L.Text("图形批注"):n.Pictures is {Count:>0}?L.Text("图片批注"):L.Text("待填写批注");
             var text=Text($"#{n.Number}  {body}",16*unit,Brushes.White,width-pad*3);
             dc?.DrawRectangle(color,null,new Rect(pad,y,3*unit,text.Height));dc?.DrawText(text,new Point(pad*2,y));y+=text.Height+pad;
         }
@@ -73,15 +76,23 @@ internal sealed class VideoAnnotations
                         }
                         if(s.Kind=="ruler"){
                             var d=new Vector(Math.Sin(angle)*7*unit,-Math.Cos(angle)*7*unit);Line(a-d,a+d);Line(b-d,b+d);
-                            double distance=Math.Sqrt(Math.Pow((s.ToX-s.X)*sourceWidth,2)+Math.Pow((s.ToY-s.Y)*sourceHeight,2));Label(distance.ToString("F1",CultureInfo.InvariantCulture)+" px",new Point((a.X+b.X)/2+4*unit,(a.Y+b.Y)/2-22*unit));
+                            Label(RulerScale.Label(s,review.RulerScales,sourceWidth,sourceHeight,defaultRulerUnit),new Point((a.X+b.X)/2+4*unit,(a.Y+b.Y)/2-22*unit));
                         }
                         if(s.Kind=="angle"){
                             var c=new Point(s.ThirdX!.Value*width,s.ThirdY!.Value*height);Line(b,c);
-                            double first=Math.Atan2(a.Y-b.Y,a.X-b.X),last=Math.Atan2(c.Y-b.Y,c.X-b.X),delta=Math.Atan2(Math.Sin(last-first),Math.Cos(last-first));
+                            double first=Math.Atan2((s.Y-s.ToY)*sourceHeight,(s.X-s.ToX)*sourceWidth),last=Math.Atan2((s.ThirdY.Value-s.ToY)*sourceHeight,(s.ThirdX.Value-s.ToX)*sourceWidth),delta=Math.Atan2(Math.Sin(last-first),Math.Cos(last-first));
                             double radius=Math.Min(24*unit,Math.Min((a-b).Length,(c-b).Length)/2);
                             if(radius>0){var geo=new StreamGeometry();using(var g=geo.Open()){g.BeginFigure(new Point(b.X+radius*Math.Cos(first),b.Y+radius*Math.Sin(first)),false,false);g.ArcTo(new Point(b.X+radius*Math.Cos(last),b.Y+radius*Math.Sin(last)),new Size(radius,radius),0,false,delta>=0?SweepDirection.Clockwise:SweepDirection.Counterclockwise,true,false);}dc.DrawGeometry(null,pen,geo);}
                             Label((Math.Abs(delta)*180/Math.PI).ToString("F1",CultureInfo.InvariantCulture)+"°",new Point(b.X+8*unit,b.Y-24*unit));
                         }
+                    }else if(s.Kind=="magnifier"){
+                        var (sample,preview)=LensFrames(s,width,height);
+                        if(s.Preview!=null){
+                            dc.PushOpacity(.16);dc.DrawGeometry(brush,null,LensConnector(sample,preview));dc.Pop();
+                            dc.DrawRectangle(null,pen,sample);
+                        }
+                        dc.DrawRectangle(null,pen,preview);
+                        Label(s.LensLabel,new Point(preview.X+6*unit,preview.Bottom-21*unit));
                     }else{
                         dc.DrawRectangle(s.Kind=="text"?new SolidColorBrush(Color.FromArgb(221,23,25,29)):null,pen,rect);
                         if(s.Kind=="text" && rect.Width>1 && rect.Height>1){
@@ -92,10 +103,10 @@ internal sealed class VideoAnnotations
                             }
                             dc.Pop();
                         }
-                        if(s.Kind=="magnifier")Label("2×",new Point(rect.X+6*unit,rect.Bottom-21*unit));
                     }
                 }
-                var tag=Text("#"+n.Number,13*unit,Brushes.Black,width);badgeX=Math.Clamp(badgeX,1,Math.Max(1,width-tag.Width-8*unit));badgeY=Math.Clamp(badgeY,1,Math.Max(1,height-20*unit));
+                var rgb=brush.Color;
+                var tag=Text("#"+n.Number,13*unit,DeskTheme.UseWhiteInk(rgb)?Brushes.White:Brushes.Black,width);badgeX=Math.Clamp(badgeX,1,Math.Max(1,width-tag.Width-8*unit));badgeY=Math.Clamp(badgeY,1,Math.Max(1,height-20*unit));
                 double badgeWidth=tag.Width+8*unit,badgeHeight=20*unit;
                 bool Clear(double x,double y)=>badges.All(b=>!b.IntersectsWith(new Rect(x-unit,y-unit,badgeWidth+2*unit,badgeHeight+2*unit)));
                 if(!Clear(badgeX,badgeY)){
@@ -157,10 +168,29 @@ internal sealed class VideoAnnotations
         var png=new PngBitmapEncoder();png.Frames.Add(BitmapFrame.Create(target));
         using var file=File.Create(path);png.Save(file);
     }
-    internal static (Rect Target,Int32Rect Source) LensBounds(Drawing s,int width,int height){
+    static (Rect Source,Rect Target) LensFrames(Drawing s,int width,int height){
         var rect=new Rect(new Point(s.X*width,s.Y*height),new Point(s.ToX*width,s.ToY*height));
-        int x=Math.Clamp((int)(rect.X+rect.Width/4),0,width-1),y=Math.Clamp((int)(rect.Y+rect.Height/4),0,height-1);
-        return (rect,new Int32Rect(x,y,Math.Clamp((int)(rect.Width/2),1,width-x),Math.Clamp((int)(rect.Height/2),1,height-y)));
+        if(s.Preview is not {} p)return (new Rect(rect.X+rect.Width/4,rect.Y+rect.Height/4,rect.Width/2,rect.Height/2),rect);
+        double w=Math.Min(width,rect.Width*s.LensScale),h=Math.Min(height,rect.Height*s.LensScale);
+        return (rect,new Rect(Math.Clamp(p.X*width,0,width-w),Math.Clamp(p.Y*height,0,height-h),w,h));
+    }
+    static GeometryGroup LensConnector(Rect a,Rect b){
+        var top=a.Top<=b.Top?a:b;var right=a.Right>=b.Right?a:b;
+        var bottom=a.Bottom>=b.Bottom?a:b;var left=a.Left<=b.Left?a:b;
+        var hull=new StreamGeometry();
+        using(var path=hull.Open()){
+            path.BeginFigure(top.TopLeft,true,true);
+            path.PolyLineTo([top.TopRight,right.TopRight,right.BottomRight,bottom.BottomRight,bottom.BottomLeft,left.BottomLeft,left.TopLeft],true,false);
+        }
+        var band=new GeometryGroup{FillRule=FillRule.EvenOdd,Children={hull,new RectangleGeometry(a),new RectangleGeometry(b)}};
+        var overlap=Rect.Intersect(a,b);
+        if(!overlap.IsEmpty)band.Children.Add(new RectangleGeometry(overlap));
+        return band;
+    }
+    internal static (Rect Target,Int32Rect Source) LensBounds(Drawing s,int width,int height){
+        var (crop,target)=LensFrames(s,width,height);
+        int x=Math.Clamp((int)crop.X,0,width-1),y=Math.Clamp((int)crop.Y,0,height-1);
+        return (target,new Int32Rect(x,y,Math.Clamp((int)crop.Width,1,width-x),Math.Clamp((int)crop.Height,1,height-y)));
     }
     internal byte[] Render(byte[] pixels,long us){
         source??=new(width,height,96,96,PixelFormats.Bgra32,null);

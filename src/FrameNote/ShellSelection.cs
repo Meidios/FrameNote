@@ -30,9 +30,10 @@ internal static class ShellSelection {
                 }catch(Exception e) when(e is IOException or TimeoutException){}
                 continue;
             }
+            var warming=NativePlayer.WarmForVideo(paths);
             var app=new Application();DeskTheme.Start(app);
             using var cancel=new CancellationTokenSource();
-            var window=new Desk(paths,true);
+            var window=new Desk(paths,true,warming);
             var timer=new DispatcherTimer{Interval=TimeSpan.FromSeconds(2)};
             void EndBatch(){timer.Stop();if(!cancel.IsCancellationRequested){cancel.Cancel();election.Dispose();}}
             timer.Tick+=(_,_)=>EndBatch();window.Closed+=(_,_)=>EndBatch();
@@ -68,6 +69,7 @@ internal static class ShellSelection {
             }
         }
         // A previous batch may have ended between election and connection.
-        var fallback=new Application();DeskTheme.Start(fallback);return fallback.Run(new Desk(paths,true));
+        var fallbackEngine=NativePlayer.WarmForVideo(paths);
+        var fallback=new Application();DeskTheme.Start(fallback);return fallback.Run(new Desk(paths,true,fallbackEngine));
     }
 }

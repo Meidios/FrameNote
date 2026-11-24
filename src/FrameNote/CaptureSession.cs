@@ -44,21 +44,21 @@ public sealed class CaptureSession : IDisposable
             try{await videoDone.Task.ConfigureAwait(false);}finally{mix.Dispose();}
             var file=Path.Combine(directory!,"video.mp4");
             if(sources.Count>0){
-                if(firstFrame==0)throw new IOException("缺少视频起点时间。");
+                if(firstFrame==0)throw new IOException(L.Text("缺少视频起点时间。"));
                 var withSound=Path.Combine(directory!,"complete.mp4");
                 await Mux(file,withSound,(firstFrame-mix.Epoch)/1e7,mix.Tracks).ConfigureAwait(false);file=withSound;
             }
             File.Move(file,destination,true);Clean();completed.TrySetResult();
         }catch(Exception e){
             // Preserve the original recording if audio finalization or the final move fails.
-            completed.TrySetException(new IOException($"{e.Message}\n本次录制的临时素材：{directory}",e));
+            completed.TrySetException(new IOException(L.Format($"{e.Message}\n本次录制的临时素材：{directory}"),e));
         }
     }
     internal static async Task Mux(string file,string output,double videoStart,IEnumerable<(string Path,int GainDb)> tracks){
         var raw=await Probe.Run("ffprobe","-v","error","-select_streams","v:0","-show_entries","stream=duration","-of","json",file).ConfigureAwait(false);
         using var doc=JsonDocument.Parse(raw);
         var duration=double.Parse(doc.RootElement.GetProperty("streams")[0].GetProperty("duration").GetString()!,CultureInfo.InvariantCulture);
-        if(!double.IsFinite(duration)||duration<=0)throw new InvalidDataException("无有效视频时长。");
+        if(!double.IsFinite(duration)||duration<=0)throw new InvalidDataException(L.Text("无有效视频时长。"));
         var args=new List<string>{"-hide_banner","-loglevel","error","-nostdin","-copyts","-i",file};
         CaptureAudioMix.AppendMix(args,1,videoStart,tracks);
         args.AddRange(["-map","0:v:0","-map","[mix]","-c:v","copy","-c:a","aac","-b:a","192k","-t",duration.ToString("F7",CultureInfo.InvariantCulture),"-movflags","+faststart",output]);

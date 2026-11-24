@@ -7,8 +7,7 @@ import uuid
 import zipfile
 
 from playwright.sync_api import sync_playwright
-from pywinauto import Desktop
-from review_ui import launch, stop, wait, work
+from review_ui import exported_file, export_window, launch, stop, wait, work
 
 os.environ["FRAMENOTE_DATA_DIR"] = str(work / "profile")
 source = work / "source.mp4"
@@ -24,53 +23,64 @@ with zipfile.ZipFile(package, "w") as archive:
     archive.write(source, "media/source.mp4")
 
 
-def start_export(proc, page, path):
-    page.evaluate("window.samples=[]")
+def start_export(page, proc):
     page.locator("#exportVideo").click()
-    picker = Desktop(backend="win32").window(process=proc.pid, class_name="#32770")
-    picker.wait("ready", timeout=10)
-    time.sleep(.2)
-    picker.child_window(class_name="Edit", found_index=0).set_edit_text(str(path))
-    picker.child_window(control_id=1).click()
+    dialog=export_window(proc)
+    dialog.wait("visible", timeout=15)
+    return dialog
 
 
 with sync_playwright() as pw:
     proc, page = launch(pw, package)
     try:
-        page.evaluate("""() => chrome.webview.addEventListener('message', ({data}) => {
-            if (data.type!=='exportProgress' || !data.active) return;
-            const card=$('taskProgress'), bar=$('progressBar'), cancel=$('cancelProgress');
-            const r=card.getBoundingClientRect(), button=cancel.getBoundingClientRect();
-            samples.push({title:$('progressTitle').textContent, percent:bar.value,
-                layout:card.matches(':modal') && Math.abs(r.left+r.width/2-innerWidth/2)<=1
-                    && Math.abs(r.top+r.height/2-innerHeight/2)<=1 && button.top>bar.getBoundingClientRect().bottom
-                    && Math.abs(button.left+button.width/2-innerWidth/2)<=1
-                    && $('progressPercent').textContent===bar.value+'%' && cancel.textContent==='取消导出'});
-        })""")
         for title in ("正在准备剪辑后的画面与声音", "正在渲染 MP4"):
-            cancelled = work / "cancelled.mp4"
-            start_export(proc, page, cancelled)
-            wait(page, "t=>$('taskProgress').open && $('progressTitle').textContent===t", title, timeout=60000)
+            dialog=start_export(page,proc)
+            dialog.child_window(auto_id="Message", title=title).wait("visible",timeout=60,retry_interval=.03)
+            cancel=dialog.child_window(auto_id="DismissExport")
+            assert cancel.window_text()=="取消导出"
             if title=="正在渲染 MP4":
-                page.locator("#taskProgress").screenshot(path=str(work / "export-progress.png"))
-                page.keyboard.press("Escape")
+                dialog.capture_as_image().save(work/"export-progress.png")
+                dialog.type_keys("{ESC}")
             else:
-                page.get_by_role("button", name="取消导出").click()
-            wait(page, "!busy && !$('taskProgress').open && $('status').textContent.includes('已取消 MP4')")
-            assert not cancelled.exists() and not list(work.glob("cancelled.mp4.*.tmp.mp4"))
-            assert all(s["layout"] and s["percent"]<100 for s in page.evaluate("samples"))
-            if title=="正在渲染 MP4":
-                assert any(s["title"]=="正在准备剪辑后的画面与声音" and s["percent"]>0 for s in page.evaluate("samples"))
-        output = work / "exported.mp4"
-        start_export(proc, page, output)
-        wait(page, "!busy && !$('taskProgress').open && $('status').textContent.startsWith('带批注的 MP4 已保存')", timeout=90000)
-        samples = page.evaluate("samples")
-        values = [s["percent"] for s in samples]
-        assert values==sorted(values) and values[0]==0 and values[-1]==100
-        assert all(s["layout"] for s in samples)
-        rendering = [s["percent"] for s in samples if s["title"]=="正在渲染 MP4"]
-        assert rendering[0]<rendering[-1]<100
-        subprocess.run(["ffmpeg", "-v", "error", "-i", str(output), "-f", "null", "-"], check=True)
+                cancel.invoke()
+            wait(page,"!busy && $('status').textContent.includes('已取消 MP4')")
+            assert not list((work/"exports").iterdir())
+        dialog=start_export(page,proc)
+        hwnd,bounds=dialog.handle,dialog.rectangle()
+        values=[]
+        bar=dialog.child_window(auto_id="Bar").wrapper_object()
+        deadline=time.monotonic()+90
+        while bar.is_visible() and time.monotonic()<deadline:
+            values.append(bar.iface_range_value.CurrentValue)
+            time.sleep(.03)
+        dialog.child_window(title="打开目录",control_type="Button").wait("visible",timeout=5)
+        assert dialog.handle==hwnd and dialog.rectangle()==bounds
+        assert len(values)>1 and values==sorted(values) and any(0<v<100 for v in values)
+        dialog.capture_as_image().save(work/"export-complete.png")
+        output=exported_file(proc)
+        wait(page,"!busy && $('status').textContent.startsWith('带批注的 MP4 已保存')")
+        subprocess.run(["ffmpeg","-v","error","-i",str(output),"-f","null","-"],check=True)
     finally:
         stop(proc)
-print("PASS: centered export progress, both cancellations, monotonic retry and decoded MP4.", work)
+    profile=work/"profile"
+    (profile/"updates.json").write_text(json.dumps(dict(automatic=False,language="en")))
+    blocked=work/"blocked"
+    blocked.touch()
+    (profile/"capture.json").write_text(json.dumps(dict(exportDirectory=str(blocked))))
+    proc,page=launch(pw,package)
+    try:
+        page.locator("#save").click()
+        dialog=export_window(proc)
+        retry=dialog.child_window(title="Retry",control_type="Button")
+        retry.wait("visible")
+        assert dialog.window_text()=="Export failed" and dialog.child_window(auto_id="Message").window_text()
+        hwnd,bounds=dialog.handle,dialog.rectangle()
+        dialog.capture_as_image().save(work/"export-error-en.png")
+        blocked.unlink()
+        retry.invoke()
+        dialog.child_window(title="Open folder",control_type="Button").wait("visible")
+        assert dialog.window_text()=="Export complete" and dialog.handle==hwnd and dialog.rectangle()==bounds
+        assert exported_file(proc).parent==blocked
+    finally:
+        stop(proc)
+print("PASS: same native window for export, both cancellations, MP4 decode, English failure and successful retry.", work)

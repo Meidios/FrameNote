@@ -3,7 +3,7 @@ import io, os, shutil, time, zipfile
 from PIL import Image
 from playwright.sync_api import sync_playwright
 from pywinauto import Desktop
-from review_ui import work,fixtures,launch,stop,wait,at
+from review_ui import exported_file, work,fixtures,launch,stop,wait,at
 
 os.environ["FRAMENOTE_DATA_DIR"]=str(work/"profile")
 video=work/"image-source.mp4";shutil.copyfile(fixtures/"vfr.mp4",video)
@@ -18,14 +18,7 @@ def ink(page,rgb):
 
 def export(page,proc):
     page.locator("#save").click()
-    dlg=Desktop(backend="win32").window(process=proc.pid,class_name="#32770");dlg.wait("ready",timeout=8)
-    edit=dlg.child_window(class_name="Edit",found_index=0);edit.wait("ready");time.sleep(.35);edit.set_edit_text(str(package))
-    assert edit.window_text()==str(package)
-    dlg.child_window(control_id=1).click()
-    time.sleep(.5)
-    if not package.exists():
-        for win in Desktop(backend="win32").windows(process=proc.pid,class_name="#32770"):
-            print(win.window_text(),[(c.class_name(),c.window_text()) for c in win.children() if c.window_text()],flush=True)
+    exported_file(proc,package)
     wait(page,"document.querySelector('#status').textContent.startsWith('审阅包已保存')")
 
 def set_clipboard_picture(page):

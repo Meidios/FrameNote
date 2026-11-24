@@ -66,7 +66,7 @@ try:
     toggle = win.child_window(auto_id="PlaylistButton")
     toggle.wait("visible", timeout=15)
     assert not win.child_window(title_re="播放列表.*", control_type="MenuItem").exists(timeout=.1)
-    surface = host.child_window(class_name="Static", found_index=0)
+    surface = host.child_window(class_name="FrameNote.VideoSurface", found_index=0)
     surface.wait("visible", timeout=8)
     surface_handle = surface.handle
     def width():

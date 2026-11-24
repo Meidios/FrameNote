@@ -2,7 +2,6 @@ using System.IO;
 using System.Windows;
 using System.Windows.Interop;
 using System.Windows.Threading;
-using Microsoft.Win32;
 using ScreenRecorderLib;
 namespace FrameNote;
 public sealed partial class Desk
@@ -25,7 +24,7 @@ public sealed partial class Desk
                 recordHotkeys.Add(id,binding);added.Add(id);
             }else if(previouslyConfigured!=null && !previouslyConfigured.Contains(binding)){
                 foreach(int fresh in added){UnregisterHotKey(hwnd,fresh);recordHotkeys.Remove(fresh);}
-                throw new InvalidOperationException($"无法注册全局录屏快捷键 {binding.Label(InputKind.Keyboard)}，请换一个。");
+                throw new InvalidOperationException(L.Format($"无法注册全局录屏快捷键 {binding.Label(InputKind.Keyboard)}，请换一个。"));
             }
         }
         foreach(var old in recordHotkeys.Where(p=>!bindings.Contains(p.Value)).ToArray()){
@@ -40,8 +39,9 @@ public sealed partial class Desk
             HwndSource.FromHwnd(hwnd).AddHook((IntPtr h,int m,IntPtr wp,IntPtr lp,ref bool handled)=>{
                 if(m==0x0312 && recordHotkeys.TryGetValue(wp.ToInt32(),out var pressed)){
                     handled=true;
+                    if(OwnedWindows.OfType<ShortcutDialog>().Any(dialog=>dialog.FindGlobalShortcut(pressed)))return IntPtr.Zero;
                     var latest=shortcutStore.Read();
-                    if(!latest["record"].Contains(pressed)){ApplyShortcuts(latest);return IntPtr.Zero;}
+                    if(!latest.Bindings["record"].Contains(pressed)){ApplyPreferences(latest);return IntPtr.Zero;}
                     if(web.CoreWebView2!=null && IsEnabled && OwnedWindows.Count==0 && !pending && !configuring){
                         if(recorder!=null)StopCapture();else Send(new{type="recordShortcut"});
                     }
@@ -54,40 +54,71 @@ public sealed partial class Desk
         Closing+=(_,e)=>{if(recorder!=null){e.Cancel=true;StopCapture();}};
     }
     void ClearOutline(){regionOutline?.Close();regionOutline=null;}
-    void StopCapture(){if(recorder==null||stopping)return;stopping=true;gifLimit.Stop();ClearOutline();recorder.Stop();Send(new{type="status",text="正在结束录制…"});}
+    void StopCapture(){if(recorder==null||stopping)return;stopping=true;gifLimit.Stop();ClearOutline();recorder.Stop();Send(new{type="status",text=L.Text("正在结束录制…")});}
     void Record(CaptureSettings settings,bool gif){
         if(recorder!=null){StopCapture();return;}if(configuring||pending)return;configuring=true;
         try{
             string clip=recordings.NewPath();
-            string title="录屏 "+DateTime.Now.ToString("yyyy-MM-dd HH-mm-ss")+".mp4";
-            var r=Session(settings,gif);recorder=r;stopping=false;
-            r.Start(clip);_=CompleteCapture(r,clip,title,gif);Send(new{type="recording",value=true,gif});
+            string title=L.Text("录屏 ")+DateTime.Now.ToString("yyyy-MM-dd HH-mm-ss")+".mp4";
+            var output=CurrentOutput();
+            var r=Session(settings,gif,output);recorder=r;stopping=false;
+            r.Start(clip);_=CompleteCapture(r,clip,title,gif,output);Send(new{type="recording",value=true,gif});
             var keys=shortcuts["record"];
-            Send(new{type="status",text="录制中　·　点击「停止录制」"+(keys.Length==0?"":$"或按 {keys.Label(InputKind.Keyboard)} 结束")});if(gif)gifLimit.Start();
-        }catch(Exception e){Release();Send(new{type="error",text=e.Message});}
+            Send(new{type="status",text=L.Text("录制中　·　点击「停止录制」")+(keys.Length==0?"":L.Format($"或按 {keys.Label(InputKind.Keyboard)} 结束"))});if(gif)gifLimit.Start();
+        }catch(Exception e){Serilog.Log.Error(e,"Could not start recording");Release();Send(new{type="error",text=e.Message});}
         finally{if(recorder==null)ClearOutline();configuring=false;}
     }
-    async Task CompleteCapture(CaptureSession session,string clip,string title,bool gif){
+    static async Task CopyRecording(string source,string destination,CancellationToken token){
+        await using var input=new FileStream(source,FileMode.Open,FileAccess.Read,FileShare.Read,81920,true);
+        await using var output=new FileStream(destination,FileMode.CreateNew,FileAccess.Write,FileShare.None,81920,true);
+        await input.CopyToAsync(output,token);
+    }
+    async Task<string?> SaveRecordingCopy(OutputSettings options,string source,string name,CancellationToken token){
+        if(!options.SaveCopy)return null;
+        try{await WriteOutput(options.CopyDirectory,name,p=>CopyRecording(source,p,token),token);return null;}
+        catch(Exception e) when(e is IOException or UnauthorizedAccessException or ArgumentException or NotSupportedException or InvalidDataException){
+            Serilog.Log.Error(e,"Could not save recording copy");
+            return L.Text("录制副本保存失败：")+e.Message;
+        }
+    }
+    async Task CompleteCapture(CaptureSession session,string clip,string title,bool gif,OutputSettings options){
         try{await session.Completion;}
-        catch(Exception e){Release();Send(new{type="error",text="录制失败："+e.Message});return;}
+        catch(Exception e){Serilog.Log.Error(e,"Recording failed");Release();Send(new{type="error",text=L.Text("录制失败：")+e.Message});return;}
         while(currentWork is {} work)await work.Task;
         Release();await Work(async()=>{
+            string? copyError=null;
             if(gif){
-                try{
-                    var fd=new SaveFileDialog{DefaultExt=".gif",Filter="GIF|*.gif",FileName="FrameNote "+DateTime.Now.ToString("yyyy-MM-dd HH-mm-ss")};
-                    if(fd.ShowDialog(this)!=true){Send(new{type="status",text="已取消保存 GIF。"});return;}
-                    await Capture.Gif(clip,0,30,fd.FileName);Send(new{type="status",text="GIF 已保存："+fd.FileName});
-                }finally{recordings.Discard(clip);}
+                string encoded=Path.Combine(scratch,Guid.NewGuid()+".gif"),name=Path.ChangeExtension(title,".gif");
+                bool backupSaved=false;
+                try{await WithExportProgress("GIF",async token=>{
+                    var info=await Probe.Inspect(clip,token);
+                    await Capture.Gif(clip,0,Math.Min(30,info.Duration/1e6),encoded,p=>ReportExport(L.Text("正在渲染 GIF"),p),token);
+                    if(options.SaveCopy && !backupSaved && !string.Equals(options.CopyDirectory,options.ExportDirectory,StringComparison.OrdinalIgnoreCase)){
+                        copyError=await SaveRecordingCopy(options,encoded,name,token);
+                        backupSaved=copyError==null;
+                    }
+                    var path=await WriteOutput(options.ExportDirectory,name,p=>CopyRecording(encoded,p,token),token);
+                    Send(new{type="status",text=L.Text("GIF 已保存：")+path});
+                    return new FileInfo(path);
+                });}finally{recordings.Discard(clip);File.Delete(encoded);}
+            }else{
+                copyError=await SaveRecordingCopy(options,clip,title,lifetime.Token);
+                await Open(clip,title);
             }
-            else await Open(clip,title);
+            if(copyError!=null)ReportError(copyError);
         });
     }
     void Release(){ClearOutline();gifLimit.Stop();recorder?.Dispose();recorder=null;stopping=false;Send(new{type="recording",value=false});}
     async Task ExportGif(Guid id){
         var note=doc?.Notes.FirstOrDefault(n=>n.Id==id);
         if(note?.EndUs is not long end || media==null)return;
-        if(end-note.StartUs>30_000_000)throw new InvalidDataException("GIF 最长 30 秒，请缩短区间。");
-        var fd=new SaveFileDialog{DefaultExt=".gif",Filter="GIF|*.gif",FileName=Path.GetFileNameWithoutExtension(doc!.FileName)+".gif"};
-        if(fd.ShowDialog(this)==true)await Work(async()=>{await Capture.Gif(await EditedMedia(lifetime.Token),note.StartUs/1e6,(end-note.StartUs)/1e6,fd.FileName);Send(new{type="status",text="GIF 已保存："+fd.FileName});});
+        var name=Path.ChangeExtension(doc!.FileName,".gif");
+        await Work(()=>WithExportProgress("GIF",async token=>{
+            if(end-note.StartUs>30_000_000)throw new InvalidDataException(L.Text("GIF 最长 30 秒，请缩短区间。"));
+            var input=await EditedMedia(token,p=>ReportExport(L.Text("正在准备剪辑后的画面与声音"),p/3));
+            var path=await WriteOutput(CurrentOutput().ExportDirectory,name,p=>Capture.Gif(input,note.StartUs/1e6,(end-note.StartUs)/1e6,p,
+                percent=>ReportExport(L.Text("正在渲染 GIF"),33+percent*2/3),token),token);
+            Send(new{type="status",text=L.Text("GIF 已保存：")+path});return new FileInfo(path);
+        }));
     }
 }

@@ -95,7 +95,8 @@ with sync_playwright() as pw:
                 const buttons=[...$('timelineBar').querySelectorAll('button')].filter(el=>el.offsetWidth).map(el=>el.getBoundingClientRect());
                 const fits=buttons.every((a,i)=>a.left>=bar.left && a.right<=bar.right &&
                     buttons.slice(i+1).every(b=>a.right<=b.left+1 || b.right<=a.left+1 || a.bottom<=b.top+1 || b.bottom<=a.top+1));
-                return fits && $('trackDesk').getBoundingClientRect().top>=bar.bottom-1
+                return fits && mark.width===mark.height && mark.height===rect($('play')).height
+                    && $('trackDesk').getBoundingClientRect().top>=bar.bottom-1
                     && firstTool.left-mark.right===4 && firstTool.top===mark.top
                     && tools.every(el=>sameSize(rect(el),mark) && sameSize(rect(el.querySelector('svg')),markIcon))
                     && (bar.width<=730 || [...$('editTools').children].every(el=>rect(el).top===mark.top))

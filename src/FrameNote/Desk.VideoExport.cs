@@ -1,18 +1,16 @@
 using System.Diagnostics;
 using System.Globalization;
 using System.IO;
-using Microsoft.Win32;
 
 namespace FrameNote;
 
 public sealed partial class Desk
 {
-    CancellationTokenSource? exportCancel;
-    void ReportExport(string text,int percent)=>Send(new{type="exportProgress",active=true,text,percent});
     static string Num(double value)=>value.ToString("0.######",CultureInfo.InvariantCulture);
     enum VideoOutput { Mp4, GifFile, GifClipboard }
     static Review ExportReview(Review review,bool hasSourceAudio){
         if(review.Timeline is not {} timeline)return review;
+        timeline=timeline with{Trimmed=null};
         // A silent source can still have an editable original-audio lane.
         if(!hasSourceAudio)timeline=timeline with{Clips=timeline.Clips.Where(c=>c.Track!="audio").ToList()};
         long end=timeline.Clips.Select(c=>c.StartUs+c.DurationUs).DefaultIfEmpty().Max();
@@ -20,52 +18,51 @@ public sealed partial class Desk
         // A Mark inside the cut stops at its end. A standalone Mark after the cut needs display time.
         var lastMark=review.Notes.Where(n=>n.EndUs==null).MaxBy(n=>n.StartUs);
         if(lastMark!=null && lastMark.StartUs>=end)end=VideoAnnotations.End(lastMark,review.DurationUs);
-        if(end==0)throw new InvalidDataException("时间线上没有可导出的片段或批注。");
+        if(end==0)throw new InvalidDataException(L.Text("时间线上没有可导出的片段或批注。"));
         return review with{DurationUs=end,Timeline=timeline};
     }
     async Task ExportVideo(VideoOutput target=VideoOutput.Mp4){
         if(doc==null || media==null || playbackInfo==null || viewingImage || voiceCapture!=null)return;
-        var review=ExportReview(doc,playbackInfo.Audio!="");
+        var source=doc;
+        bool hasSourceAudio=playbackInfo.Audio!="";
         bool gif=target!=VideoOutput.Mp4;
         string format=gif?"GIF":"MP4",extension=gif?".gif":".mp4";
-        string stem=Path.GetFileNameWithoutExtension(doc.FileName)+"_批注";
-        string? destination=null;
-        if(target!=VideoOutput.GifClipboard){
-            var dialog=new SaveFileDialog{Filter=$"带批注的 {format}|*{extension}",DefaultExt=extension,FileName=stem+extension,
-                Title=gif?"将带批注的 GIF 另存为":"导出 MP4 · H.264 高画质压缩，最高 1080p，包含语音批注"};
-            if(dialog.ShowDialog(this)!=true)return;
-            destination=dialog.FileName;
-            if(string.Equals(Path.GetFullPath(destination),Path.GetFullPath(media),StringComparison.OrdinalIgnoreCase))throw new IOException("请选择新的文件名，以保留原片。");
-        }
-        using var cancel=CancellationTokenSource.CreateLinkedTokenSource(lifetime.Token);
-        await Work(async()=>{
-            exportCancel=cancel;
-            string output=Path.Combine(destination==null?scratch:Path.GetDirectoryName(destination)!,Guid.NewGuid().ToString("N")+".tmp"+extension);
-            try{
+        string stem=Path.GetFileNameWithoutExtension(doc.FileName)+L.Text("_批注");
+        await Work(()=>WithExportProgress(format,async token=>{
+            var review=ExportReview(source,hasSourceAudio);
+            var options=CurrentOutput();
+            async Task Render(string output){
                 int prepared=review.Timeline==null?0:40;
-                if(prepared>0)ReportExport("正在准备剪辑后的画面与声音",0);
-                var input=await EditedMedia(cancel.Token,p=>ReportExport("正在准备剪辑后的画面与声音",p*prepared/100),review);
-                await RenderVideo(review,input,output,prepared,gif,cancel.Token);
-                cancel.Token.ThrowIfCancellationRequested();
-                if(destination!=null)File.Move(output,destination,true);
-                else await GifClipboard.Publish(output,stem,cancel.Token);
-                ReportExport(format+" 导出完成",100);
-                Send(new{type="status",text=destination==null?"带批注的 GIF 已复制到粘贴板。":$"带批注的 {format} 已保存："+destination});
-            }catch(OperationCanceledException){Send(new{type="status",text=$"已取消 {format} 导出。"});}
-            finally{exportCancel=null;Send(new{type="exportProgress",active=false});File.Delete(output);}
-        });
+                if(prepared>0)ReportExport(L.Text("正在准备剪辑后的画面与声音"),0);
+                var input=await EditedMedia(token,p=>ReportExport(L.Text("正在准备剪辑后的画面与声音"),p*prepared/100),review);
+                await RenderVideo(review,input,output,prepared,gif,options.ExportBar,token);
+            }
+            if(target!=VideoOutput.GifClipboard){
+                var path=await WriteOutput(options.ExportDirectory,stem+extension,Render,token);
+                Send(new{type="status",text=L.Format($"带批注的 {format} 已保存：")+path});
+                return new FileInfo(path);
+            }
+            string output=Path.Combine(scratch,Guid.NewGuid().ToString("N")+extension);
+            try{
+                await Render(output);
+                await GifClipboard.Publish(output,stem,token);
+                Send(new{type="status",text=L.Text("带批注的 GIF 已复制到粘贴板。")});
+                return null;
+            }finally{File.Delete(output);}
+        }));
     }
-    async Task RenderVideo(Review review,string input,string output,int prepared,bool gif,CancellationToken token){
-        review.Check();ReportExport("正在准备视频与批注",prepared);
+    async Task RenderVideo(Review review,string input,string output,int prepared,bool gif,ExportBarOptions bar,CancellationToken token){
+        review.Check();ReportExport(L.Text("正在准备视频与批注"),prepared);
         int renderStart=prepared+5;
-        void RenderProgress(int percent)=>ReportExport(gif?"正在渲染 GIF":"正在渲染 MP4",renderStart+(100-renderStart)*percent/100);
+        void RenderProgress(int percent)=>ReportExport(gif?L.Text("正在渲染 GIF"):L.Text("正在渲染 MP4"),renderStart+(100-renderStart)*percent/100);
         var format=await Probe.ReadVideoFormat(input,token);
         var (width,height)=gif?format.Fit(800,800):format.Fit(1920,1080);
         const int gifFps=12;
         long gifFrames=(review.DurationUs*gifFps+999_999)/1_000_000;
         double fps=gif?gifFps:format.Fps;
         string frameRate=gif?gifFps.ToString(CultureInfo.InvariantCulture):format.FrameRate;
-        var renderer=new VideoAnnotations(review,width,height,format.Width,format.Height,ImageDirectory);
+        int barHeight=!gif && bar.Enabled?VideoProgressBar.Height(height):0;
+        var renderer=new VideoAnnotations(review,width,height,format.Width,format.Height,ImageDirectory,defaultRulerUnit,footerBottomInset:barHeight);
         string videoFilter=$"scale={width}:{height},setsar=1,fps={frameRate}"+(gif?$":round=up,tpad=stop_mode=clone:stop=-1,trim=end_frame={gifFrames}":"");
         bool liveLens=review.Notes.Any(n=>n.Shape?.Kind=="magnifier");
         var encode=new List<string>{"-nostdin","-v","error","-i",input};
@@ -79,7 +76,7 @@ public sealed partial class Desk
             }else if(review.Notes.Count>0){
                 overlayDirectory=Directory.CreateTempSubdirectory("framenote-overlay-").FullName;
                 var timeline=await renderer.WriteOverlayTimeline(overlayDirectory,fps,frameRate,token,
-                    p=>ReportExport("正在准备视频与批注",prepared+5*p/100));
+                    p=>ReportExport(L.Text("正在准备视频与批注"),prepared+5*p/100));
                 encode.AddRange(["-f","concat","-safe","0","-i",timeline]);
                 filters.Add($"[0:v:0]{videoFilter},setpts=PTS-STARTPTS,pad={width}:{renderer.OutputHeight}[base]");
                 filters.Add("[base][1:v:0]overlay=eof_action=repeat[video]");
@@ -98,6 +95,15 @@ public sealed partial class Desk
                 var voices=review.Timeline==null?review.Notes.Where(n=>n.Voice!=null).ToArray():Array.Empty<Note>();
                 AddExportAudio(encode,filters,voices,review,info.Audio!="");
                 audio=info.Audio!=""||voices.Length>0;
+                if(barHeight>0){
+                    overlayDirectory??=Directory.CreateTempSubdirectory("framenote-overlay-").FullName;
+                    string strip=Path.Combine(overlayDirectory,"progress.png");
+                    VideoProgressBar.Write(strip,review,width,barHeight,bar);
+                    int stripInput=1+(review.Notes.Count>0?1:0)+voices.Length;
+                    encode.AddRange(["-framerate",frameRate,"-i",strip]);
+                    VideoProgressBar.AddFilters(filters,liveLens?"[1:v:0]":videoMap,stripInput,width,barHeight,review.DurationUs,fps);
+                    videoMap="[withProgress]";
+                }
             }
             if(filters.Count>0)encode.AddRange(["-filter_complex",string.Join(';',filters)]);
             encode.AddRange(["-map",videoMap]);
@@ -139,14 +145,14 @@ public sealed partial class Desk
             while(true){
                 token.ThrowIfCancellationRequested();int offset=0;
                 while(offset<pixels.Length){int count=await decoder.StandardOutput.BaseStream.ReadAsync(pixels.AsMemory(offset),token);if(count==0)break;offset+=count;}
-                if(offset==0)break;if(offset!=pixels.Length)throw new IOException("视频解码帧不完整。");
+                if(offset==0)break;if(offset!=pixels.Length)throw new IOException(L.Text("视频解码帧不完整。"));
                 var rendered=renderer.Render(pixels,(long)Math.Round(frame*1e6/fps));await encoder.StandardInput.BaseStream.WriteAsync(rendered,token);frame++;
                 if(progress.ElapsedMilliseconds>250){report(Math.Min(99,(int)(frame*1e8/fps/duration)));progress.Restart();await Task.Delay(1,token);}
             }
             encoder.StandardInput.Close();await decoder.WaitForExitAsync(token);await encoder.WaitForExitAsync(token);
-            if(decoder.ExitCode!=0)throw new IOException("视频解码失败："+await decodeError);
-            if(encoder.ExitCode!=0)throw new IOException("视频编码失败："+await encodeError);
-            if(frame==0)throw new IOException("视频中没有可导出的画面。");
+            if(decoder.ExitCode!=0)throw new IOException(L.Text("视频解码失败：")+await decodeError);
+            if(encoder.ExitCode!=0)throw new IOException(L.Text("视频编码失败：")+await encodeError);
+            if(frame==0)throw new IOException(L.Text("视频中没有可导出的画面。"));
         }catch{
             Probe.Kill(decoder);Probe.Kill(encoder);
             await Task.WhenAll(decoder.WaitForExitAsync(),encoder.WaitForExitAsync());

@@ -9,17 +9,13 @@ from pathlib import Path
 from PIL import Image
 from playwright.sync_api import sync_playwright
 from pywinauto import Desktop
-from review_ui import fixtures, launch, stop, wait, work
+from review_ui import exported_file, export_window, fixtures, launch, stop, wait, work
 
 os.environ["FRAMENOTE_DATA_DIR"]=str(work/"profile")
 
-def start_save(proc,page,path):
+def start_save(page):
     page.locator("#exportGif").hover()
-    page.get_by_role("menuitem",name="将GIF另存为...").click()
-    picker=Desktop(backend="win32").window(process=proc.pid,class_name="#32770")
-    picker.wait("ready",timeout=10)
-    field=picker.child_window(class_name="Edit",found_index=0)
-    field.wait("ready");field.set_focus();field.set_edit_text(str(path));field.type_keys("{ENTER}")
+    page.get_by_role("menuitem",name="导出 GIF").click()
 
 def make_review(name,kind,length):
     media=work/"source.mp4"
@@ -60,6 +56,11 @@ with sync_playwright() as pw:
             assert Desktop(backend="win32").window(process=proc.pid,title_re=".*FrameNote.*",found_index=0).exists()
             p.locator("#exportGif").hover()
             p.get_by_role("menuitem",name="复制GIF到粘贴板").click()
+            wait(p,"$('status').textContent.includes('GIF 已复制')",timeout=90000)
+            # A private, non-interactive window station keeps even active windows invisible.
+            dialog=Desktop(backend="win32").window(process=proc.pid,title="导出完成",visible_only=False)
+            dialog.wait("exists")
+            dialog.post_message(win32con.WM_CLOSE)
             wait(p,"!busy && $('status').textContent.includes('GIF 已复制')",timeout=90000)
         finally:stop(proc)
         cb.OpenClipboard()
@@ -104,13 +105,11 @@ with sync_playwright() as pw:
                 p.keyboard.press("ArrowDown");assert p.evaluate("document.activeElement===$('saveGif')")
                 p.keyboard.press("Escape");assert menu.evaluate("el=>el.inert")
                 if kind=="box":
-                    p.evaluate("""()=>{function cancel({data}){
-                        if(data.type==='exportProgress' && data.active){chrome.webview.removeEventListener('message',cancel);$('cancelProgress').click()}}
-                        chrome.webview.addEventListener('message',cancel)}""")
-                    dest=work/"cancelled.gif";start_save(proc,p,dest)
+                    start_save(p)
+                    export_window(proc).child_window(title="取消导出",control_type="Button").invoke()
                     wait(p,"!busy && $('status').textContent.includes('已取消 GIF')",timeout=30000)
-                    assert not dest.exists()
-                dest=package.with_suffix(".gif");start_save(proc,p,dest)
+                    assert not list((work/"exports").glob("*"))
+                dest=package.with_suffix(".gif");start_save(p);exported_file(proc,dest)
                 wait(p,"!busy && $('status').textContent.startsWith('带批注的 GIF 已保存')",timeout=90000)
                 check_frames(dest,length,kind)
             finally:stop(proc)

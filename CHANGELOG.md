@@ -4,6 +4,10 @@
 
 Versions are listed newest first. Earlier entries summarize the offline release history shipped with the app; they do not imply that each version had a public GitHub installer.
 
+## 0.9.4
+
+改进时间线剪辑、角度与标尺测量，增加录制副本、Excel 模板、MP4 批注进度条和英文界面。优化小窗口布局、键盘操作与批注编号对比度，修复主界面和 Player 退出全屏后标题栏图标偏移。[0.9.4 更新说明](docs/releases/v0.9.4.md)
+
 ## 0.9.3
 
 新增带批注的 GIF 导出和多组快捷键配置，调整图片查看器侧栏与按钮悬浮效果，修复时间标尺上的分割快捷键。[0.9.3 更新说明](docs/releases/v0.9.3.md)

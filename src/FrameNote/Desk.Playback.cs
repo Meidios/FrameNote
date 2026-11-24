@@ -11,18 +11,18 @@ public sealed partial class Desk
     Task<LibVLCSharp.Shared.LibVLC>? startingEngine;
     CancellationTokenSource? preparing;
     Guid playbackId;
-    Menu menuStrip=null!;
+    DeskTitleBar titleBar=null!;
     (WindowState State,WindowStyle Style,ResizeMode Resize,WindowSize Size)? beforeFullscreen;
     void SetPreviewFullscreen(bool on){
         if(on && beforeFullscreen==null){
             beforeFullscreen=(WindowState,WindowStyle,ResizeMode,CurrentWindowSize());
-            menuStrip.Visibility=Visibility.Collapsed;
+            titleBar.SetFullscreen(true);
             WindowState=WindowState.Normal;WindowStyle=WindowStyle.None;ResizeMode=ResizeMode.NoResize;WindowState=WindowState.Maximized;
             if(native?.IsVisible==true)native.SetFullscreen(true);else Send(new{type="previewFullscreen",on=true});
             ShowPlaylist();
         }else if(!on && beforeFullscreen is {} old){
             WindowState=WindowState.Normal;WindowStyle=old.Style;ResizeMode=old.Resize;WindowState=old.State;
-            menuStrip.Visibility=Visibility.Visible;beforeFullscreen=null;
+            titleBar.SetFullscreen(false);beforeFullscreen=null;
             if(native?.IsVisible==true)native.SetFullscreen(false);else Send(new{type="previewFullscreen",on=false});
             ShowPlaylist();
         }
@@ -32,7 +32,7 @@ public sealed partial class Desk
     bool deskLoaded,needsPreview,reviewOnly;
 
     async Task PickVideo(){
-        var fd=new OpenFileDialog{Multiselect=true,Filter="图片、视频与审阅包|"+string.Join(";",Review.Formats.Concat(ImageFormats).Append(".framenote").Select(ext=>"*"+ext))};
+        var fd=new OpenFileDialog{Multiselect=true,Filter=L.Text("图片、视频与审阅包|")+string.Join(";",Review.Formats.Concat(ImageFormats).Append(".framenote").Select(ext=>"*"+ext))};
         if(fd.ShowDialog(this)==true)await OpenFiles(fd.FileNames);
     }
     NativePlayer EnsurePlayer(){
@@ -80,15 +80,15 @@ public sealed partial class Desk
         native.Pause();
         using var cancel=CancellationTokenSource.CreateLinkedTokenSource(lifetime.Token);preparing=cancel;
         bool generate=needsPreview && preview==null;
-        native.Preparing(true,generate?"正在生成批注预览":"正在打开逐帧审阅…",generate);
+        native.Preparing(true,generate?L.Text("正在生成批注预览"):L.Text("正在打开逐帧审阅…"),generate);
         try{
             if(!deskLoaded || needsPreview && preview==null)await LoadReview(position,cancel.Token,playOnLoad:initialUs!=null);
             else Send(new{type="resumeReview",us=position});
             SetPreviewFullscreen(false);
             native.Stop();native.Visibility=Visibility.Collapsed;web.Visibility=Visibility.Visible;web.Focus();
-            Title=(activeRecording!=null?"临时录屏 · ":"")+doc.FileName+" · FrameNote";
-        }catch(OperationCanceledException){native.Preparing(false,"已取消，可继续播放。");}
-        catch(Exception e){native.Preparing(false,"无法进入批注："+e.Message);native.ToolTip=e.Message;}
+            Title=(activeRecording!=null?L.Text("临时录屏 · "):"")+doc.FileName+" · FrameNote";
+        }catch(OperationCanceledException){native.Preparing(false,L.Text("已取消，可继续播放。"));}
+        catch(Exception e){Serilog.Log.Error(e,"Player could not enter the review editor");native.Preparing(false,L.Text("无法进入批注：")+e.Message);native.ToolTip=e.Message;}
         finally{preparing=null;if(native.Visibility==Visibility.Collapsed)native.Preparing(false,"");}
     }
     async Task<(long[] Frames,string Preview)> PrepareDeskPreview(string source,Probe.Info info){
@@ -98,7 +98,7 @@ public sealed partial class Desk
             var frames=await Probe.Frames(source,info,cancel.Token);
             return (frames,await CreatePreview(source,info.Duration,frames,cancel.Token));
         }
-        catch(OperationCanceledException) when(cancel.IsCancellationRequested){throw new OperationCanceledException("已取消生成批注预览。",cancel.Token);}
+        catch(OperationCanceledException) when(cancel.IsCancellationRequested){throw new OperationCanceledException(L.Text("已取消生成批注预览。"),cancel.Token);}
         finally{preparing=null;Send(new{type="preparingPreview",active=false});}
     }
     void ReportPreviewProgress(int percent){
@@ -116,19 +116,19 @@ public sealed partial class Desk
             var encoded=await Probe.Inspect(dest,token);
             var pts=await Probe.Frames(dest,encoded,token);
             if(pts.Length!=frames.Length || pts.Where((t,i)=>Math.Abs(t-frames[i])>2).Any())
-                throw new InvalidDataException("预览与原片的帧时间不一致，无法逐帧批注。");
+                throw new InvalidDataException(L.Text("预览与原片的帧时间不一致，无法逐帧批注。"));
             token.ThrowIfCancellationRequested();
             ReportPreviewProgress(100);
             return dest;
         }catch{File.Delete(dest);throw;}
     }
-    async Task LoadReview(long us,CancellationToken token,long[]? knownFrames=null,bool playOnLoad=false){
+    async Task LoadReview(long us,CancellationToken token,long[]? knownFrames=null,bool playOnLoad=false,bool recovering=false){
         if(media==null || doc==null || playbackInfo==null)return;
         await EnsureReviewWeb();
         var frames=knownFrames??await Probe.Frames(media,playbackInfo,token);
         if(needsPreview && preview==null)preview=await CreatePreview(media,playbackInfo.Duration,frames,token);
         token.ThrowIfCancellationRequested();
-        Send(new{type="loaded",playbackId,doc,frames,src=new Uri(preview??media).AbsoluteUri,proxy=preview!=null,autoPlay=knownFrames!=null || playOnLoad,volume,us,
+        Send(new{type="loaded",playbackId,doc,frames,src=new Uri(preview??media).AbsoluteUri,proxy=preview!=null,recovering,autoPlay=!recovering&&(knownFrames!=null || playOnLoad),volume,us,
             images=new Uri(ImageDirectory+Path.DirectorySeparatorChar).AbsoluteUri,temporary=activeRecording!=null});
         deskLoaded=true;
         _=BuildTimeline(playbackId,media,playbackInfo);

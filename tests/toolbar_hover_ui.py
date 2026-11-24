@@ -2,7 +2,7 @@
 import io
 import os
 import time
-from PIL import Image, ImageChops
+from PIL import Image, ImageChops, ImageColor
 from playwright.sync_api import sync_playwright
 from pywinauto import Desktop, mouse
 from review_ui import fixtures, launch, stop, wait, work
@@ -12,7 +12,14 @@ picture=work/"sample.png"
 Image.new("RGB",(400,240),"#466477").save(picture)
 
 def snapshot(locator):
-    return Image.open(io.BytesIO(locator.screenshot())).convert("RGB")
+    return Image.open(io.BytesIO(locator.screenshot(scale="css"))).convert("RGB")
+
+def check_field_border(page, selector):
+    color=ImageColor.getrgb(page.evaluate("getComputedStyle(document.documentElement).getPropertyValue('--link').trim()"))
+    wait(page,"""([selector,color])=>{
+        const s=getComputedStyle(document.querySelector(selector));
+        return s.borderColor===color && s.borderWidth==='1px' && s.outlineStyle==='none' && s.boxShadow==='none';
+    }""",[selector,"rgb(%d, %d, %d)" % color])
 
 def check_hint(page,button):
     wait(page,"id=>$('buttonHint').classList.contains('visible') && $('buttonHint').textContent===$(id).ariaDescription",button)
@@ -23,11 +30,32 @@ def check_hint(page,button):
 with sync_playwright() as pw:
     proc,p=launch(pw,fixtures/"vfr.mp4")
     try:
+        for selector in ("#mode", "#refreshSources"):
+            control=p.locator(selector)
+            width=control.bounding_box()["width"]
+            control.hover(position={"x":6,"y":8})
+            p.wait_for_timeout(180)
+            left=snapshot(control)
+            control.hover(position={"x":int(width)-7,"y":8})
+            p.wait_for_timeout(180)
+            right=snapshot(control)
+            # Opposite edges must brighten in turn, even when the theme uses dark ink.
+            changes=[sum(left.getpixel((x,4)))-sum(right.getpixel((x,4))) for x in (6,left.width-7)]
+            assert min(changes)<-3 and max(changes)>3, (selector,changes)
         p.mouse.move(2,2)
         arrow=p.locator("#arrow")
         box=p.locator("#box")
         size=box.bounding_box()
         baseline=snapshot(arrow)
+        # Light from the gap should reach the last interior pixel without tinting the border.
+        edge=arrow.bounding_box()
+        gap_x=(edge["x"]+edge["width"]+size["x"])/2
+        p.mouse.move(gap_x,edge["y"]+edge["height"]+1)
+        p.wait_for_timeout(180)
+        gap_light=snapshot(arrow)
+        column=gap_light.width//2
+        assert gap_light.getpixel((column,gap_light.height-2))!=baseline.getpixel((column,baseline.height-2))
+        assert gap_light.getpixel((column,gap_light.height-1))==baseline.getpixel((column,baseline.height-1))
         box.hover(position={"x":2,"y":12})
         r=check_hint(p,"box")
         assert r["y"]+r["height"]<size["y"]
@@ -44,6 +72,19 @@ with sync_playwright() as pw:
         p.mouse.move(2,2)
         p.wait_for_timeout(180)
         assert not ImageChops.difference(snapshot(arrow),baseline).getbbox()
+        mode=p.locator("#mode")
+        mode.click()
+        wait(p,"$('mode').matches(':open')")
+        check_field_border(p,"#mode")
+        p.keyboard.press("Escape")
+        p.locator("#point").click()
+        p.locator("#noteStart").click()
+        check_field_border(p,"#noteStart")
+        p.keyboard.press("Tab")
+        check_field_border(p,"#noteDuration")
+        assert p.evaluate("getComputedStyle($('noteStart')).borderColor!==getComputedStyle($('noteDuration')).borderColor")
+        p.locator("#body").click()
+        check_field_border(p,"#body")
         p.locator("#vlc").click()
         handle=Desktop(backend="win32").window(process=proc.pid,title_re=".*FrameNote.*",found_index=0).handle
         window=Desktop(backend="uia").window(handle=handle)

@@ -3,7 +3,9 @@ using System.Windows;
 using System.Windows.Automation;
 using System.Windows.Controls;
 using System.Windows.Input;
+using System.Windows.Interop;
 using System.Windows.Media;
+using System.Windows.Media.Imaging;
 using System.Windows.Shapes;
 
 namespace FrameNote;
@@ -11,9 +13,11 @@ namespace FrameNote;
 internal partial class ShortcutDialog : Window
 {
     readonly ShortcutMap edited;
-    readonly Action<ShortcutMap> save;
-    readonly Action defaultsApp;
+    readonly Action<EditorPreferences,bool,string,OutputSettings> save;
+    readonly Desk desk;
     readonly Dictionary<string,Button> rows=new();
+    readonly Dictionary<string,DockPanel> groupHeaders=new();
+    Shortcut? searchBinding;
     readonly List<Shortcut> working=[];
     ShortcutAction? action;
     int editIndex=-1;
@@ -22,11 +26,30 @@ internal partial class ShortcutDialog : Window
     bool updating;
     bool Recording=>action!=null && editIndex>=0;
 
-    internal ShortcutDialog(Window owner,ShortcutMap current,Action<ShortcutMap> save,Action defaultsApp){
+    internal ShortcutDialog(Desk owner,EditorPreferences current,bool automatic,string language,OutputSettings output,Action<EditorPreferences,bool,string,OutputSettings> save){
         InitializeComponent();
-        Owner=owner;this.save=save;this.defaultsApp=defaultsApp;edited=new(current);
-        Height=Math.Min(770,SystemParameters.WorkArea.Height);
-        DeskTheme.Window(this);InputMethod.SetIsInputMethodEnabled(this,false);
+        IssueButton.ToolTip=Updates.NewIssue;
+        HomeButton.ToolTip=Updates.Home;
+        var icon=new IconBitmapDecoder(new Uri("pack://application:,,,/FrameNote;component/Assets/FrameNote.ico"),
+            BitmapCreateOptions.None,BitmapCacheOption.OnLoad);
+        AboutIcon.Source=icon.Frames.MaxBy(frame=>frame.PixelWidth);
+        Owner=desk=owner;this.save=save;edited=new(current.Bindings);
+        DefaultRulerUnit.SelectedValue=current.RulerUnit;
+        AutomaticUpdates.IsChecked=automatic;
+        InterfaceLanguage.SelectedValue=language;
+        ExportDirectory.Text=output.ExportDirectory;SetExportBar(output.ExportBar);SetRecordingFields(output);
+        foreach(var column in ExcelReview.Columns){
+            var check=new CheckBox{Tag=column.Field,Content=L.Text(column.Label),Margin=new Thickness(0,5,6,5)};
+            AutomationProperties.SetAutomationId(check,"ExcelColumn"+column.Field);
+            ExcelColumnChoices.Children.Add(check);
+        }
+        SetExcelTemplate(output.Excel);
+        CurrentVersion.Text=L.Text("当前版本  ")+Updates.Running;
+        AboutVersion.Text=L.Format($"版本 {Updates.Running}  ·  Windows x64");
+        AboutDescription.Text=Desk.ProductDescription;AboutAuthor.Text=Desk.Author;
+        Height=Math.Min(700,SystemParameters.WorkArea.Height);
+        DeskTheme.Dialog(this);InputMethod.SetIsInputMethodEnabled(this,false);
+        FindKeyIcon.Content=MakeIcon("keyboard",15);ClearSearch.Content=MakeIcon("close",14);
         PlusIcon.Content=MakeIcon("plus");CloseEditorButton.Content=MakeIcon("close");
         foreach(var (label,bit) in new[]{("Ctrl",2),("Alt",1),("Shift",4),("Win",8)}){
             var check=new CheckBox{Content=label,Tag=bit,Style=(Style)FindResource("ModifierChip")};
@@ -34,10 +57,10 @@ internal partial class ShortcutDialog : Window
         }
         foreach(var group in Shortcuts.Actions.GroupBy(a=>a.Group)){
             var header=new DockPanel{Margin=new Thickness(0,10,4,5)};
-            var reset=IconButton("reset","恢复「"+group.Key+"」默认快捷键",()=>Reset(group));
+            var reset=IconButton("reset",L.Format($"恢复「{group.Key}」默认快捷键"),()=>Reset(group));
             DockPanel.SetDock(reset,Dock.Right);header.Children.Add(reset);
             header.Children.Add(new TextBlock{Text=group.Key,FontSize=15,FontWeight=FontWeights.SemiBold,VerticalAlignment=VerticalAlignment.Center});
-            Groups.Children.Add(header);
+            Groups.Children.Add(header);groupHeaders.Add(group.Key,header);
             foreach(var a in group){
                 var row=new Button{Style=(Style)FindResource("ActionRow")};
                 AutomationProperties.SetAutomationId(row,a.Id);AutomationProperties.SetName(row,a.Name);
@@ -48,6 +71,30 @@ internal partial class ShortcutDialog : Window
         PreviewKeyDown+=OnEditorKey;
     }
 
+    void ResizeUpdates(object sender,SizeChangedEventArgs e){
+        // When the cards leave little space for the notes, scroll the whole page instead.
+        bool compact=e.NewSize.Height<380;
+        UpdatesContent.Height=compact?double.NaN:e.NewSize.Height;
+        ReleaseScroll.VerticalScrollBarVisibility=compact?ScrollBarVisibility.Disabled:ScrollBarVisibility.Auto;
+    }
+
+    void PageChanged(object sender,SelectionChangedEventArgs e){
+        if(e.OriginalSource!=Pages||ResetButton==null)return;
+        ResetButton.Visibility=GeneralTab.IsSelected||ShortcutsTab.IsSelected||RecordingTab.IsSelected||ExcelTab.IsSelected?Visibility.Visible:Visibility.Collapsed;
+        if(UpdatesTab.IsSelected && ReleaseVersions.ItemsSource==null){
+            Desk.BindReleaseNotes(ReleaseVersions,ReleaseText,()=>{
+                ReleaseScroll.ScrollToTop();
+                UpdatesScroll.ScrollToTop();
+            });
+        }
+        if(!GuideTab.IsSelected)return;
+        GuideOverviewTitle.Text=Desk.GuideTitle;
+        GuideOverviewText.Text=Desk.GuideSummary;
+        GuideSections.ItemsSource=Desk.Guide(edited).Select(section=>new {
+            Icon=(Geometry)FindResource("sc-"+section.Icon),section.Title,section.Topics
+        }).ToArray();
+    }
+
     Viewbox MakeIcon(string id,int size=16){
         var path=new System.Windows.Shapes.Path{Data=(Geometry)FindResource("sc-"+id),StrokeThickness=1.7,
             StrokeLineJoin=PenLineJoin.Round,StrokeStartLineCap=PenLineCap.Round,StrokeEndLineCap=PenLineCap.Round};
@@ -56,7 +103,7 @@ internal partial class ShortcutDialog : Window
         return new Viewbox{Width=size,Height=size,Child=canvas,VerticalAlignment=VerticalAlignment.Center,IsHitTestVisible=false};
     }
     Button IconButton(string icon,string label,Action click){
-        var button=new Button{Width=29,Height=26,Padding=new Thickness(0),Content=MakeIcon(icon,15),ToolTip=label};
+        var button=new Button{Style=(Style)FindResource("SettingsIconButton"),Content=MakeIcon(icon,15),ToolTip=label};
         AutomationProperties.SetName(button,label);button.Click+=(_,_)=>click();return button;
     }
     void RefreshRows(){
@@ -66,18 +113,95 @@ internal partial class ShortcutDialog : Window
             layout.ColumnDefinitions.Add(new ColumnDefinition{Width=new GridLength(.95,GridUnitType.Star)});
             var name=new StackPanel{Orientation=Orientation.Horizontal,VerticalAlignment=VerticalAlignment.Center};
             name.Children.Add(new TextBlock{Text=a.Name,VerticalAlignment=VerticalAlignment.Center});
-            var icon=MakeIcon(a.Id,15);icon.Margin=new Thickness(7,0,0,0);icon.Opacity=.78;name.Children.Add(icon);layout.Children.Add(name);
+            var icon=MakeIcon(a.Id=="zoomVideo"?"zoomTimeline":a.Id,15);icon.Margin=new Thickness(7,0,0,0);icon.Opacity=.78;name.Children.Add(icon);layout.Children.Add(name);
             var keys=edited[a.Id];
             var badge=new Grid{MinWidth=86,HorizontalAlignment=HorizontalAlignment.Right,VerticalAlignment=VerticalAlignment.Center,Margin=new Thickness(6,0,0,0)};
             var outline=new Rectangle{RadiusX=5,RadiusY=5,StrokeThickness=1,StrokeDashArray=[3,2]};
-            outline.SetResourceReference(Shape.StrokeProperty,keys.Length==0?"border":"shortcutEdge");badge.Children.Add(outline);
-            var label=new DockPanel{Margin=new Thickness(9,3,9,3),HorizontalAlignment=HorizontalAlignment.Center};
-            label.SetResourceReference(System.Windows.Documents.TextElement.ForegroundProperty,keys.Length==0?"muted":"shortcutSet");
-            var device=MakeIcon(a.Kind==InputKind.Keyboard?"keyboard":"mouse",15);device.Margin=new Thickness(0,0,6,0);label.Children.Add(device);
-            label.Children.Add(new TextBlock{Text=keys.Length==0?"未设置":keys.Label(a.Kind),TextWrapping=TextWrapping.Wrap});
+            outline.SetResourceReference(Shape.StrokeProperty,keys.Length==0?"border":"link");
+            if(keys.Length>0)outline.Opacity=.62;
+            badge.Children.Add(outline);
+            var label=new DockPanel{Margin=new Thickness(9,3,0,3)};
+            label.SetResourceReference(System.Windows.Documents.TextElement.ForegroundProperty,keys.Length==0?"muted":"link");
+            bool keyboard=a.Kind==InputKind.Keyboard;
+            var device=MakeIcon(keyboard?"keyboard":"mouse",15);
+            // The mouse outline starts three viewBox units farther right than the keyboard.
+            if(!keyboard)device.RenderTransform=new TranslateTransform(-3d*device.Width/24,0);
+            label.Children.Add(device);
+            // Balance the gap to the visible icon stroke, including the whitespace inside its view box.
+            var keyPadding=keyboard?new Thickness(7,0,8,0):new Thickness(5.5,0,9.5,0);
+            label.Children.Add(new TextBlock{Text=keys.Length==0?L.Text("未设置"):keys.Label(a.Kind),
+                Padding=keyPadding,TextAlignment=TextAlignment.Center,TextWrapping=TextWrapping.Wrap});
             badge.Children.Add(label);Grid.SetColumn(badge,1);layout.Children.Add(badge);rows[a.Id].Content=layout;
-            AutomationProperties.SetHelpText(rows[a.Id],keys.Length==0?"未设置":keys.Label(a.Kind));
+            AutomationProperties.SetHelpText(rows[a.Id],keys.Length==0?L.Text("未设置"):keys.Label(a.Kind));
         }
+        FilterShortcuts();
+    }
+    void FilterShortcuts(){
+        bool byKey=FindByKey.IsChecked==true;
+        string query=ShortcutSearch.Text.Trim();
+        var visibleGroups=new HashSet<string>();
+        foreach(var a in Shortcuts.Actions){
+            bool match=byKey
+                ? searchBinding is not {} binding || edited[a.Id].Contains(binding)
+                : a.Name.Contains(query,StringComparison.CurrentCultureIgnoreCase);
+            rows[a.Id].Visibility=match?Visibility.Visible:Visibility.Collapsed;
+            if(match)visibleGroups.Add(a.Group);
+        }
+        foreach(var (group,header) in groupHeaders)header.Visibility=visibleGroups.Contains(group)?Visibility.Visible:Visibility.Collapsed;
+        NoSearchResults.Visibility=visibleGroups.Count==0?Visibility.Visible:Visibility.Collapsed;
+        bool empty=ShortcutSearch.Text.Length==0;
+        SearchHint.Visibility=empty?Visibility.Visible:Visibility.Collapsed;
+        ClearSearch.Visibility=empty?Visibility.Collapsed:Visibility.Visible;
+    }
+    void SearchTextChanged(object sender,TextChangedEventArgs e){
+        FilterShortcuts();ShortcutList.ScrollToTop();
+    }
+    void ChangeSearchMode(object sender,RoutedEventArgs e){
+        bool byKey=FindByKey.IsChecked==true;
+        ShortcutSearch.IsReadOnly=byKey;InputMethod.SetIsInputMethodEnabled(ShortcutSearch,!byKey);
+        ContextMenuService.SetIsEnabled(ShortcutSearch,!byKey);
+        SearchHint.Text=byKey?L.Text("请按下快捷键或使用鼠标手势"):L.Text("输入操作名称");
+        ClearShortcutSearch(sender,e);
+    }
+    void ClearShortcutSearch(object sender,RoutedEventArgs e){
+        searchBinding=null;ShortcutSearch.Clear();ShortcutSearch.Focus();
+    }
+    void ShowSearchBinding(Shortcut key){
+        searchBinding=key;ShortcutSearch.Text=key.Label(InputKind.Keyboard);
+    }
+    internal bool FindGlobalShortcut(Shortcut key){
+        if(!IsActive || FindByKey.IsChecked!=true || !ShortcutSearch.IsKeyboardFocused)return false;
+        ShowSearchBinding(key);return true;
+    }
+    void SearchKeyDown(object sender,KeyEventArgs e){
+        if(FindByKey.IsChecked!=true){
+            if(e.Key==Key.Escape && ShortcutSearch.Text.Length>0){ShortcutSearch.Clear();e.Handled=true;}
+            return;
+        }
+        if(e.Key==Key.Tab && Keyboard.Modifiers is ModifierKeys.None or ModifierKeys.Shift)return;
+        e.Handled=true;
+        if(e.IsRepeat)return;
+        var key=Shortcut.From(e);
+        if(key.Vk is 16 or 17 or 18 or 91 or 92)ShowSearchBinding(new(key.Mods,0));
+        else ShowSearchBinding(WithHeldKey(key,searchBinding));
+    }
+    static Shortcut WithHeldKey(Shortcut key,Shortcut? previous){
+        if(previous is {With:0,Vk:>=8 and <255} first && first.Mods==key.Mods && first.Vk!=key.Vk){
+            var held=KeyInterop.KeyFromVirtualKey(first.Vk);
+            if(held!=Key.None && Keyboard.IsKeyDown(held))return Shortcut.Pair(first,key.Vk);
+        }
+        return key;
+    }
+    static int MouseVirtualKey(MouseButton button)=>button switch{
+        MouseButton.Left=>1,MouseButton.Right=>2,MouseButton.Middle=>4,MouseButton.XButton1=>5,MouseButton.XButton2=>6,_=>0
+    };
+    void SearchMouseDown(object sender,MouseButtonEventArgs e){
+        if(FindByKey.IsChecked!=true || Keyboard.Modifiers==ModifierKeys.None)return;
+        ShortcutSearch.Focus();ShowSearchBinding(new((int)Keyboard.Modifiers,MouseVirtualKey(e.ChangedButton)));e.Handled=true;
+    }
+    void SearchWheel(object sender,MouseWheelEventArgs e){
+        if(FindByKey.IsChecked!=true)return;
+        ShortcutSearch.Focus();ShowSearchBinding(new((int)Keyboard.Modifiers,Shortcut.Wheel));e.Handled=true;
     }
     void Reset(IEnumerable<ShortcutAction> group){
         var restored=new ShortcutMap(edited);
@@ -87,18 +211,94 @@ internal partial class ShortcutDialog : Window
         Message(SaveError,null);RefreshRows();
     }
     static void Message(TextBlock block,string? text){block.Text=text??"";block.Visibility=text==null?Visibility.Collapsed:Visibility.Visible;}
-    void ResetAll(object sender,RoutedEventArgs e)=>Reset(Shortcuts.Actions);
-    void OpenDefaultApps(object sender,RoutedEventArgs e)=>defaultsApp();
+    void SetRecordingFields(OutputSettings options){
+        RecordingFps.SelectedValue=options.Fps==30?"30":"60";RecordingQuality.SelectedValue=options.Quality;
+        SaveCopy.IsChecked=options.SaveCopy;CopyDirectory.Text=options.CopyDirectory;
+    }
+    void SetExcelTemplate(ExcelTemplate template){
+        ExcelShowSource.IsChecked=template.ShowSource;ExcelZip.IsChecked=template.Zip;
+        foreach(CheckBox check in ExcelColumnChoices.Children)check.IsChecked=template.Columns.HasFlag((ExcelColumns)check.Tag);
+    }
+    ExcelTemplate ReadExcelTemplate(){
+        ExcelColumns columns=0;
+        foreach(CheckBox check in ExcelColumnChoices.Children)
+            if(check.IsChecked==true)columns|=(ExcelColumns)check.Tag;
+        if(columns==0){
+            ExcelTab.IsSelected=true;
+            ExcelColumnChoices.Children[0].Focus();
+            throw new InvalidDataException(L.Text("请至少选择一列导出。"));
+        }
+        return new(columns,ExcelShowSource.IsChecked==true,ExcelZip.IsChecked==true);
+    }
+    void SetExportBar(ExportBarOptions bar){
+        ExportBarEnabled.IsChecked=bar.Enabled;
+        SetColorButton(ExportBarBackground,bar.Background);SetColorButton(ExportBarFill,bar.Fill);
+    }
+    static void SetColorButton(Button button,string hex){
+        button.Tag=hex;
+        var swatch=new Border{Width=15,Height=15,CornerRadius=new CornerRadius(3),Margin=new Thickness(0,0,6,0),
+            Background=new SolidColorBrush((Color)ColorConverter.ConvertFromString(hex)),BorderThickness=new Thickness(1)};
+        swatch.SetResourceReference(Border.BorderBrushProperty,"border");
+        var content=new StackPanel{Orientation=Orientation.Horizontal};
+        content.Children.Add(swatch);content.Children.Add(new TextBlock{Text=hex});button.Content=content;
+        AutomationProperties.SetHelpText(button,hex);
+    }
+    sealed class ColorDialogOwner(IntPtr handle):System.Windows.Forms.IWin32Window { public IntPtr Handle=>handle; }
+    void ChooseBarColor(object sender,RoutedEventArgs e){
+        var button=(Button)sender;
+        using var picker=new System.Windows.Forms.ColorDialog{FullOpen=true,Color=System.Drawing.ColorTranslator.FromHtml((string)button.Tag)};
+        if(picker.ShowDialog(new ColorDialogOwner(new WindowInteropHelper(this).Handle))==System.Windows.Forms.DialogResult.OK)
+            SetColorButton(button,$"#{picker.Color.R:X2}{picker.Color.G:X2}{picker.Color.B:X2}");
+    }
+    void ResetPage(object sender,RoutedEventArgs e){
+        if(ExcelTab.IsSelected){SetExcelTemplate(ExcelTemplate.Defaults);Message(SaveError,null);return;}
+        if(RecordingTab.IsSelected){SetRecordingFields(OutputSettings.Defaults);return;}
+        if(ShortcutsTab.IsSelected){Reset(Shortcuts.Actions);return;}
+        if(GeneralTab.IsSelected){
+            InterfaceLanguage.SelectedValue=L.DefaultLanguage;
+            DefaultRulerUnit.SelectedValue=RulerScale.DefaultUnit;
+            ExportDirectory.Text=OutputSettings.Defaults.ExportDirectory;
+            SetExportBar(ExportBarOptions.Defaults);
+        }
+    }
+    void ChooseDirectory(object sender,RoutedEventArgs e){
+        if(sender is not Button {Tag:TextBox field})return;
+        var dialog=new Microsoft.Win32.OpenFolderDialog{Title=System.Windows.Automation.AutomationProperties.GetName(field)};
+        if(Directory.Exists(field.Text))dialog.InitialDirectory=field.Text;
+        if(dialog.ShowDialog(this)==true)field.Text=dialog.FolderName;
+    }
+    void OpenDefaultApps(object sender,RoutedEventArgs e)=>desk.OpenDefaultApps();
+    void OpenHome(object sender,RoutedEventArgs e)=>Desk.OpenProjectHome();
+    void OpenFeedbackTarget(object sender,RoutedEventArgs e){
+        try{
+            Message(SaveError,null);
+            if(sender==IssueButton)Desk.Browse(Updates.NewIssue);
+            else Desk.Browse(Directory.CreateDirectory(RuntimeLog.DirectoryPath).FullName);
+        }catch(Exception ex) when(ex is IOException or UnauthorizedAccessException or System.ComponentModel.Win32Exception or InvalidOperationException){
+            Serilog.Log.Error(ex,"Could not open feedback destination");
+            Message(SaveError,sender==IssueButton?L.Text("无法打开 GitHub Issues，请检查默认浏览器。"):L.Text("无法打开日志目录，请检查目录权限。"));
+        }
+    }
+    async void CheckVersion(object sender,RoutedEventArgs e){
+        CheckButton.IsEnabled=false;CheckButton.Content=L.Text("正在检查…");
+        try{await desk.CheckUpdates(true,this);}
+        finally{CheckButton.Content=L.Text("检查更新");CheckButton.IsEnabled=true;}
+    }
     void CancelSettings(object sender,RoutedEventArgs e)=>Close();
     void SaveSettings(object sender,RoutedEventArgs e){
-        try{save(edited);DialogResult=true;}
-        catch(Exception ex) when(ex is IOException or InvalidDataException or UnauthorizedAccessException or InvalidOperationException){Message(SaveError,ex.Message);}
+        try{
+            bool copy=SaveCopy.IsChecked==true;
+            var output=new OutputSettings(Equals(RecordingFps.SelectedValue,"30")?30:60,(string)RecordingQuality.SelectedValue,copy,
+                copy?OutputSettings.DirectoryPath(CopyDirectory.Text):CopyDirectory.Text,OutputSettings.DirectoryPath(ExportDirectory.Text),
+                new(ExportBarEnabled.IsChecked==true,(string)ExportBarBackground.Tag,(string)ExportBarFill.Tag),ReadExcelTemplate());
+            save(new(edited,(string)DefaultRulerUnit.SelectedValue),AutomaticUpdates.IsChecked==true,(string)InterfaceLanguage.SelectedValue,output);DialogResult=true;
+        }catch(Exception ex) when(ex is IOException or InvalidDataException or UnauthorizedAccessException or InvalidOperationException or ArgumentException or NotSupportedException){Message(SaveError,ex.Message);}
     }
 
     void OpenEditor(ShortcutAction a){
         action=a;working.Clear();working.AddRange(edited[a.Id]);editIndex=-1;draft=null;
-        string type=a.Kind switch{InputKind.Keyboard=>"按键",InputKind.Modifier=>"修饰键",_=>"鼠标"};
-        EditorTitle.Text=$"「{a.Name}」的{type}配置";
+        string type=a.Kind switch{InputKind.Keyboard=>L.Text("按键"),InputKind.Modifier=>L.Text("修饰键"),_=>L.Text("鼠标")};
+        EditorTitle.Text=L.Format($"「{a.Name}」的{type}配置");
         SettingsPage.IsEnabled=false;Overlay.Visibility=Visibility.Visible;
         if(working.Count==0)StartBinding(0);
         else{RenderEditor();FocusBinding(((DockPanel)BindingRows.Children[0]).Children.OfType<Button>().Last());}
@@ -106,7 +306,8 @@ internal partial class ShortcutDialog : Window
     void EndEditor(){
         if(action==null)return;
         var row=rows[action.Id];action=null;editIndex=-1;
-        Overlay.Visibility=Visibility.Collapsed;SettingsPage.IsEnabled=true;row.Focus();
+        Overlay.Visibility=Visibility.Collapsed;SettingsPage.IsEnabled=true;
+        if(row.IsVisible)row.Focus();else ShortcutSearch.Focus();
     }
     void CancelEditor(object sender,RoutedEventArgs e)=>EndEditor();
     void ConfirmEditor(object sender,RoutedEventArgs e){
@@ -134,22 +335,20 @@ internal partial class ShortcutDialog : Window
             int index=i;
             var row=new DockPanel{Margin=new Thickness(0,0,0,8)};
             bool active=index==editIndex;
-            var command=active?IconButton("check","确认此绑定",()=>{
+            var command=active?IconButton("check",L.Text("确认此绑定"),()=>{
                 if(CommitDraft()){RenderEditor();AddBinding.Focus();}
-            }):IconButton("trash","删除 "+working[i].Label(action.Kind),()=>Remove(index));
+            }):IconButton("trash",L.Text("删除 ")+working[i].Label(action.Kind),()=>Remove(index));
             command.IsEnabled=active||!Recording;
-            command.SetResourceReference(ForegroundProperty,active?"shortcutSet":"danger");
+            command.SetResourceReference(ForegroundProperty,active?"link":"danger");
             if(active)accept=command;
             DockPanel.SetDock(command,Dock.Right);row.Children.Add(command);
-            var key=new Button{HorizontalAlignment=HorizontalAlignment.Left,Padding=new Thickness(10,3,10,3),
-                MaxWidth=310,IsEnabled=active||!Recording};
+            var key=new Button{HorizontalAlignment=HorizontalAlignment.Left,MaxWidth=310,IsEnabled=active||!Recording};
             if(active){
                 capture=key;key.SetResourceReference(BorderBrushProperty,"link");
                 AutomationProperties.SetAutomationId(key,"recordBinding");
                 key.PreviewMouseDown+=(_,e)=>{
                     if(action?.Kind is not (InputKind.Click or InputKind.Drag) || Keyboard.Modifiers==ModifierKeys.None)return;
-                    int vk=e.ChangedButton switch{MouseButton.Left=>1,MouseButton.Right=>2,MouseButton.Middle=>4,MouseButton.XButton1=>5,MouseButton.XButton2=>6,_=>0};
-                    draft=new((int)Keyboard.Modifiers,vk);e.Handled=true;RenderEditor();FocusBinding(capture!);
+                    draft=new((int)Keyboard.Modifiers,MouseVirtualKey(e.ChangedButton));e.Handled=true;RenderEditor();FocusBinding(capture!);
                 };
                 key.PreviewMouseWheel+=(_,e)=>{
                     if(action?.Kind!=InputKind.Wheel)return;
@@ -185,17 +384,18 @@ internal partial class ShortcutDialog : Window
         draft=vk==null?null:new Shortcut(mods,vk.Value);
     }
     string? Problem(Shortcut key){
-        if(Shortcuts.Problem(action!,key) is {} invalid)return invalid;
-        if(working.Where((_,i)=>i!=editIndex).Contains(key))return "这个操作已使用此快捷键。";
-        var owner=Shortcuts.Actions.FirstOrDefault(a=>a!=action && edited[a.Id].Contains(key));
-        return owner==null?null:$"此快捷键已用于「{owner.Name}」，请换一个。";
+        var current=action!;
+        if(Shortcuts.Problem(current,key) is {} invalid)return invalid;
+        if(working.Where((_,i)=>i!=editIndex).Contains(key))return L.Text("这个操作已使用此快捷键。");
+        var owner=Shortcuts.Actions.FirstOrDefault(a=>a!=current && edited[a.Id].Any(other=>Shortcuts.Overlap(a,other,current,key)));
+        return owner==null?null:L.Format($"此快捷键已用于「{owner.Name}」，请换一个。");
     }
     void UpdateDraft(){
         string? error=Recording && draft is {} key?Problem(key):null;
         Message(EditorError,error);
         bool valid=draft!=null && error==null;
         if(capture!=null){
-            capture.Content=draft?.Label(action!.Kind) is {Length:>0} text?text:action!.Kind==InputKind.Keyboard?"请按下按键":"请选择组合";
+            capture.Content=draft?.Label(action!.Kind) is {Length:>0} text?text:action!.Id=="rateReset"?L.Text("按一个键，或同时按两个键"):action.Kind==InputKind.Keyboard?L.Text("请按下按键"):L.Text("请选择组合");
             accept!.IsEnabled=valid;
         }
         ApplyBinding.IsEnabled=!Recording||valid;
@@ -213,7 +413,8 @@ internal partial class ShortcutDialog : Window
             if(key.Vk is 16 or 17 or 18){
                 draft=null;UpdateDraft();capture.Content=new Shortcut(key.Mods,0).Label(InputKind.Modifier)+" + …";return;
             }
-            draft=key;UpdateDraft();
+            draft=action.Id=="rateReset"?WithHeldKey(key,draft):key;
+            UpdateDraft();
         }else if(e.Key==Key.Escape && !MouseChoice.IsDropDownOpen){e.Handled=true;EndEditor();}
     }
 }

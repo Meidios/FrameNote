@@ -20,7 +20,7 @@ internal sealed class ReviewNavigation(string indexPath,string recoveryDirectory
             await input.CopyToAsync(output,token);
         }
         var entry=Path.Combine(dest,"index.html");
-        if(!File.Exists(entry))throw new IOException("无法恢复审阅页，请重新安装 FrameNote。");
+        if(!File.Exists(entry))throw new IOException(L.Text("无法恢复审阅页，请重新安装 FrameNote。"));
         page=new Uri(entry);
     }
 
@@ -56,12 +56,12 @@ internal sealed class ReviewNavigation(string indexPath,string recoveryDirectory
                 var result=await done.Task.WaitAsync(TimeSpan.FromSeconds(30),token);
                 if(result.IsSuccess)return;
                 if(attempt==0)continue;
-                throw new IOException($"无法打开审阅界面：{result.WebErrorStatus}。已尝试从当前用户目录加载。（FrameNote {Updates.Running}，WebView2 {core.Environment.BrowserVersionString}）");
+                throw new IOException(L.Format($"无法打开审阅界面：{result.WebErrorStatus}。已尝试从当前用户目录加载。（FrameNote {Updates.Running}，WebView2 {core.Environment.BrowserVersionString}）"));
             }catch(TimeoutException e){
                 if(attempt==0)continue;
-                throw new IOException($"等待本地审阅界面加载超时（WebView2 {core.Environment.BrowserVersionString}）。",e);
+                throw new IOException(L.Format($"等待本地审阅界面加载超时（WebView2 {core.Environment.BrowserVersionString}）。"),e);
             }finally{core.NavigationStarting-=Starting;core.NavigationCompleted-=Completed;}
         }
-        throw new IOException("无法读取本地审阅页或恢复副本。");
+        throw new IOException(L.Text("无法读取本地审阅页或恢复副本。"));
     }
 }

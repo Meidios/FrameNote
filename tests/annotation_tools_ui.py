@@ -3,15 +3,11 @@ import array, json, math, os, shutil, subprocess, time, zipfile
 from pathlib import Path
 from playwright.sync_api import sync_playwright
 from pywinauto import Desktop
-from review_ui import fixtures, launch, notes, stop, wait, work, at
+from review_ui import exported_file, export_window, fixtures, launch, notes, stop, wait, work, at
 
 profile=work/'profile';profile.mkdir();(profile/'updates.json').write_text('{"automatic":false}')
 os.environ['FRAMENOTE_DATA_DIR']=str(profile)
 video=work/'tools.mp4';shutil.copyfile(fixtures/'2997.mp4',video)
-def save_dialog(proc,path):
-    dialog=Desktop(backend='win32').window(process=proc.pid,class_name='#32770');dialog.wait('ready',timeout=10)
-    time.sleep(.2);dialog.child_window(class_name='Edit',found_index=0).set_edit_text(str(path));dialog.child_window(control_id=1).click()
-
 with sync_playwright() as pw:
     proc,p=launch(pw,video)
     tone=None;errors=[];p.on('pageerror',lambda e:errors.append(str(e)))
@@ -35,10 +31,14 @@ with sync_playwright() as pw:
             if kind=='angle':
                 for x,y in [(.2,.3),(.2,.6),(.5,.6)]:p.mouse.click(*point(x,y))
                 assert '90.0°' in p.locator('#ink').text_content()
+                assert notes(p)[-1]['text']=='角度 90.0°' and p.locator('#body').input_value()=='角度 90.0°'
             else:
                 p.mouse.move(*point(.25,.25));p.mouse.down();p.mouse.move(*point(.6,.65));p.mouse.up()
             assert notes(p)[-1]['shape']['kind']==kind
-            if kind=='ruler':assert 'px' in p.locator('#ink').text_content()
+            if kind=='ruler':
+                p.locator('#rulerLength').fill('1')
+                p.locator('#calibrateRuler').click()
+                assert '1 m' in p.locator('#ink').text_content()
             if kind=='magnifier':assert p.locator('#ink foreignObject canvas').count()==1
             p.locator('#point').click();p.locator('#body').fill(kind+' 验证')
         p.keyboard.press('Escape');at(p,0)
@@ -58,10 +58,10 @@ with sync_playwright() as pw:
         p.locator('#mic').select_option('missing-test-device')
         before_voice=notes(p)
         p.locator('#voiceRecord').click()
-        wait(p,"!voicePending && $('voiceStatus').textContent==='录音失败'",timeout=15000)
+        wait(p,"!voicePending && $('status').textContent.includes('语音录制失败')",timeout=15000)
         assert notes(p)==before_voice
         assert not p.locator('header').evaluate('el=>el.inert')
-        assert '语音录制失败' in p.locator('#status').text_content()
+        assert p.locator('#voiceStatus').is_hidden()
         cable=next((d for d in devices if d['name'].startswith('CABLE Output')),None)
         if cable:
             p.locator('#mic').select_option(cable['id'])
@@ -100,14 +100,13 @@ with sync_playwright() as pw:
             assert notes(p)==before_voice+[original]
             assert p.evaluate("id=>!doc.timeline?.clips.some(c=>c.noteId===id)",copied["id"])
             p.locator(".note .stamp").last.click()
-            p.locator('#voicePreview').click();wait(p,'voicePreview && !voicePreview.paused')
-            p.evaluate('voicePreview.pause()')
+            assert p.locator('#voiceStatus').is_hidden()
             at(p,0);p.locator('#play').click()
             if os.environ.get('FRAMENOTE_TEST_EDITS'):
                 wait(p,"audioProbes.some(a=>a.src.endsWith(doc.notes.at(-1).voice.asset+'.m4a') && !a.paused && Math.abs(a.currentTime-transport.currentTime)<.2)")
             else:wait(p,"(()=>{const a=voicePlayers.get(doc.notes.at(-1).id);return a && !a.paused && Math.abs(a.currentTime-v.currentTime)<.2})()")
             p.locator('#play').click()
-        package=work/'annotation-tools.framenote';p.locator('#save').click();save_dialog(proc,package)
+        package=work/'annotation-tools.framenote';p.locator('#save').click();exported_file(proc,package)
         wait(p,"!busy && $('status').textContent.startsWith('审阅包已保存')",timeout=15000)
         expected=notes(p)
         with zipfile.ZipFile(package) as z:
@@ -120,7 +119,7 @@ with sync_playwright() as pw:
                     samples=array.array('f');samples.frombytes(raw)
                     rms=math.sqrt(sum(v*v for v in samples)/len(samples));assert rms>.005,rms
                     print('Recorded virtual test-tone RMS:',rms,flush=True)
-        p.locator('#exportVideo').click();out=work/'annotated.mp4';save_dialog(proc,out)
+        p.locator('#exportVideo').click();out=work/'annotated.mp4';exported_file(proc,out)
         wait(p,"!busy && $('status').textContent.startsWith('带批注的 MP4 已保存')",timeout=180000)
         meta=json.loads(subprocess.check_output(['ffprobe','-v','error','-show_streams','-of','json',str(out)]))
         vstream=next(s for s in meta['streams'] if s['codec_type']=='video')
@@ -143,10 +142,10 @@ with sync_playwright() as pw:
     proc,p=launch(pw,package)
     try:
         assert notes(p)==expected
-        p.locator('#exportVideo').click();cancelled=work/'cancelled.mp4';save_dialog(proc,cancelled)
-        wait(p,"$('taskProgress').open")
-        p.locator('#cancelProgress').click();wait(p,'!busy',timeout=20000)
-        assert not cancelled.exists() and not list(work.glob('cancelled.mp4.*.tmp.mp4'))
+        before_files=set((work/'exports').iterdir());p.locator('#exportVideo').click()
+        export_window(proc).child_window(title="取消导出",control_type="Button").invoke()
+        wait(p,'!busy',timeout=20000)
+        assert set((work/'exports').iterdir())==before_files
     finally:stop(proc)
 print('PASS: immediate notes, duration conversion, five tools, voice/package roundtrip, MP4 decode and cancellation.',work)
 

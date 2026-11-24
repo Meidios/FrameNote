@@ -1,5 +1,5 @@
 using System.IO;
-using Microsoft.Win32;
+using System.IO.Compression;
 
 namespace FrameNote;
 
@@ -8,47 +8,72 @@ public sealed partial class Desk
     async Task ExportExcel(){
         var review=doc;
         if(review==null || media==null || viewingImage || voiceCapture!=null || review.Notes.Count==0)return;
-        var picker=new OpenFolderDialog{Title="选择保存位置 · 将新建含 Excel 清单和媒体的文件夹"};
-        if(picker.ShowDialog(this)!=true)return;
-        using var cancel=CancellationTokenSource.CreateLinkedTokenSource(lifetime.Token);
-        var token=cancel.Token;
-        await Work(async()=>{
-            exportCancel=cancel;
-            string stage=Path.Combine(picker.FolderName,".framenote-excel-"+Guid.NewGuid().ToString("N"));
+        await Work(()=>WithExportProgress("Excel",async token=>{
+            var settings=CurrentOutput();
+            var template=settings.Excel;
+            string parent=Directory.CreateDirectory(OutputSettings.DirectoryPath(settings.ExportDirectory)).FullName;
+            string stage=Path.Combine(parent,".framenote-excel-"+Guid.NewGuid().ToString("N"));
             string working=Path.Combine(scratch,"excel-"+Guid.NewGuid().ToString("N"));
             try{
-                ReportExport("正在准备 Excel 批注清单",0);
+                ReportExport(L.Text("正在准备 Excel 批注清单"),0);
                 review.Check();
-                int prepared=review.Timeline==null?0:30;
-                string input=await EditedMedia(token,p=>ReportExport("正在准备剪辑后的画面与声音",p*prepared/100));
-                ReportExport("正在准备 Excel 批注清单",prepared);
-                var format=await Probe.ReadVideoFormat(input,token);
-                var frames=await Probe.Frames(input,await Probe.Inspect(input,token),token);
                 var notes=review.Notes.OrderBy(n=>n.StartUs).ThenBy(n=>n.Number).ToArray();
-                Directory.CreateDirectory(Path.Combine(stage,"media"));
-                Directory.CreateDirectory(working);
-                for(int i=0;i<notes.Length;i++){
-                    token.ThrowIfCancellationRequested();
-                    var note=notes[i];
-                    string title=$"正在导出 Excel 媒体 {i+1}/{notes.Length} · #{note.Number}";
-                    void MediaProgress(int p)=>ReportExport(title,prepared+(95-prepared)*(100*i+p)/(100*notes.Length));
-                    MediaProgress(0);
-                    await WriteExcelMedia(input,review,note,format,frames,working,Path.Combine(stage,ExcelReview.MediaFile(note)),MediaProgress,token);
-                }
-                ReportExport("正在写入 Excel 工作簿",95);
-                await Task.Run(()=>ExcelReview.Write(stage,working,review.FileName,notes,token),token);
+                Directory.CreateDirectory(stage);
+                if((template.Columns & (ExcelColumns.Preview|ExcelColumns.Media))!=0)
+                    await PrepareExcelMedia(review,notes,template.Columns,stage,working,token);
+                ReportExport(L.Text("正在写入 Excel 工作簿"),95);
+                await Task.Run(()=>ExcelReview.Write(stage,working,review.FileName,notes,template,token),token);
                 token.ThrowIfCancellationRequested();
-                string directory=await PublishExcelFolder(stage,picker.FolderName,Path.GetFileNameWithoutExtension(review.FileName),token);
-                ReportExport("Excel 导出完成",100);
-                Send(new{type="status",text="Excel 批注已导出："+Path.Combine(directory,ExcelReview.WorkbookName)});
-            }catch(OperationCanceledException) when(token.IsCancellationRequested){
-                Send(new{type="status",text="已取消 Excel 导出。"});
+                string stem=Path.GetFileNameWithoutExtension(review.FileName);
+                string path;
+                if(template.Zip){
+                    ReportExport(L.Text("正在打包 Excel 和附件"),98);
+                    path=await WriteOutput(parent,stem+"_Excel.zip",zip=>Task.Run(()=>ZipExcel(stage,zip,token),token),token);
+                }else{
+                    string directory=await PublishExcelFolder(stage,parent,stem,token);
+                    path=Path.Combine(directory,ExcelReview.WorkbookName);
+                }
+                Send(new{type="status",text=L.Text("Excel 批注已导出：")+path});
+                // The media links in the workbook resolve relative to the exported folder.
+                if(!template.Zip && template.Columns.HasFlag(ExcelColumns.Media))return new DirectoryInfo(Path.GetDirectoryName(path)!);
+                return new FileInfo(path);
             }finally{
-                exportCancel=null;Send(new{type="exportProgress",active=false});
                 if(Directory.Exists(working))await RetrySharingViolation(()=>Directory.Delete(working,true),CancellationToken.None);
                 if(Directory.Exists(stage))await RetrySharingViolation(()=>Directory.Delete(stage,true),CancellationToken.None);
             }
-        });
+        }));
+    }
+
+    static async Task ZipExcel(string directory,string path,CancellationToken token){
+        using var zip=ZipFile.Open(path,ZipArchiveMode.Create);
+        foreach(string file in Directory.EnumerateFiles(directory,"*",SearchOption.AllDirectories)){
+            token.ThrowIfCancellationRequested();
+            var name=Path.GetRelativePath(directory,file).Replace(Path.DirectorySeparatorChar,'/');
+            var entry=zip.CreateEntry(name,CompressionLevel.Fastest);
+            using var input=File.OpenRead(file);
+            using var output=entry.Open();
+            await input.CopyToAsync(output,token).ConfigureAwait(false);
+        }
+    }
+
+    async Task PrepareExcelMedia(Review review,Note[] notes,ExcelColumns columns,string stage,string working,CancellationToken token){
+        int prepared=review.Timeline==null?0:30;
+        string input=await EditedMedia(token,p=>ReportExport(L.Text("正在准备剪辑后的画面与声音"),p*prepared/100));
+        ReportExport(L.Text("正在准备 Excel 批注清单"),prepared);
+        var format=await Probe.ReadVideoFormat(input,token);
+        var frames=await Probe.Frames(input,await Probe.Inspect(input,token),token);
+        Directory.CreateDirectory(working);
+        if(columns.HasFlag(ExcelColumns.Media))Directory.CreateDirectory(Path.Combine(stage,"media"));
+        for(int i=0;i<notes.Length;i++){
+            token.ThrowIfCancellationRequested();
+            var note=notes[i];
+            string title=L.Format($"正在导出 Excel 媒体 {i+1}/{notes.Length} · #{note.Number}");
+            void MediaProgress(int p)=>ReportExport(title,prepared+(95-prepared)*(100*i+p)/(100*notes.Length));
+            MediaProgress(0);
+            string? output=columns.HasFlag(ExcelColumns.Media)?Path.Combine(stage,ExcelReview.MediaFile(note)):null;
+            string? preview=columns.HasFlag(ExcelColumns.Preview)?Path.Combine(working,$"{note.Number}.png"):null;
+            await WriteExcelMedia(input,review,note,format,frames,working,output,preview,MediaProgress,token);
+        }
     }
 
     static async Task RetrySharingViolation(Action operation,CancellationToken token){
@@ -74,12 +99,11 @@ public sealed partial class Desk
         }
     }
 
-    async Task WriteExcelMedia(string input,Review review,Note note,Probe.VideoFormat format,long[] frames,string working,string output,Action<int> report,CancellationToken token){
+    async Task WriteExcelMedia(string input,Review review,Note note,Probe.VideoFormat format,long[] frames,string working,string? output,string? preview,Action<int> report,CancellationToken token){
         bool gif=note.EndUs.HasValue;
         string layer=Path.Combine(working,"layer.png");
-        string preview=Path.Combine(working,$"{note.Number}.png");
         var (width,height)=gif?format.Fit(800,800):format.Fit(1920,1080);
-        var renderer=new VideoAnnotations(review,width,height,format.Width,format.Height,ImageDirectory,showFooter:false);
+        var renderer=new VideoAnnotations(review,width,height,format.Width,format.Height,ImageDirectory,defaultRulerUnit,showFooter:false);
         renderer.WriteLayerPng(layer,[note]);
 
         int index=Array.BinarySearch(frames,note.StartUs);
@@ -100,27 +124,34 @@ public sealed partial class Desk
                 scene="scene";
             }
         }
-        filters.Add($"[{scene}][1:v:0]overlay=format=rgb,split[annotated][poster]");
-        double scale=Math.Min(1,Math.Min(160d/width,88d/height));
-        int previewWidth=Math.Max(1,(int)Math.Round(width*scale)),previewHeight=Math.Max(1,(int)Math.Round(height*scale));
-        filters.Add($"[poster]trim=end_frame=1,scale={previewWidth}:{previewHeight}:flags=lanczos[preview]");
+        string branches=output!=null && preview!=null?",split[annotated][poster]":output!=null?"[annotated]":"[poster]";
+        filters.Add($"[{scene}][1:v:0]overlay=format=rgb{branches}");
+        if(preview!=null){
+            double scale=Math.Min(1,Math.Min(160d/width,88d/height));
+            int previewWidth=Math.Max(1,(int)Math.Round(width*scale)),previewHeight=Math.Max(1,(int)Math.Round(height*scale));
+            filters.Add($"[poster]trim=end_frame=1,scale={previewWidth}:{previewHeight}:flags=lanczos[preview]");
+        }
         string result="annotated";
-        if(gif){
+        bool writeGif=gif && output!=null;
+        if(writeGif){
             // Per-frame palettes stream long Regions without buffering the entire clip.
             filters.Add("[annotated]split[color][pixels]");
             filters.Add("[color]palettegen=stats_mode=single[palette]");
             filters.Add("[pixels][palette]paletteuse=new=1:dither=sierra2_4a[gif]");
             result="gif";
         }
-        args.AddRange(["-filter_complex",string.Join(';',filters),"-map",$"[{result}]","-an"]);
-        if(gif){
-            long count=(duration*12+999_999)/1_000_000;
-            int finalDelay=Math.Max(1,(int)(Math.Round(duration/10000d)-Math.Round((count-1)*100d/12)));
-            args.AddRange(["-frames:v",count.ToString(),"-loop","0","-final_delay",finalDelay.ToString()]);
-        }else args.AddRange(["-frames:v","1","-c:v","png","-threads:v","1"]);
-        args.Add(output);
-        args.AddRange(["-map","[preview]","-an","-frames:v","1","-c:v","png","-threads:v","1",preview]);
-        if(gif)await Probe.EncodeWithProgress(args,duration,report,token);
+        args.AddRange(["-filter_complex",string.Join(';',filters)]);
+        if(output!=null){
+            args.AddRange(["-map",$"[{result}]","-an"]);
+            if(writeGif){
+                long count=(duration*12+999_999)/1_000_000;
+                int finalDelay=Math.Max(1,(int)(Math.Round(duration/10000d)-Math.Round((count-1)*100d/12)));
+                args.AddRange(["-frames:v",count.ToString(),"-loop","0","-final_delay",finalDelay.ToString()]);
+            }else args.AddRange(["-frames:v","1","-c:v","png","-threads:v","1"]);
+            args.Add(output);
+        }
+        if(preview!=null)args.AddRange(["-map","[preview]","-an","-frames:v","1","-c:v","png","-threads:v","1",preview]);
+        if(writeGif)await Probe.EncodeWithProgress(args,duration,report,token);
         else await Probe.Run(token,"ffmpeg",args.ToArray());
     }
 }

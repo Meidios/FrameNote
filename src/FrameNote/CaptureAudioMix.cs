@@ -28,7 +28,7 @@ internal sealed class CaptureAudioMix : IDisposable
         stopped=true;
         Exception? error=null;
         foreach(var (track,_) in audio){try{track.Dispose();}catch(Exception e){error??=e;}}
-        if(error!=null)throw new IOException("采集音频失败。",error);
+        if(error!=null)throw new IOException(L.Text("采集音频失败。"),error);
     }
     // Callers map [mix] and trim the padded audio to the recording duration.
     internal static void AppendMix(List<string> args,int firstInput,double startSeconds,IEnumerable<(string Path,int GainDb)> tracks){

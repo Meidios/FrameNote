@@ -6,7 +6,7 @@ from urllib.request import url2pathname
 from PIL import Image,ImageChops,ImageStat
 from playwright.sync_api import sync_playwright
 from pywinauto import Desktop
-from review_ui import launch,stop,wait,work
+from review_ui import exported_file, launch,stop,wait,work
 profile=work/'profile';profile.mkdir();(profile/'updates.json').write_text('{"automatic":false}');os.environ['FRAMENOTE_DATA_DIR']=str(profile)
 source=work/'source.mp4';voice=work/'voice.m4a';package=work/'input.framenote';saved=work/'edited.framenote';out=work/'edited.mp4'
 subprocess.run(['ffmpeg','-v','error','-f','lavfi','-i','testsrc2=size=320x180:rate=30:duration=14','-f','lavfi','-i','sine=frequency=440:duration=14','-af',"volume='if(between(t,3,4),0.01,1)':eval=frame",'-c:v','libx264','-c:a','aac','-shortest',str(source)],check=True)
@@ -44,17 +44,84 @@ def check_trim_preview(p,before,first,last):
             tint=ImageStat.Stat(channel).median[0]
             matching=sum(channel.histogram()[max(0,tint-2):tint+3])
             assert matching>.98*channel.width*channel.height,(tint,matching,box)
+
+def check_reorder(proc,p):
+    def split_at(us):
+        p.evaluate('t=>seekUs(t)',us)
+        wait(p,'t=>!v.seeking && Math.abs(shown-t)<1000',us)
+        p.locator('#splitClip').click()
+    def track(name):
+        return sorted(p.evaluate('t=>doc.timeline.clips.filter(c=>c.track===t)',name),key=lambda c:c['startUs'])
+    def drag_to(clip,us,check_preview=None,cancel=False):
+        middle=clip['startUs']+clip['durationUs']/2
+        selector='#videoClips [data-id="'+clip['id']+'"]'
+        drag(p,selector,us-middle,while_held=check_preview,cancel=cancel)
+    def order(name):
+        return [c['sourceUs'] for c in track(name)]
+    def undo():
+        p.keyboard.press('Control+z')
+    split_at(4000000)
+    a,b=track('video')
+    saved=p.evaluate('doc.timeline')
+    def preview():
+        for name in ('video','audio'):
+            first,second=sorted((c for c in saved['clips'] if c['track']==name),key=lambda c:c['startUs'])
+            for clip,us in [(second,0),(first,b['durationUs'])]:
+                x=p.locator('[data-id="'+clip['id']+'"]').evaluate('el=>parseFloat(el.style.left)*doc.durationUs/100')
+                assert abs(x-us)<14,(name,x,us)
+        assert abs(float(p.locator('#markLanes button').get_attribute('data-start'))*14000000-2000000)<1
+        assert p.evaluate('doc.timeline')==saved
+    drag_to(b,500000,preview,cancel=True)
+    assert p.evaluate('doc.timeline')==saved
+    drag_to(b,500000,preview)
+    assert order('video')==order('audio')==[4000000,0]
+    assert track('voice')[0]['startUs']==p.evaluate('doc.notes[0].startUs')==2000000
+    p.evaluate('seekUs(0)')
+    wait(p,'!v.seeking && Math.abs(v.currentTime-4)<.035')
+    review=work/'reordered.framenote'
+    p.locator('#save').click();exported_file(proc,review)
+    wait(p,"!busy && $('status').textContent.startsWith('审阅包已保存')")
+    with zipfile.ZipFile(review) as z:
+        timeline=json.loads(z.read('review.json'))['timeline']
+        assert sorted((c['startUs'],c['sourceUs']) for c in timeline['clips'] if c['track']=='video')==[(0,4000000),(10000000,0)]
+    exported=work/'reordered.mp4'
+    p.locator('#exportVideo').click();exported_file(proc,exported)
+    wait(p,"!busy && $('status').textContent.startsWith('带批注的 MP4 已保存')",timeout=90000)
+    def video_frame(path,sec):
+        data=subprocess.check_output(['ffmpeg','-v','error','-ss',str(sec),'-i',str(path),'-frames:v','1','-f','image2pipe','-c:v','png','-'])
+        return Image.open(io.BytesIO(data)).convert('RGB').crop((0,0,320,180))
+    for timeline_sec,source_sec in [(1,5),(11,1)]:
+        actual=video_frame(exported,timeline_sec)
+        def difference(sec):
+            return sum(ImageStat.Stat(ImageChops.difference(actual,video_frame(source,sec))).mean)/3
+        assert difference(source_sec)<difference(timeline_sec)/2
+    undo()
+    assert p.evaluate('doc.timeline')==saved
+    p.keyboard.press('Control+Shift+z')
+    drag_to(track('video')[0],13500000)
+    assert p.evaluate('doc.timeline')==saved
+    split_at(10000000)
+    p.locator('#linkTracks').click()
+    audio,notes=track('audio'),p.evaluate('doc.notes')
+    drag_to(track('video')[-1],500000)
+    assert order('video')==[10000000,0,4000000] and track('audio')==audio and p.evaluate('doc.notes')==notes
+    for _ in range(6):undo()
+    assert p.evaluate('doc.timeline') is None
+    print('PASS: packed clip reordering by mouse, linked previews, decoded first frame, undo/redo and independent three-clip insertion.',flush=True)
 with sync_playwright() as pw:
     proc,p=launch(pw,package);errors=[];p.on('pageerror',lambda e:errors.append(str(e)))
     try:
+        window=Desktop(backend='win32').window(process=proc.pid,title_re='.*FrameNote.*',found_index=0)
+        window.move_window(width=1440,height=900)
+        wait(p,"$('viewer').clientWidth>730 && !$('alignClips').hasAttribute('popover')")
         images=Path(url2pathname(urlsplit(p.evaluate('imageBase')).path))
         assert (images/(hash+'.m4a')).read_bytes()==voice.read_bytes()
         assert p.locator('#videoClips .editClip').count()==1
         assert p.locator('#voiceClips .editClip').count()==1
         tools=p.get_by_role('group',name='片段剪辑')
-        for name,icon in [('联动所有轨道','link'),('分割片段','scissors'),('贴到上一片段','arrow-left-to-line'),('贴到下一片段','arrow-right-to-line'),('删除片段','trash')]:
+        for name,icon in [('轨道联动','link'),('分割片段','scissors'),('贴到上一片段','arrow-left-to-line'),('贴到下一片段','arrow-right-to-line'),('删除片段','trash')]:
             button=tools.get_by_role('button',name=name,exact=True)
-            assert button.is_visible() and not button.inner_text().strip()
+            assert button.is_visible() and not button.inner_text().strip(),name
             assert button.locator('use').get_attribute('href')=='#icon-'+icon
         assert tools.get_by_role('button',name='删除片段').is_disabled()
         for track,name in [('video','视频'),('audio','原声'),('voice','语音批注')]:
@@ -63,6 +130,7 @@ with sync_playwright() as pw:
         wait(p,"""()=>{const images=[...document.querySelectorAll('#sourceFrames image')];
             return images.length>0 && images.every(im=>im.hasAttribute('href')) && $('sourceWave').hasAttribute('d')}""",timeout=15000)
         assert '#1' in p.locator('#markLanes').inner_text()
+        check_reorder(proc,p)
         p.locator('#trackDesk').screenshot(path=str(work/'timeline-clips.png'))
         join=tools.get_by_role('button',name='贴到上一片段')
         join_next=tools.get_by_role('button',name='贴到下一片段')
@@ -139,6 +207,13 @@ with sync_playwright() as pw:
         assert state['notes'][0]['startUs']==6000000+moved
         assert next(c for c in state['timeline']['clips'] if c['track']=='voice')['startUs']==6000000+moved
         assert next(c for c in state['timeline']['clips'] if c['track']=='audio' and c['startUs']>0)['startUs']==second['startUs']
+        # Release well inside the neighboring clip from each side. Verify the preview too.
+        drag(p,video+':nth-child(1)',moved+1500000,preview_start=moved)
+        assert p.evaluate('doc.timeline.clips.find(c=>c.track==="video").startUs')==moved
+        p.keyboard.press('Control+z')
+        drag(p,video+':nth-child(2)',-moved-1500000,preview_start=split)
+        assert p.evaluate('doc.timeline.clips.filter(c=>c.track==="video")[1].startUs')==split
+        p.keyboard.press('Control+z')
         p.locator(video).first.click()
         join_next.click()
         aligned=p.evaluate('doc.timeline.clips.filter(c=>c.track==="video")')
@@ -160,7 +235,7 @@ with sync_playwright() as pw:
         # Move again, then detach original audio without moving other tracks.
         drag(p,'#videoClips .editClip:nth-child(2)',2000000)
         p.locator('#linkTracks').click();before=p.evaluate('doc.notes')
-        assert tools.get_by_role('button',name='联动所有轨道',pressed=False).locator('use').get_attribute('href')=='#icon-unlink'
+        assert tools.get_by_role('button',name='轨道联动',pressed=False).locator('use').get_attribute('href')=='#icon-unlink'
         still=p.locator(video).nth(1).bounding_box()
         def detached_move():
             assert p.locator(video).nth(1).bounding_box()==still
@@ -183,9 +258,9 @@ with sync_playwright() as pw:
         p.evaluate('seekUs(6000000)');p.locator('#saveFrame').click();gap=work/'gap.png';dialog(proc,gap)
         wait(p,"!busy && $('status').textContent.startsWith('当前帧已保存')",timeout=180000)
         assert max(max(px) for px in Image.open(gap).convert('RGB').get_flattened_data())<15
-        p.locator('#save').click();dialog(proc,saved);wait(p,"$('status').textContent.startsWith('审阅包已保存')",timeout=15000)
+        p.locator('#save').click();exported_file(proc,saved);wait(p,"$('status').textContent.startsWith('审阅包已保存')",timeout=15000)
         expected=p.evaluate('doc');p.screenshot(path=str(work/'timeline.png'))
-        p.locator('#exportVideo').click();dialog(proc,out);wait(p,"!busy && $('status').textContent.startsWith('带批注的 MP4 已保存')",timeout=180000)
+        p.locator('#exportVideo').click();exported_file(proc,out);wait(p,"!busy && $('status').textContent.startsWith('带批注的 MP4 已保存')",timeout=180000)
         assert not errors,errors
     finally:stop(proc)
     assert not images.parent.exists(),images.parent

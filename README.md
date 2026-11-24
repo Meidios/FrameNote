@@ -18,7 +18,7 @@
 
 在 **文件 → 设置** 的快捷键列表中，点一项操作即可编辑。键盘快捷键可以直接按下录入，鼠标手势可以选择修饰键和鼠标键。同一操作可添加多组组合，也可以删除全部绑定。点「确定」返回列表，再点「保存」即可在 FrameNote 和 Player 中使用。每个分组标题右侧的按钮可恢复该组默认值。设置中也可以打开 Windows 默认应用设置。
 
-录制设置和混音器在左侧，批注列表和编辑器在右侧。中间时间线从上到下显示视频缩略图、混合音频波形和批注；选中一个区间后，可在播放栏开启循环。下次打开时会恢复窗口大小或最大化状态。
+视频和声音捕获来源在左侧，批注列表和编辑器在右侧。帧率、压缩品质和录制副本可在「设置 → 录制设置」中调整。中间时间线从上到下显示视频缩略图、混合音频波形和批注；选中一个区间后，可在播放栏开启循环。下次打开时会恢复窗口大小或最大化状态。
 
 1. 在[最新版本](https://github.com/Meidios/FrameNote/releases/latest)的 **Assets** 下载以 `win-x64-Setup.exe` 结尾的安装包。安装包包含 .NET 运行时、VLC、FFmpeg 和 FFprobe；如果电脑缺少 Microsoft Edge WebView2，首次安装需要联网。Windows 的默认视频播放器不会被替换。
 2. 拖入视频，用 **空格** 播放／暂停、**← / →** 逐帧移动。直接选框选、箭头等工具在画面上绘制，就会在播放头位置新建点批注。选图和录音也各自新建批注。右键画面可选工具，右键已有批注可编辑、换色、复制或删除。**M** 可添加纯文字点批注，**I** 和 **O** 可标记区间。批注和剪辑只保留到窗口关闭，需要留存时请先导出 `.framenote` 审阅包。卡片右上角可删除该条批注；**Ctrl+Z** 撤销，**Ctrl+Shift+Z** 重做。
@@ -30,13 +30,13 @@
 | 调整已有批注 | 在画面上拖动图形或附图即可移动。选中后拖端点调整线长和方向，拖顶点改变角度，拖角点调整框或图片大小。双击文字框可修改文字。 |
 | 移动批注区间和调整时长 | 拖住 Region 标签中间可整体移动区间，关联语音会一起移动。拖动非语音批注标签的左边缘改起点，拖右边缘改终点。点批注可直接拉成区间，两端合拢可恢复成点。 |
 | 录制语音批注 | 在左侧音频混音器选择系统输出或麦克风，按需调节每一路的增益和静音。点击批注工具栏的麦克风，按当前混音设置开始录音。 |
-| Excel 批注清单 | 在视频审阅页点 **导出 Excel**，选择保存位置。新文件夹里有工作簿和 `media` 文件夹，每条批注一行，点 **打开 PNG** 查看 Mark 所在帧，点 **播放 GIF** 查看完整 Region。转发时带上整个文件夹。 |
+| Excel 批注清单 | 在「设置 → 表格设置」选择导出列。画面预览嵌在表格中，媒体文件列链接到点批注的 PNG 和区间批注的 GIF。在视频审阅页点 **导出 Excel** 后，默认生成文件夹，也可开启 ZIP 打包，一次发送工作簿及所选附件。 |
 | 录屏与 GIF | 选择显示器、窗口或框选区域。在横向混音器中添加多个系统输出和一个可选麦克风；录制前按路调节增益、静音，成片为立体声混音；停止录制视频后直接进入审阅。临时录屏要在换片或退出前导出审阅包。GIF 最长 30 秒，无音频。 |
 | 图片批注 | 空界面按 Ctrl+V 打开剪贴板图片；已有视频时，同一快捷键会添加图片批注。可缩放、平移，按原图分辨率复制或导出带批注 PNG；动图导出静态首帧。 |
 | 播放与兼容 | 欢迎页点“打开文件”并选择视频后直接进入批注。需要生成批注预览时，FrameNote 和 Player 都会在窗口中央显示百分比进度，点下方的“取消加载”可中止。可手动切换到内置 VLC 播放原片；导出审阅包保留原始媒体。 |
 | 发送到 REAPER | 首次单击安装脚本；之后单击会检查更新，并发送到所选轨道的编辑光标处。也可将按钮直接拖到 REAPER 编排区，按落点插入。审阅包的 Marker 和 Region 保留批注颜色。 |
 
-在原片播放器中，使用底部走带逐帧定位、复制当前帧或另存 PNG。图片查看器的画布直接位于菜单下方；按 **Ctrl+O** 打开文件，按 **Ctrl+S** 导出审阅包。
+在原片播放器中，使用底部走带逐帧定位、复制当前帧或另存 PNG。图片查看器的画布直接位于菜单下方；按 **Ctrl+O** 打开文件，按 **Ctrl+S** 导出审阅包。审阅包、GIF、Excel 和 MP4 直接保存到「设置 → 通用 → 导出路径」，完成后可打开文件所在目录。
 
 ### 从源码构建
 
@@ -69,7 +69,7 @@ Recording settings and the mixer are on the left; the annotation list and editor
 | Adjust existing annotations | Drag a drawing or picture to move it. Drag an endpoint to change a line, a vertex to change an angle, or a corner to resize a box or picture. Double-click a text box to edit its text. |
 | Move a Region or adjust its duration | Drag the middle of a Region label to move the whole interval and its attached voice clips. For a note without a voice recording, drag either edge to adjust the interval. Drag a Mark into a Region, or bring the edges together to restore a Mark. |
 | Record a voice annotation | Choose system outputs or a microphone in the left audio mixer. Adjust gain and mute for each source, then click the microphone in the annotation toolbar to record that mix. |
-| Excel review sheet | In video review, click **导出 Excel** and choose a parent folder. The workbook includes a preview per note and links to a PNG for each Mark and a silent GIF for each Region. Share the entire generated folder so those links travel with the workbook. |
+| Excel review sheet | Choose the columns in **Settings → Spreadsheet**, then click **Export Excel** in video review. Previews are embedded in the workbook. Media links open a PNG for each Mark or a silent GIF for each Region. Share the generated folder or enable ZIP export to send one archive. |
 | Screen capture and GIF | Record a display, window or selected region. Add multiple Windows outputs and an optional microphone in the horizontal mixer. Set gain and mute per source before recording one stereo mix. Stopping a video opens it for review; export the temporary recording before switching files or quitting. GIFs are silent and limited to 30 seconds. |
 | Image annotation | Paste into an empty desk to open a clipboard image; paste while reviewing a video to attach a picture note. Zoom or pan without changing the dimensions of an exported PNG. Animated images export as a still of the first frame. |
 | Playback compatibility | Opening a video from the welcome screen starts frame review. FrameNote prepares a temporary preview in the same window when needed. You can switch to VLC to play the original. Packages keep the original media. |
@@ -87,4 +87,4 @@ For a self-contained installer, follow the [Windows packaging instructions](docs
 
 ### 第三方资源 / Third-party assets
 
-[Noto Sans SC](src/FrameNote/ui/fonts/Noto-OFL.txt) · [Cascadia Mono](src/FrameNote/ui/fonts/Cascadia-OFL.txt) · [Fluent System Icons](src/FrameNote/ui/icons/LICENSE.txt) · [Fontaudio REAPER glyph](src/FrameNote/ui/reaper-LICENSE.txt) · [Linkify.js](src/FrameNote/ui/vendor/linkifyjs/LICENSE)
+[Noto Sans SC](src/FrameNote/ui/fonts/Noto-OFL.txt) · [Inter 4.1](src/FrameNote/ui/fonts/Inter-OFL.txt) · [Fluent System Icons](src/FrameNote/ui/icons/LICENSE.txt) · [Fontaudio REAPER glyph](src/FrameNote/ui/reaper-LICENSE.txt) · [Linkify.js](src/FrameNote/ui/vendor/linkifyjs/LICENSE)

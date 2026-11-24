@@ -14,7 +14,7 @@ public sealed partial class Desk
     static extern int StrCmpLogicalW(string left,string right);
     async Task AdjacentImage(int direction){
         if(!viewingImage || direction is not (-1 or 1))return;
-        if(imageFile is not {} source){Send(new{type="status",text=openedPackage?"审阅包中的图片没有可切换的所在文件夹。":"剪贴板图片没有所在文件夹。"});return;}
+        if(imageFile is not {} source){Send(new{type="status",text=openedPackage?L.Text("审阅包中的图片没有可切换的所在文件夹。"):L.Text("剪贴板图片没有所在文件夹。")});return;}
         if(playlist.Files.Count>1 && playlist.Items.SelectedIndex>=0){
             int target=playlist.Items.SelectedIndex+direction;
             if(target>=0 && target<playlist.Files.Count)await Open(playlist.Files[target].Path,mode:PlaylistOpenMode);
@@ -26,7 +26,7 @@ public sealed partial class Desk
             .OrderBy(Path.GetFileName,Comparer<string?>.Create((a,b)=>StrCmpLogicalW(a!,b!)))
             .ThenBy(p=>p,StringComparer.Ordinal).ToArray());
         int i=Array.FindIndex(files,p=>StringComparer.OrdinalIgnoreCase.Equals(p,source))+direction;
-        if(i<0 || i>=files.Length){Send(new{type="status",text=Path.GetFileName(source)+(direction<0?" · 已是第一张":" · 已是最后一张")});return;}
+        if(i<0 || i>=files.Length){Send(new{type="status",text=Path.GetFileName(source)+(direction<0?L.Text(" · 已是第一张"):L.Text(" · 已是最后一张"))});return;}
         await Open(files[i]);
     }
     int volume=100;
@@ -39,7 +39,7 @@ public sealed partial class Desk
         void Save(){
             volumeWrite.Stop();if(!volumeDirty)return;
             try{Packages.Atomic(file,s=>JsonSerializer.Serialize(s,volume));volumeDirty=false;}
-            catch(Exception e) when(e is IOException or UnauthorizedAccessException){if(IsLoaded && web.CoreWebView2!=null)ReportError("音量已调整，但无法保存设置。");}
+            catch(Exception e) when(e is IOException or UnauthorizedAccessException){if(IsLoaded && web.CoreWebView2!=null)ReportError(L.Text("音量已调整，但无法保存设置。"));}
         }
         volumeWrite.Tick+=(_,_)=>Save();Closing+=(_,_)=>Save();
     }
@@ -53,14 +53,15 @@ public sealed partial class Desk
     async Task ShowImage(string path,string name,bool fromClipboard=false,string? nextKey=null,Review? review=null,bool package=false){
         var source=path;
         var browser=EnsureReviewWeb();
-        review??=new Review(2,Guid.NewGuid(),fromClipboard?"剪贴板图片.png":name,0,[]);
+        review??=new Review(2,Guid.NewGuid(),fromClipboard?L.Text("剪贴板图片.png"):name,0,[]);
         bool scaled=false;
+        int[]? originalSize=null;
         var originalFile=fromClipboard||package?null:path;
         if(Path.GetExtension(path).ToLowerInvariant() is ".tif" or ".tiff"){
             string original=path;
             var dpi=System.Windows.Media.VisualTreeHelper.GetDpi(this);
             var cap=(Math.Max(960,(int)(ActualWidth*dpi.DpiScaleX)),Math.Max(540,(int)(ActualHeight*dpi.DpiScaleY)));
-            (path,scaled)=await Task.Run(()=>ConvertTiff(original,cap.Item1,cap.Item2));
+            (path,scaled,originalSize)=await Task.Run(()=>ConvertTiff(original,cap.Item1,cap.Item2));
         }
         await browser;
         var src=new Uri(path).AbsoluteUri;
@@ -70,27 +71,28 @@ public sealed partial class Desk
             expression="imageView.prepare("+json+")",awaitPromise=true,returnByValue=true}));
         using var result=JsonDocument.Parse(response);
         if(!result.RootElement.GetProperty("result").TryGetProperty("value",out var ok)||ok.ValueKind!=JsonValueKind.True)
-            throw new InvalidDataException("无法读取图片，请确认文件完整且格式受支持。");
+            throw new InvalidDataException(L.Text("无法读取图片，请确认文件完整且格式受支持。"));
         var previous=activeRecording;activeRecording=null;
         if(native!=null){native.Stop();native.Visibility=Visibility.Collapsed;}
         web.Visibility=Visibility.Visible;
         SetPreviewFullscreen(false);StopTimeline();displayImagePath=path;media=source;sessionKey=nextKey;preview=null;doc=review;deskLoaded=false;openedPackage=package;playbackInfo=null;playbackId=Guid.NewGuid();
-        fullTiffSource=scaled?source:null;viewingImage=true;imageFile=originalFile;Title=name+" · FrameNote";Send(new{type="image",src,name,doc,scaled,images=new Uri(ImageDirectory+Path.DirectorySeparatorChar).AbsoluteUri,folder=imageFile!=null});
+        fullTiffSource=scaled?source:null;viewingImage=true;imageFile=originalFile;Title=name+" · FrameNote";Send(new{type="image",src,name,doc,scaled,originalSize,images=new Uri(ImageDirectory+Path.DirectorySeparatorChar).AbsoluteUri,folder=imageFile!=null});
         if(previous!=null)recordings.Discard(previous);
     }
     string? fullTiffSource;
-    (string Path,bool Scaled) ConvertTiff(string original,int width,int height){
+    (string Path,bool Scaled,int[] OriginalSize) ConvertTiff(string original,int width,int height){
         using var input=File.OpenRead(original);
         var decoder=new TiffBitmapDecoder(input,BitmapCreateOptions.PreservePixelFormat,BitmapCacheOption.OnDemand);
         BitmapSource frame=decoder.Frames[0];
+        int[] originalSize=[frame.PixelWidth,frame.PixelHeight];
         double fit=Math.Min((double)width/frame.PixelWidth,(double)height/frame.PixelHeight);
         bool scaled=fit<.85;
         if(scaled)frame=new TransformedBitmap(frame,new System.Windows.Media.ScaleTransform(fit,fit));
         if(frame.Format==System.Windows.Media.PixelFormats.Bgr24 || frame.Format==System.Windows.Media.PixelFormats.Bgr32 || frame.Format==System.Windows.Media.PixelFormats.Rgb24){
             Directory.CreateDirectory(scratch);var bmp=Path.Combine(scratch,Guid.NewGuid().ToString("N")+".bmp");
-            var enc=new BmpBitmapEncoder();enc.Frames.Add(BitmapFrame.Create(frame));using var output=File.Create(bmp);enc.Save(output);return (bmp,scaled);
+            var enc=new BmpBitmapEncoder();enc.Frames.Add(BitmapFrame.Create(frame));using var output=File.Create(bmp);enc.Save(output);return (bmp,scaled,originalSize);
         }
-        return (StorePreview(frame),scaled);
+        return (StorePreview(frame),scaled,originalSize);
     }
     async Task<string> OriginalImage(){
         if(fullTiffSource is {} source){
@@ -106,12 +108,12 @@ public sealed partial class Desk
     void SendClipboardPicture(Guid documentId,long at){
         using var data=new MemoryStream();
         if(Clipboard.GetData("PNG") is Stream png){
-            if(png.CanSeek){if(png.Length>ReviewImages.MaxBytes)throw new InvalidDataException("图片过大。");png.Position=0;}
+            if(png.CanSeek){if(png.Length>ReviewImages.MaxBytes)throw new InvalidDataException(L.Text("图片过大。"));png.Position=0;}
             png.CopyTo(data);
         }else if(Clipboard.GetImage() is {} image){
             var encoder=new PngBitmapEncoder();encoder.Frames.Add(BitmapFrame.Create(image));encoder.Save(data);
-        }else throw new InvalidDataException("剪贴板中没有图片。");
-        if(data.Length>ReviewImages.MaxBytes)throw new InvalidDataException("图片过大。");
+        }else throw new InvalidDataException(L.Text("剪贴板中没有图片。"));
+        if(data.Length>ReviewImages.MaxBytes)throw new InvalidDataException(L.Text("图片过大。"));
         Send(new{type="clipboardPicture",documentId,at,data=Convert.ToBase64String(data.GetBuffer(),0,(int)data.Length)});
     }
     async Task PasteAsImage(){
@@ -123,9 +125,9 @@ public sealed partial class Desk
         if(Clipboard.GetData("PNG") is Stream png){
             Directory.CreateDirectory(scratch);var path=Path.Combine(scratch,Guid.NewGuid().ToString("N")+".png");
             if(png.CanSeek)png.Position=0;using(var dst=File.Create(path))png.CopyTo(dst);
-            await ShowImage(path,"剪贴板图片",true);return;
+            await ShowImage(path,L.Text("剪贴板图片"),true);return;
         }
-        if(Clipboard.GetImage() is {} bitmap){await ShowImage(StorePreview(bitmap),"剪贴板图片",true);return;}
-        throw new InvalidDataException("剪贴板中没有可打开的图片。");
+        if(Clipboard.GetImage() is {} bitmap){await ShowImage(StorePreview(bitmap),L.Text("剪贴板图片"),true);return;}
+        throw new InvalidDataException(L.Text("剪贴板中没有可打开的图片。"));
     }
 }

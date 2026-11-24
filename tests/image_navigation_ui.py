@@ -17,18 +17,22 @@ def close(a,b,eps=.03):return abs(a-b)<eps
 def check_arrow(page, selector, direction):
     button=page.locator(selector)
     other=page.locator("#nextImage" if direction<0 else "#prevImage")
-    opacity=lambda el:float(el.evaluate("el=>getComputedStyle(el).opacity"))
+    def face(el):
+        return el.evaluate("el=>getComputedStyle(el).backgroundColor")
     page.mouse.move(0,0)
-    for hovered,expected in [(False,.15),(True,.5)]:
+    resting=face(button)
+    for hovered in (False,True):
         if hovered:button.hover()
-        assert opacity(button)==expected and opacity(other)==.15
+        page.wait_for_timeout(200)  # Let the toolbar's pointer lighting settle before comparing pixels.
+        assert button.evaluate("el=>getComputedStyle(el).opacity")== "1"
+        assert (face(button)!=resting)==hovered and face(other)==resting
         snap=lambda:Image.open(io.BytesIO(button.screenshot(scale="css"))).convert("RGB")
         visible=snap()
         icon=button.locator("svg")
         icon.evaluate("el=>el.style.visibility='hidden'")
         delta=ImageChops.difference(visible,snap()).convert("L")
         icon.evaluate("el=>el.style.removeProperty('visibility')")
-        bounds=delta.getbbox()
+        bounds=delta.point(lambda v:255 if v>3 else 0).getbbox()
         assert bounds and bounds[2]-bounds[0]>=7 and bounds[3]-bounds[1]>=12
         left,top,right,bottom=bounds
         def center(y):
@@ -36,14 +40,15 @@ def check_arrow(page, selector, direction):
             return sum(xs)/len(xs)
         assert direction*(center((top+bottom)//2)-center(top+2))>2
     page.mouse.move(0,0)
-    assert opacity(button)==.15
+    wait(page,"([id,rest])=>getComputedStyle(document.querySelector(id)).backgroundColor===rest",[selector,resting])
 with sync_playwright() as pw:
     proc,page=launch(pw,folder/"图1.png","document.querySelector('#openedImage')?.naturalWidth===640")
     try:
         r=rect(page);x=round(r["x"]+.65*r["width"]);y=round(r["y"]+.45*r["height"])
         assert page.locator("header").is_hidden() and page.locator("main").bounding_box()["y"]==0
         check_arrow(page,"#prevImage",-1);check_arrow(page,"#nextImage",1)
-        around=point(r,x,y);chrome=page.locator("footer").bounding_box();dpr=page.evaluate("devicePixelRatio")
+        around=point(r,x,y);stage=page.locator("#stage").bounding_box();dpr=page.evaluate("devicePixelRatio")
+        assert not page.locator("footer").count() and stage["y"]+stage["height"]==page.evaluate("innerHeight")
         page.mouse.move(x,y);page.mouse.wheel(0,-480)
         wait(page,"w=>$('openedImage').getBoundingClientRect().width>w*1.98",r["width"])
         big=rect(page);actual=point(big,x,y)
@@ -54,7 +59,7 @@ with sync_playwright() as pw:
         page.mouse.wheel(0,240)
         wait(page,"w=>$('openedImage').getBoundingClientRect().width<w*.8",big["width"])
         assert max(abs(a-b) for a,b in zip(point(moved,x,y),point(rect(page),x,y)))<.0001
-        assert chrome==page.locator("footer").bounding_box() and page.evaluate("devicePixelRatio")==dpr
+        assert stage==page.locator("#stage").bounding_box() and page.evaluate("devicePixelRatio")==dpr
         for control,name in [("#nextImage","图2.tif"),("ArrowRight","图10.GIF"),("#nextImage","已是最后一张"),("#prevImage","图2.tif"),("ArrowLeft","图1.png"),("#prevImage","已是第一张")]:
             if control.startswith("#"):page.locator(control).click()
             else:page.keyboard.press(control)

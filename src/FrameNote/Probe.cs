@@ -15,7 +15,7 @@ public static class Probe
         token.ThrowIfCancellationRequested();
         var start=new ProcessStartInfo(Tool(name)){UseShellExecute=false,CreateNoWindow=true,RedirectStandardOutput=true,RedirectStandardError=true};
         foreach(var a in args)start.ArgumentList.Add(a);
-        using var p=Process.Start(start)??throw new IOException("无法启动媒体工具。");
+        using var p=Process.Start(start)??throw new IOException(L.Text("无法启动媒体工具。"));
         using var cancel=token.Register(()=>Kill(p));
         var stdout=p.StandardOutput.ReadToEndAsync();var stderr=p.StandardError.ReadToEndAsync();
         await p.WaitForExitAsync();var error=await stderr;var output=await stdout;
@@ -25,7 +25,7 @@ public static class Probe
     }
     internal static Process StartFfmpeg(List<string> args,bool input,bool output){
         var start=new ProcessStartInfo(Tool("ffmpeg")){UseShellExecute=false,CreateNoWindow=true,RedirectStandardInput=input,RedirectStandardOutput=output,RedirectStandardError=true};
-        foreach(var arg in args)start.ArgumentList.Add(arg);return Process.Start(start)??throw new IOException("无法启动 FFmpeg。");
+        foreach(var arg in args)start.ArgumentList.Add(arg);return Process.Start(start)??throw new IOException(L.Text("无法启动 FFmpeg。"));
     }
     internal static void Kill(Process process){try{if(!process.HasExited)process.Kill(true);}catch(InvalidOperationException){}}
     internal static async Task EncodeWithProgress(List<string> args,long durationUs,Action<int> report,CancellationToken token){
@@ -41,7 +41,7 @@ public static class Probe
             }
         }
         await encoder.WaitForExitAsync();token.ThrowIfCancellationRequested();
-        if(encoder.ExitCode!=0)throw new IOException("视频编码失败："+await error);
+        if(encoder.ExitCode!=0)throw new IOException(L.Text("视频编码失败：")+await error);
     }
     static long Us(string s)=>(long)Math.Round(double.Parse(s,CultureInfo.InvariantCulture)*1e6);
     public sealed record Info(long Duration,long Origin,string Video,string Audio,string PixelFormat){
@@ -54,7 +54,7 @@ public static class Probe
         using var json=JsonDocument.Parse(meta);
         var streams=json.RootElement.GetProperty("streams").EnumerateArray().ToArray();
         var v=streams.FirstOrDefault(s=>s.GetProperty("codec_type").GetString()=="video");
-        if(v.ValueKind==JsonValueKind.Undefined)throw new InvalidDataException("没有视频轨。");
+        if(v.ValueKind==JsonValueKind.Undefined)throw new InvalidDataException(L.Text("没有视频轨。"));
         var a=streams.FirstOrDefault(s=>s.GetProperty("codec_type").GetString()=="audio");
         var f=json.RootElement.GetProperty("format");
         return new(f.TryGetProperty("duration",out var d)?Us(d.GetString()!):0,f.TryGetProperty("start_time",out var o)?Us(o.GetString()!):0,
@@ -88,7 +88,7 @@ public static class Probe
         if(packets.Contains("N/A") || string.IsNullOrWhiteSpace(packets))
             packets=await Run(token,"ffprobe","-v","error","-select_streams","v:0","-show_entries","frame=best_effort_timestamp_time","-of","csv=p=0","-i",path);
         var pts=packets.Split('\n',StringSplitOptions.RemoveEmptyEntries).Select(l=>l.Trim().Split(',')[0]).Where(l=>double.TryParse(l,CultureInfo.InvariantCulture,out _)).Select(s=>Us(s)-info.Origin).Where(t=>t>=0 && t<info.Duration).Distinct().Order().ToArray();
-        if(pts.Length==0)throw new InvalidDataException("无法读取视频帧时间。");
+        if(pts.Length==0)throw new InvalidDataException(L.Text("无法读取视频帧时间。"));
         return pts;
     }
 }

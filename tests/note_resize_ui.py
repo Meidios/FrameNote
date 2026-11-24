@@ -10,7 +10,7 @@ import zipfile
 from PIL import Image
 from playwright.sync_api import sync_playwright
 from pywinauto import Desktop
-from review_ui import at, fixtures, launch, stop, wait, work
+from review_ui import exported_file, at, fixtures, launch, stop, wait, work
 
 profile = work / "profile"
 profile.mkdir()
@@ -149,11 +149,7 @@ with sync_playwright() as pw:
         assert abs(state()[2]["startUs"] - point["startUs"] - 50000) < 2000
         expected = state()
         page.locator("#save").click()
-        dialog = Desktop(backend="win32").window(process=proc.pid, class_name="#32770")
-        dialog.wait("ready", timeout=10)
-        dialog.child_window(class_name="Edit", found_index=0).set_edit_text(str(saved))
-        dialog.child_window(control_id=1).click()
-        wait(page, "name=>!busy && $('status').textContent.endsWith(name)", saved.name)
+        saved=exported_file(proc)
     finally:
         stop(proc)
     proc, page = launch(pw, saved)

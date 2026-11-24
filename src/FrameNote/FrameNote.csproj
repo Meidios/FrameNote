@@ -1,9 +1,13 @@
 <Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup>
     <ApplicationIcon>Assets/FrameNote.ico</ApplicationIcon>
-    <OutputType>WinExe</OutputType><TargetFramework>net8.0-windows</TargetFramework><UseWPF>true</UseWPF><Nullable>enable</Nullable><ImplicitUsings>enable</ImplicitUsings><Platform>x64</Platform><PlatformTarget>x64</PlatformTarget><Version>0.9.3</Version>
+    <ApplicationManifest>app.manifest</ApplicationManifest>
+    <OutputType>WinExe</OutputType><TargetFramework>net8.0-windows</TargetFramework><UseWPF>true</UseWPF><Nullable>enable</Nullable><ImplicitUsings>enable</ImplicitUsings><Platform>x64</Platform><PlatformTarget>x64</PlatformTarget><Version>0.9.4</Version>
   </PropertyGroup>
   <ItemGroup>
+    <EmbeddedResource Include="Locales/en.json" LogicalName="FrameNote.en.json" />
+    <FrameworkReference Include="Microsoft.WindowsDesktop.App.WindowsForms" />
+    <Resource Include="Assets/FrameNote.ico"/>
     <Content Include="Assets/FrameNote_File.ico" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
     <Content Include="../../docs/releases/v*.md" Link="releases/%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
     <InternalsVisibleTo Include="UpdateCheck" />
@@ -19,6 +23,7 @@
     <PackageReference Include="NAudio.Wasapi" Version="2.2.1" />
     <PackageReference Include="NEbml" Version="1.1.1.10" />
     <PackageReference Include="ScreenRecorderLib" Version="7.0.1" />
+    <PackageReference Include="Serilog.Sinks.File" Version="7.0.0" />
     <PackageReference Include="VideoLAN.LibVLC.Windows" Version="3.0.24" />
   </ItemGroup>
   <!-- A second apphost gives Explorer a distinct executable identity.

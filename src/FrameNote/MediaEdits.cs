@@ -5,19 +5,29 @@ using System.Text.Json;
 namespace FrameNote;
 
 public record EditClip(Guid Id,string Track,long StartUs,long SourceUs,long DurationUs,string? Asset=null,long? SourceDurationUs=null,Guid? NoteId=null);
-public record EditTimeline(long SourceDurationUs,List<EditClip> Clips,bool Linked=true)
+public record TrimmedPart(Guid ClipId,Note? Note=null,EditClip? Voice=null);
+public record EditTimeline(long SourceDurationUs,List<EditClip> Clips,bool Linked=true,List<TrimmedPart>? Trimmed=null)
 {
     public void Check(long duration){
-        if(SourceDurationUs<=0 || SourceDurationUs>604800000000L || Clips==null || Clips.Count>2000)throw new InvalidDataException("剪辑片段数量或原片时长无效。");
+        if(SourceDurationUs<=0 || SourceDurationUs>604800000000L || Clips==null || Clips.Count>2000)throw new InvalidDataException(L.Text("剪辑片段数量或原片时长无效。"));
         var ids=new HashSet<Guid>();
         foreach(var c in Clips){
             if(c==null || c.Id==Guid.Empty || !ids.Add(c.Id) || c.Track is not ("video" or "audio" or "voice") || c.StartUs<0 || c.SourceUs<0 || c.DurationUs<=0 || c.StartUs>duration-c.DurationUs || c.SourceUs>(c.Track=="voice"?c.SourceDurationUs??0:SourceDurationUs)-c.DurationUs)
-                throw new InvalidDataException("片段超出媒体或时间线范围。");
+                throw new InvalidDataException(L.Text("片段超出媒体或时间线范围。"));
             if(c.Track=="voice" && (c.SourceDurationUs is null or <=0 or >600000000 || c.Asset is not {Length:64} || !c.Asset.All(x=>char.IsAsciiDigit(x)||x is >= 'a' and <= 'f')))
-                throw new InvalidDataException("语音片段附件无效。");
+                throw new InvalidDataException(L.Text("语音片段附件无效。"));
         }
         foreach(string track in new[]{"video","audio"}){
-            long end=0;foreach(var c in Clips.Where(c=>c.Track==track).OrderBy(c=>c.StartUs)){if(c.StartUs<end)throw new InvalidDataException("同一视频或原声音轨的片段不能重叠。");end=c.StartUs+c.DurationUs;}
+            long end=0;foreach(var c in Clips.Where(c=>c.Track==track).OrderBy(c=>c.StartUs)){if(c.StartUs<end)throw new InvalidDataException(L.Text("同一视频或原声音轨的片段不能重叠。"));end=c.StartUs+c.DurationUs;}
+        }
+        if(Trimmed is {Count:>20000})throw new InvalidDataException(L.Text("被裁剪的批注或录音过多。"));
+        foreach(var part in Trimmed??[]){
+            if(part==null||!ids.Contains(part.ClipId)||(part.Note==null)==(part.Voice==null))
+                throw new InvalidDataException(L.Text("裁剪记录没有对应片段。"));
+            if(part.Voice is {} v && (v.Track!="voice"||v.Id==Guid.Empty||v.StartUs<0||v.DurationUs<=0||v.StartUs>SourceDurationUs-v.DurationUs||
+                v.SourceDurationUs is null or <=0 or >600000000||v.SourceUs<0||v.SourceUs>v.SourceDurationUs-v.DurationUs||
+                v.Asset is not {Length:64}||!v.Asset.All(x=>char.IsAsciiDigit(x)||x is >= 'a' and <= 'f')))
+                throw new InvalidDataException(L.Text("被裁剪的语音片段无效。"));
         }
     }
 }
@@ -70,7 +80,7 @@ public sealed partial class Desk
         if(review?.Timeline==null)return media!;
         string key=media+JsonSerializer.Serialize(new{review.DurationUs,review.Timeline},Review.Json);
         if(composedKey==key&&composedMedia!=null&&File.Exists(composedMedia))return composedMedia;
-        Send(new{type="status",text="正在合成剪辑后的媒体…"});Directory.CreateDirectory(scratch);
+        Send(new{type="status",text=L.Text("正在合成剪辑后的媒体…")});Directory.CreateDirectory(scratch);
         string output=Path.Combine(scratch,Guid.NewGuid()+".mp4");await MediaEdits.Compose(media!,review,ImageDirectory,output,token,report);
         composedKey=key;composedMedia=output;return output;
     }

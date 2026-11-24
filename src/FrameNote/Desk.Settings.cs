@@ -6,30 +6,41 @@ public sealed partial class Desk
 {
     Shortcuts shortcutStore=null!;
     ShortcutMap shortcuts=null!;
+    string defaultRulerUnit=RulerScale.DefaultUnit;
     void InitShortcuts(){
-        shortcutStore=new(root);shortcuts=shortcutStore.Read();
+        shortcutStore=new(root);
+        (shortcuts,defaultRulerUnit)=shortcutStore.Read();
         Activated+=(_,_)=>{
             var latest=shortcutStore.Read();
-            if(!shortcuts.All(p=>latest[p.Key].SequenceEqual(p.Value)))ApplyShortcuts(latest);
+            if(defaultRulerUnit!=latest.RulerUnit||!shortcuts.All(p=>latest.Bindings[p.Key].SequenceEqual(p.Value)))ApplyPreferences(latest);
             else if(recordHotkeys.Count!=shortcuts["record"].Length)UpdateRecordHotkey(shortcuts["record"]);
         };
     }
     object ShortcutPayload()=>Shortcuts.Actions.ToDictionary(a=>a.Id,a=>new{
         keys=shortcuts[a.Id],label=shortcuts[a.Id].Label(a.Kind)});
-    void ApplyShortcuts(ShortcutMap next){
-        shortcuts=next;
+    void SendEditorPreferences()=>Send(new{type="shortcuts",bindings=ShortcutPayload(),defaultRulerUnit});
+    void ApplyPreferences(EditorPreferences next){
+        (shortcuts,defaultRulerUnit)=next;
         UpdateRecordHotkey(shortcuts["record"]);
-        native?.SetShortcuts(next);
-        if(webReady)Send(new{type="shortcuts",bindings=ShortcutPayload()});
+        native?.SetShortcuts(shortcuts);
+        titleBar.SetHistoryShortcuts(shortcuts);
+        if(webReady)SendEditorPreferences();
     }
-    void OpenSettings(){
-        var original=shortcutStore.Read();ApplyShortcuts(original);
-        var dialog=new ShortcutDialog(this,original,
-            edited=>ApplyShortcuts(shortcutStore.Save(original,edited,UpdateRecordHotkey)),
-            OpenDefaultApps);
+    void OpenSettings(bool showAbout=false){
+        var original=shortcutStore.Read();ApplyPreferences(original);
+        var previous=prefs.Change(p=>p);
+        string language=previous.Language??L.Language;
+        var output=OutputSettings.Read(ReadCapturePrefs());
+        var dialog=new ShortcutDialog(this,original,previous.Automatic,language,output,(edited,nextAuto,nextLanguage,nextOutput)=>
+            prefs.Change(p=>p with{
+                Automatic=previous.Automatic==nextAuto?p.Automatic:nextAuto,
+                Language=language==nextLanguage?p.Language:nextLanguage},
+                ()=>ChangeCapturePrefs(fields=>nextOutput.ApplyChanges(output,fields),
+                    ()=>ApplyPreferences(shortcutStore.Save(original,edited,UpdateRecordHotkey)))));
+        if(showAbout)dialog.AboutTab.IsSelected=true;
         dialog.ShowDialog();
     }
-    void OpenDefaultApps(){
+    internal void OpenDefaultApps(){
         string name=playerEntry?"FrameNote Player":"FrameNote";
         bool installed=Microsoft.Win32.Registry.GetValue(@"HKEY_CURRENT_USER\Software\RegisteredApplications",name,null) is string;
         Browse(installed?"ms-settings:defaultapps?registeredAppUser="+Uri.EscapeDataString(name):"ms-settings:defaultapps");

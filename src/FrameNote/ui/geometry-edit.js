@@ -47,12 +47,24 @@ function dragShape(shape,start,point,dx,dy){
  }
 }
 
+function moveLensPreview(shape,start,dx,dy){
+ const {source,target}=magnifierLayout(start,1,1);
+ if(!start.preview){
+  // Old packages stored the outer lens; its middle half was the original sample.
+  Object.assign(shape,{x:source.x,y:source.y,toX:source.x+source.width,toY:source.y+source.height});
+ }
+ shape.preview={x:clamp(target.x+dx,0,1-target.width),y:clamp(target.y+dy,0,1-target.height)};
+}
+
 function endGeometryDrag(commitChange){
  const drag=geometryDrag;
  if(!drag)return;
  geometryDrag=null;
  if(overlay.hasPointerCapture(drag.pointer))overlay.releasePointerCapture(drag.pointer);
- if(!commitChange)Object.assign(drag.target,drag.start);
+ if(!commitChange){
+  Object.assign(drag.target,drag.start);
+  if(drag.preview&&!('preview' in drag.start))delete drag.target.preview;
+ }
  else if(drag.moved)persistEdit();
  paint();
  if(commitChange && !drag.picture && imageDoc() && ['ruler','magnifier'].includes(drag.target.kind))imageView.ensureOriginal();
@@ -82,16 +94,18 @@ document.addEventListener('DOMContentLoaded',()=>{
   if(editing?.id!==note.id){finishEdit();selected=note.id;begin(note,false);}
   transport.pause();activePicture=i;
   const target=picture?editing.pictures[i]:editing.shape;
-  geometryDrag={pointer:e.pointerId,at:pos(e),target,start:{...target},picture,corner,point,moved:false};
+  const preview=e.target.hasAttribute('data-lens-preview')&&!picture;
+  geometryDrag={pointer:e.pointerId,at:pos(e),target,start:{...target},picture,corner,point,preview,moved:false};
   overlay.setPointerCapture(e.pointerId);
   e.preventDefault();e.stopImmediatePropagation();render();
  },true);
  function update(e){
-  const {at,target,start,picture,corner,point}=geometryDrag,[x,y]=pos(e);
+  const {at,target,start,picture,corner,point,preview}=geometryDrag,[x,y]=pos(e);
   const dx=x-at[0],dy=y-at[1],bounds=overlay.getBoundingClientRect();
   if(!geometryDrag.moved && Math.hypot(dx*bounds.width,dy*bounds.height)<2)return;
   geometryDrag.moved=true;
   if(picture)dragPicture(target,start,corner,dx,dy,bounds);
+  else if(preview)moveLensPreview(target,start,dx,dy);
   else dragShape(target,start,point,dx,dy);
  }
  overlay.addEventListener('pointermove',e=>{

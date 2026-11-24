@@ -1,0 +1,36 @@
+<Window x:Class="FrameNote.ExportDialog" x:ClassModifier="internal"
+ xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+ xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+ Width="460" Height="204" MinWidth="450" MinHeight="204" ShowInTaskbar="False"
+ AutomationProperties.AutomationId="ExportDialog">
+ <Grid Margin="24,8,24,22">
+  <Grid.RowDefinitions><RowDefinition/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
+  <Grid>
+   <Grid.ColumnDefinitions><ColumnDefinition Width="Auto"/><ColumnDefinition/></Grid.ColumnDefinitions>
+   <Grid Width="38" Height="38" VerticalAlignment="Center" Margin="0,0,14,0">
+    <Ellipse x:Name="Badge" Fill="{DynamicResource link}" Opacity=".14"/>
+    <!-- Lucide arrow-up, check and x outlines; see ui/icons/LUCIDE-LICENSE.txt. -->
+    <Canvas Width="24" Height="24" HorizontalAlignment="Center" VerticalAlignment="Center">
+     <Path x:Name="Glyph" Stroke="{DynamicResource link}" StrokeThickness="2" StrokeLineJoin="Round" StrokeStartLineCap="Round" StrokeEndLineCap="Round"/>
+    </Canvas>
+   </Grid>
+   <ScrollViewer Grid.Column="1" VerticalAlignment="Center" MaxHeight="74" VerticalScrollBarVisibility="Auto">
+    <TextBlock x:Name="Message" TextWrapping="Wrap" FontSize="15" LineHeight="22" AutomationProperties.LiveSetting="Polite"/>
+   </ScrollViewer>
+  </Grid>
+  <Grid Grid.Row="1" Margin="0,10,0,0">
+   <Grid.ColumnDefinitions><ColumnDefinition/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+   <Grid x:Name="Meter" Margin="0,0,16,0" VerticalAlignment="Center">
+    <Grid.ColumnDefinitions><ColumnDefinition/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+    <ProgressBar x:Name="Bar" Height="8" Minimum="0" Maximum="100" AutomationProperties.LabeledBy="{Binding ElementName=Message}"/>
+    <TextBlock Grid.Column="1" x:Name="Percent" Margin="10,0,0,0" MinWidth="37" TextAlignment="Right"
+     Foreground="{DynamicResource link}" Typography.NumeralAlignment="Tabular"/>
+   </Grid>
+   <StackPanel x:Name="Actions" Grid.Column="1" Orientation="Horizontal" HorizontalAlignment="Center">
+    <Button x:Name="Primary" MinWidth="120" MinHeight="36" Margin="0,0,12,0" Visibility="Collapsed" Click="PrimaryClick"/>
+    <Button x:Name="CopyExport" MinWidth="120" MinHeight="36" Margin="0,0,12,0" Visibility="Collapsed" Click="CopyClick"/>
+    <Button x:Name="Dismiss" MinWidth="120" MinHeight="36" Click="DismissClick" AutomationProperties.AutomationId="DismissExport"/>
+   </StackPanel>
+  </Grid>
+ </Grid>
+</Window>

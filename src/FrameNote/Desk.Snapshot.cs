@@ -30,15 +30,16 @@ public sealed partial class Desk
         else{
             using var annotated=new MemoryStream();
             await RenderAnnotatedImage(file,notes,annotated,true);
-            png=FrameDetails.Append(annotated.ToArray(),source,time,notes);
+            annotated.Position=0;
+            png=FrameDetails.Append(annotated,source,time,notes,doc?.RulerScales,defaultRulerUnit);
         }
         token.ThrowIfCancellationRequested();
         if(save){
-            var fd=new SaveFileDialog{Filter="PNG 图片|*.png",DefaultExt=".png",
-                FileName=Path.GetFileNameWithoutExtension(source)+"_"+time.ToString(@"hh\-mm\-ss\.fff"),Title="当前帧另存为"};
-            if(fd.ShowDialog(this)!=true)return "已取消保存当前帧。";
+            var fd=new SaveFileDialog{Filter=L.Text("PNG 图片|*.png"),DefaultExt=".png",
+                FileName=Path.GetFileNameWithoutExtension(source)+"_"+time.ToString(@"hh\-mm\-ss\.fff"),Title=L.Text("当前帧另存为")};
+            if(fd.ShowDialog(this)!=true)return L.Text("已取消保存当前帧。");
             Packages.Atomic(fd.FileName,s=>s.Write(png));
-            return "当前帧已保存："+fd.FileName;
+            return L.Text("当前帧已保存：")+fd.FileName;
         }
         using var stream=new MemoryStream(png);
         var bitmap=BitmapFrame.Create(stream,BitmapCreateOptions.PreservePixelFormat,BitmapCacheOption.OnLoad);
@@ -52,6 +53,6 @@ public sealed partial class Desk
                 await Task.Delay(75,token);
             }
         }
-        return "当前帧已复制，可直接在聊天框按 Ctrl+V 粘贴。";
+        return L.Text("当前帧已复制，可直接在聊天框按 Ctrl+V 粘贴。");
     }
 }

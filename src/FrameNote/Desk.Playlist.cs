@@ -53,8 +53,6 @@ public sealed partial class Desk {
     }
     void ShowPlaylist(){
         bool visible=PlaylistAvailable;
-        // Keep the viewer's menu bar at its previous height after moving the toggle.
-        menuStrip.MinHeight=visible?22:0;
         selecting=true;
         try{
             if(visible && media!=null && !playlist.Files.Any(f=>string.Equals(f.Path,media,StringComparison.OrdinalIgnoreCase))){

@@ -83,10 +83,9 @@ with sync_playwright() as pw:
             p.evaluate("transport.pause()")
             results.extend(live)
             p.locator(".note .stamp").first.click()
-            p.locator("#voicePreview").click()
-            wait(p, "voicePreview && voicePreview.currentTime>.1")
+            assert p.locator("#voicePreview, #voiceRemove").count()==0
+            assert p.locator("#voiceStatus").is_hidden()
             p.evaluate("()=>transport.play()")
-            wait(p, "!voicePreview || voicePreview.paused")
             p.evaluate("()=>{transport.playbackRate=1.5;transport.currentTime=4}")
             wait(p, "transport.currentTime>4.6")
             delta = p.evaluate("""()=>{const active=mediaLog.map(m=>m.el).filter(a=>!a.paused&&a.currentSrc.endsWith('.m4a'));
@@ -116,13 +115,11 @@ with sync_playwright() as pw:
         assert p.evaluate("v.paused && v.style.visibility==='hidden'") and original["seeks"]<=2
         assert abs(original["position"]-clock-1)<.15 and abs(comment["position"]-(clock-4.5+1.2))<.20,(clock,audio)
         p.locator(".note .stamp").first.click()
+        p.evaluate("transport.pause()")
         p.evaluate("transport.currentTime=5.2")
-        p.locator("#voicePreview").click()
-        wait(p,"voicePreview && voicePreview.currentTime>.15")
         p.locator("#play").click()
-        wait(p,"!voicePreview || voicePreview.paused")
         wait(p,"transport.currentTime>5.6")
         assert len(p.evaluate("measureAudio().filter(m=>m.playing)"))==2
     finally:
         stop(proc)
-print("PASS: continuous source audio, overlapping voices, seek/rate changes, trimmed audio and preview handoff in a video gap.")
+print("PASS: voice note details, continuous source audio, overlapping voices, seek/rate changes and playback in a video gap.")

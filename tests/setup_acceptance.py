@@ -56,7 +56,7 @@ try:
         win=Desktop(backend="win32").window(process=pid,title=title)
         win.wait("visible",timeout=15)
         return ui.window(handle=win.handle)
-    try:dlg=dialog(proc.pid,"更新记录 · FrameNote")
+    try:dlg=dialog(proc.pid,"更新记录")
     except Exception:
         print("Visible windows:",[(w.window_text(),w.handle) for w in Desktop(backend="win32").windows(process=proc.pid)],flush=True)
         print("Baseline:",value(state,"PreviousVersion"),"uninstaller:",(target/"unins000.exe").exists(),flush=True)
@@ -88,7 +88,7 @@ try:
         until(connect);page=browser.contexts[0].pages[0]
         until(lambda:page.evaluate("typeof ready!=='undefined' && ready && doc.notes.length>0"),22)
         main=ui.window(handle=Desktop(backend="win32").window(process=pid,title_re=".* · FrameNote").handle)
-        assert not ui.window(process=pid,title="更新记录 · FrameNote").exists(timeout=.6)
+        assert not ui.window(process=pid,title="更新记录").exists(timeout=.6)
         menu=main.child_window(title_re="帮助.*",control_type="MenuItem")
         menu.expand()
         choices=[w for w in ui.windows(process=pid) for w in w.descendants(control_type="MenuItem") if w.window_text()=="关于 FrameNote"]

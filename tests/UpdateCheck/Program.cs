@@ -13,6 +13,10 @@ UpdateRelease? Release(bool preview=false,string? digest=null,string? asset=null
     return Updates.Parse(JsonSerializer.SerializeToElement(obj));
 }
 void Assert(bool b){if(!b)throw new Exception("Update verification failed");}
+foreach(var (installed,windows,expectedLanguage) in new (string?,string,string)[]{
+    (null,"zh-CN","zh-CN"),(null,"zh-TW","zh-CN"),(null,"en-GB","en"),(null,"de-DE","en"),
+    ("zh-CN","en-US","zh-CN"),("en","zh-CN","en"),("invalid","zh-HK","zh-CN")})
+    Assert(L.InitialLanguage(installed,System.Globalization.CultureInfo.GetCultureInfo(windows))==expectedLanguage);
 var r=Release()!;
 Assert(r.Version>new Version(1,9,9) && r.Notes=="此版本未提供更新说明" && r.Setup!=null && Release(true)==null && Release(digest:"bad")!.Setup==null && Release(asset:"https://example.com/setup.exe")!.Setup==null);
 var prefs=new UpdateSettings(folder);

@@ -24,7 +24,8 @@ def clip_counts(page):
 with sync_playwright() as pw:
     for key in ("s", "w"):
         if key == "w":
-            (profile / "shortcuts.json").write_text(json.dumps({"splitClip": {"mods": 0, "vk": 87}}))
+            (profile / "shortcuts.json").write_text(json.dumps({"splitClip": {"mods": 0, "vk": 87},
+                                                                "deleteClip": {"mods": 0, "vk": 75}}))
         proc, page = launch(pw, fixtures / "vfr.mp4")
         try:
             page.evaluate("transport.pause()")
@@ -38,6 +39,15 @@ with sync_playwright() as pw:
             assert counts == [2, 2] and outline == "none", (key, cut, counts, outline)
             assert page.evaluate("doc.timeline.clips.filter(c=>c.startUs>0).map(c=>c.startUs)") == [cut, cut]
             assert page.evaluate("document.activeElement===$('seek')")
+            page.locator("#videoClips .editClip").last.click()
+            page.locator("#seek").focus()
+            if key == "w":
+                page.keyboard.press("Delete")
+                assert clip_counts(page) == [2, 2]
+            page.keyboard.press("Delete" if key == "s" else "k")
+            assert clip_counts(page) == [1, 1]
+            page.keyboard.press("Control+z")
+            assert clip_counts(page) == [2, 2]
             page.keyboard.press("Control+z")
             assert clip_counts(page) == [1, 1]
             page.locator("#linkTracks").click()
@@ -48,7 +58,10 @@ with sync_playwright() as pw:
             page.locator("#point").click()
             page.locator("#body").press(key)
             assert page.locator("#body").input_value() == key
+            page.locator("#body").press("Home")
+            page.locator("#body").press("Delete")
+            assert page.locator("#body").input_value() == ""
             assert clip_counts(page) == [2, 1]
         finally:
             stop(proc)
-print("PASS: ruler focus, linked and independent splits, undo, remapped shortcut and text entry.")
+print("PASS: ruler focus, linked and independent splits, default/remapped Delete, undo and text entry.")

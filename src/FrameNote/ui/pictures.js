@@ -17,12 +17,12 @@ function pickPicture(at=annotationTime(),targetId=null){
 }
 async function addPicture(file,choice){
  if(!canAnnotate()||choice&&choice.documentId!==doc.id)return;
- if(!['image/png','image/jpeg','image/webp','image/bmp'].includes(file.type))return status('请选择 PNG、JPEG、WebP 或 BMP 图片。',true);
- if(file.size>32*1024*1024)return status('请选择小于 32 MB 的图片。',true);
+ if(!['image/png','image/jpeg','image/webp','image/bmp'].includes(file.type))return status(tr('请选择 PNG、JPEG、WebP 或 BMP 图片。'),true);
+ if(file.size>32*1024*1024)return status(tr('请选择小于 32 MB 的图片。'),true);
  const at=choice?.at??annotationTime(),targetId=choice?.targetId;
  finishEdit();transport.pause();
- if((doc.notes.find(n=>n.id===targetId)?.pictures?.length??0)>=16)return status('每条批注最多可添加 16 张图片。',true);
- const pending={request:crypto.randomUUID(),at,targetId};imagePending=pending;
+ if((doc.notes.find(n=>n.id===targetId)?.pictures?.length??0)>=16)return status(tr('每条批注最多可添加 16 张图片。'),true);
+ const pending={request:crypto.randomUUID(),at,targetId};imagePending=pending;syncHistoryButtons();
  try{
   const bitmap=await createImageBitmap(file);
   const canvas=document.createElement('canvas');
@@ -33,7 +33,7 @@ async function addPicture(file,choice){
   }finally{bitmap.close()}
   if(imagePending!==pending)return;
   send('storePicture',{request:pending.request,data:canvas.toDataURL('image/png').split(',')[1]});
- }catch{if(imagePending===pending){imagePending=null;status('无法读取这张图片。',true)}}
+ }catch{if(imagePending===pending){imagePending=null;syncHistoryButtons();status(tr('无法读取这张图片。'),true)}}
 }
 
 document.addEventListener('DOMContentLoaded',()=>{
@@ -58,7 +58,7 @@ document.addEventListener('DOMContentLoaded',()=>{
   }
   if(m.type==='loaded'||m.type==='image'){imagePending=pictureChoice=null;return}
   if(m.type!=='pictureStored'||imagePending?.request!==m.request)return;
-  const {at,targetId}=imagePending;imagePending=null;
+  const {at,targetId}=imagePending;imagePending=null;syncHistoryButtons();
   if(m.error)return status(m.error,true);
   finishEdit();
   const note=targetId?doc.notes.find(n=>n.id===targetId):blankNote(at,null);if(!note)return;
@@ -68,7 +68,7 @@ document.addEventListener('DOMContentLoaded',()=>{
   (editing.pictures??=[]).push({asset:m.asset,pixelWidth:m.pixelWidth,pixelHeight:m.pixelHeight,
     x:(1-width)/2,y:(1-height)/2,width});
   activePicture=editing.pictures.length-1;setTool(null);persistEdit();render();
-  status('拖动图片移动位置，拖动角点等比缩放。');
+  status(tr('拖动图片移动位置，拖动角点等比缩放。'));
  });
  $('removePicture').onclick=()=>{if(!editing?.pictures?.length)return;
   editing.pictures.splice(activePicture<0?editing.pictures.length-1:activePicture,1);activePicture=editing.pictures.length-1;persistEdit();render()};

@@ -11,13 +11,13 @@ from xml.etree import ElementTree as ET
 from PIL import Image
 from playwright.sync_api import sync_playwright
 from pywinauto import Desktop
-from review_ui import fixtures, launch, stop, wait, work
+from review_ui import exported_file, fixtures, launch, stop, wait, work
 
 os.environ["FRAMENOTE_DATA_DIR"] = str(work / "profile")
 uid = lambda: str(uuid.uuid4())
 notes = [dict(id=uid(), number=num, startUs=start, endUs=end, text=f"Body {num}", shape=None)
          for num, start, end in [(2, 900000, 1200000), (5, 0, 850000), (9, 1800000, None), (4, 0, 500000)]]
-notes[1]["color"] = "#c43257"
+notes[1]["color"] = "#ff00ff"
 notes[3]["shape"] = dict(kind="box", x=.2, y=.1, toX=.7, toY=.4)
 voice = work / "voice.m4a"
 subprocess.run(["ffmpeg", "-v", "error", "-f", "lavfi", "-i", "sine=frequency=450:duration=0.3", str(voice)], check=True)
@@ -40,21 +40,10 @@ with zipfile.ZipFile(package, "w") as z:
     z.write(voice, f"voice/{voice_id}.m4a")
 
 
-def choose_path(proc, path):
-    picker = Desktop(backend="win32").window(process=proc.pid, class_name="#32770")
-    picker.wait("ready", timeout=10)
-    time.sleep(.2)
-    picker.child_window(class_name="Edit", found_index=0).set_edit_text(str(path))
-    picker.child_window(control_id=1).click()
-    time.sleep(.35)
-    if picker.exists(timeout=.2) and picker.is_visible():
-        picker.child_window(control_id=1).click()
-
-
 with sync_playwright() as pw:
     proc, page = launch(pw, package)
     try:
-        button = page.get_by_role("button", name="重新排序", exact=True)
+        button = page.get_by_role("button", name="按时间编号", exact=True)
         assert button.is_enabled()
         rows = page.locator("#list .noteNumber")
         assert rows.all_text_contents() == ["#4", "#5", "#2", "#9"]
@@ -69,6 +58,8 @@ with sync_playwright() as pw:
         assert rows.all_text_contents() == ["#1", "#2", "#3", "#4"]
         assert page.locator("#markLanes .markLabel").all_text_contents() == rows.all_text_contents()
         assert sorted(page.locator(".inkBadge text").all_text_contents()) == ["#1", "#2"]
+        assert rows.nth(1).evaluate("el=>getComputedStyle(el).color") == "rgb(0, 0, 0)"
+        assert page.locator('.inkBadge').filter(has_text="#2").locator('text').get_attribute("fill") == "#000"
         assert page.evaluate("[selected,shown,transport.currentTime]") == cursor
         assert page.evaluate(colored) == expected
         assert page.evaluate("doc.timeline") == before["timeline"]
@@ -82,7 +73,7 @@ with sync_playwright() as pw:
         page.locator("#reviewPanel .sideTitle").screenshot(path=str(work / "renumber-header.png"))
         saved = work / "renumbered.framenote"
         page.locator("#save").click()
-        choose_path(proc, saved)
+        exported_file(proc, saved)
         wait(page, "!busy && $('status').textContent.startsWith('审阅包已保存')")
         with zipfile.ZipFile(saved) as z:
             restored = json.loads(z.read("review.json"))
@@ -90,18 +81,25 @@ with sync_playwright() as pw:
             assert z.read(f"voice/{voice_id}.m4a") == voice.read_bytes()
             assert z.read(f"images/{picture_id}.png") == picture.read_bytes()
         page.locator("#exportExcel").click()
-        choose_path(proc, work)
+        exported_file(proc)
         wait(page, "!busy && $('status').textContent.startsWith('Excel 批注已导出')", timeout=60000)
         with zipfile.ZipFile(next(work.rglob("*.xlsx"))) as z:
             sheet = ET.fromstring(z.read("xl/worksheets/sheet1.xml"))
             for i in range(1, 5):
                 assert sheet.find(f".//{{*}}c[@r='A{i+2}']/{{*}}v").text == str(i)
+            styles = ET.fromstring(z.read("xl/styles.xml"))
+            cell = sheet.find(".//{*}c[@r='A4']")
+            style = styles.find("{*}cellXfs")[int(cell.get("s"))]
+            font = styles.find("{*}fonts")[int(style.get("fontId"))]
+            fill = styles.find("{*}fills")[int(style.get("fillId"))]
+            assert font.find("{*}color").get("rgb") == "FF000000"
+            assert fill.find(".//{*}fgColor").get("rgb") == "FFFF00FF"
     finally:
         stop(proc)
 
     proc, page = launch(pw, picture, "typeof imageDoc==='function' && imageDoc()")
     try:
-        button = page.get_by_role("button", name="重新排序", exact=True)
+        button = page.get_by_role("button", name="按时间编号", exact=True)
         assert button.is_disabled()
         for _ in range(2):
             page.locator("#point").click()

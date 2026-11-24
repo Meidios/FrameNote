@@ -6,6 +6,7 @@ using System.Text.Json;
 using Microsoft.Win32;
 using Microsoft.Web.WebView2.Core;
 using Microsoft.Web.WebView2.Wpf;
+using Serilog;
 
 namespace FrameNote;
 public static class Program
@@ -16,21 +17,24 @@ public static class Program
             using var engine=NativePlayer.CreateEngine(true);
             return File.Exists(Path.Combine(AppContext.BaseDirectory,"libvlc","win-x64","plugins","plugins.dat"))?0:1;
         }
+        L.Initialize();
         if (args.FirstOrDefault()=="--prepare-reaper") {
             try { if(args.Length!=4 && !(args.Length==5 && args[4]=="--colors")) return 2; Packages.PrepareReaper(args[1],args[2],args[3],args.Length==5); return 0; }
             catch(Exception e) { if(args.Length>=4) File.WriteAllText(args[3]+".error",e.Message); return 1; }
         }
         var player=string.Equals(Path.GetFileName(Environment.ProcessPath),"FrameNote Player.exe",StringComparison.OrdinalIgnoreCase);
         if(player && args.FirstOrDefault()=="--shell-selection")return ShellSelection.Run(args.Skip(1).ToArray());
-        bool direct=(player||args.Length>1) && args.Length>0 && Review.Formats.Contains(Path.GetExtension(args[0]).ToLowerInvariant());
-        var warming=direct?Task.Run(()=>NativePlayer.CreateEngine()):null;
-        var app=new Application();DeskTheme.Start(app);return app.Run(new Desk(args,player,warming));
+        var warming=player||args.Length>1?NativePlayer.WarmForVideo(args):null;
+        RuntimeLog.Start(player);
+        var app=new Application();
+        app.Exit+=(_,e)=>{Log.Information("Exited with code {ExitCode}",e.ApplicationExitCode);Log.CloseAndFlush();};
+        DeskTheme.Start(app);return app.Run(new Desk(args,player,warming));
     }
 }
 public sealed partial class Desk : Window
 {
     readonly WebView2 web = new();
-    readonly string root = Environment.GetEnvironmentVariable("FRAMENOTE_DATA_DIR") ?? Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),"FrameNote");
+    readonly string root = RuntimeLog.DataDirectory;
     readonly ReviewNavigation reviewPage;
     readonly string scratch;
     string ImageDirectory=>Path.Combine(scratch,"images");
@@ -49,7 +53,7 @@ public sealed partial class Desk : Window
         string? initial=paths.FirstOrDefault();
         this.playerEntry=playerEntry;
         bool direct=(playerEntry || paths.Length>1) && (initial==null || Review.Formats.Contains(Path.GetExtension(initial).ToLowerInvariant()));
-        Title=direct?(initial==null?"FrameNote Player":"FrameNote Player - "+Path.GetFileName(initial)):"FrameNote · 视频审阅"; Width=1230; Height=800; MinWidth=840; MinHeight=560;
+        Title=direct?(initial==null?"FrameNote Player":"FrameNote Player - "+Path.GetFileName(initial)):L.Text("FrameNote · 视频审阅"); Width=1230; Height=800; MinWidth=840; MinHeight=560;
         DeskTheme.Window(this); WindowStartupLocation=WindowStartupLocation.CenterScreen;
         InitWindowSize();
         // Only the WPF host surface uses software rendering. WebView2 and VLC
@@ -72,10 +76,10 @@ public sealed partial class Desk : Window
                 openingPlayer=direct;
                 if(!direct && (initial==null || !ImageFormats.Contains(Path.GetExtension(initial).ToLowerInvariant())))await EnsureReviewWeb();
                 if(initial!=null && !lifetime.IsCancellationRequested)await OpenFiles(paths,fromShell:true);
-            }catch(Exception e){if(!lifetime.IsCancellationRequested)MessageBox.Show(this,e.Message,"FrameNote");}
+            }catch(Exception e){if(!lifetime.IsCancellationRequested){Log.Error(e,"Startup failed");Simple(L.Text("启动失败"),L.Text("启动失败"),e.Message);}}
             finally{openingPlayer=false;initialOpen.TrySetResult();}
         };
-        Closing+=(_,e)=>{if(voiceCapture!=null || configuring){e.Cancel=true;StopVoice();return;}if(pending && !openingPlayer) {e.Cancel=true; preparing?.Cancel();exportCancel?.Cancel(); Send(new {type="status",text="请等当前操作结束后再关闭。"});} };
+        Closing+=(_,e)=>{if(voiceCapture!=null || configuring){e.Cancel=true;StopVoice();return;}if(pending && !openingPlayer) {e.Cancel=true; preparing?.Cancel();exportDialog?.Cancel(); Send(new {type="status",text=L.Text("请等当前操作结束后再关闭。")});} };
         Closed+=(_,_)=>{StopTimeline();native?.Dispose();web.Dispose();recordings.Dispose();CleanSessionFiles();};
     }
     void CleanSessionFiles(){
@@ -90,19 +94,24 @@ public sealed partial class Desk : Window
     }
     Task EnsureReviewWeb()=>webStartup??=InitializeReviewWeb();
     async Task InitializeReviewWeb(){
-        var loading=new System.Windows.Controls.TextBlock{Text="正在打开审阅界面…",HorizontalAlignment=HorizontalAlignment.Center,VerticalAlignment=VerticalAlignment.Center};
+        var loading=new System.Windows.Controls.TextBlock{Text=L.Text("正在打开审阅界面…"),HorizontalAlignment=HorizontalAlignment.Center,VerticalAlignment=VerticalAlignment.Center};
         try{
             surfaces.Children.Insert(0,web);
             web.Visibility=Visibility.Hidden;
             surfaces.Children.Insert(0,loading);
-            if(web.CoreWebView2==null)
-                await web.EnsureCoreWebView2Async(await CoreWebView2Environment.CreateAsync(null,Path.Combine(root,"Browser"),new CoreWebView2EnvironmentOptions("--autoplay-policy=no-user-gesture-required")));
-            var core=web.CoreWebView2 ?? throw new InvalidOperationException("WebView2 初始化未完成。");
+            if(web.CoreWebView2==null){
+                // WebView2 processes sharing a profile must agree on the browser language.
+                // An existing window can keep running in the previous language after a settings change.
+                string profile=Path.Combine(root,L.Language=="en"?"Browser.en":"Browser");
+                var options=new CoreWebView2EnvironmentOptions("--autoplay-policy=no-user-gesture-required",language:L.Language);
+                await web.EnsureCoreWebView2Async(await CoreWebView2Environment.CreateAsync(null,profile,options));
+            }
+            var core=web.CoreWebView2 ?? throw new InvalidOperationException(L.Text("WebView2 初始化未完成。"));
             if(!webConfigured){ConfigureReviewWeb(core);webConfigured=true;}
-            await core.AddScriptToExecuteOnDocumentCreatedAsync("window.shortcutBindings="+JsonSerializer.Serialize(ShortcutPayload(),Review.Json));
+            await core.AddScriptToExecuteOnDocumentCreatedAsync("window.shortcutBindings="+JsonSerializer.Serialize(ShortcutPayload(),Review.Json)+";window.frameNoteEnglish="+L.WebCatalog);
             await reviewPage.Load(core,lifetime.Token);
             webReady=true;
-            Send(new{type="shortcuts",bindings=ShortcutPayload()});
+            SendEditorPreferences();
             if(native?.IsVisible!=true)web.Visibility=Visibility.Visible;
         }catch{surfaces.Children.Remove(web);webStartup=null;throw;}
         finally{surfaces.Children.Remove(loading);}
@@ -115,6 +124,7 @@ public sealed partial class Desk : Window
         }
         ApplyWebTheme();DeskTheme.Changed+=ApplyWebTheme;Closed+=(_,_)=>DeskTheme.Changed-=ApplyWebTheme;
         core.DOMContentLoaded+=(_,_)=>ApplyWebTheme();
+        core.ProcessFailed+=(_,e)=>Log.Error("WebView2 process failed: {Kind} ({Reason}, exit {Code})",e.ProcessFailedKind,e.Reason,e.ExitCode);
         core.Settings.AreDefaultContextMenusEnabled=false; core.Settings.IsStatusBarEnabled=false; core.Settings.AreHostObjectsAllowed=false;
         core.Settings.IsZoomControlEnabled=false;core.Settings.IsPinchZoomEnabled=false;web.ZoomFactor=1;
         core.Settings.AreBrowserAcceleratorKeysEnabled=false; core.Settings.AreDevToolsEnabled=false;
@@ -129,31 +139,32 @@ public sealed partial class Desk : Window
             else await Message(e.WebMessageAsJson);
         };
     }
-    void ReportError(string text){if(lifetime.IsCancellationRequested)return;if(native?.IsVisible==true)native.Preparing(false,text);else if(webReady)Send(new{type="error",text});else MessageBox.Show(this,text,"FrameNote");}
+    void ReportError(string text){if(lifetime.IsCancellationRequested)return;if(native?.IsVisible==true)native.Preparing(false,text);else if(webReady)Send(new{type="error",text});else Simple(L.Text("操作失败"),L.Text("操作失败"),text);}
     void Send(object o){if(!lifetime.IsCancellationRequested && web.CoreWebView2!=null)web.CoreWebView2.PostWebMessageAsJson(JsonSerializer.Serialize(o,Review.Json));}
     void ApplyReviewEdits(Review updated){
         doc=updated;
         if(sessionKey!=null)sessionReviews[sessionKey]=updated;
     }
-    async Task Work(Func<Task> action) {
+    async Task Work(Func<Task> action,[System.Runtime.CompilerServices.CallerMemberName] string operation="") {
         if(pending)return; pending=true;var done=currentWork=new();Send(new{type="busy",value=true});
+        Log.Information("Operation started: {Operation}",operation);
         try { await action(); }
         catch(OperationCanceledException e) when(e.CancellationToken.IsCancellationRequested){Send(new{type="status",text=e.Message});}
-        catch(Exception e){ReportError(e.Message);}
+        catch(Exception e){Log.Error(e,"Operation failed: {Operation}",operation);ReportError(e.Message);}
         finally {pending=false;currentWork=null;Send(new{type="busy",value=false});ShowPlaylist();done.SetResult();}
     }
     async Task Open(string path,string? recordingTitle=null,VideoOpenMode mode=VideoOpenMode.Auto) {
         path=Path.GetFullPath(path);var info=new FileInfo(path);
-        if(!info.Exists)throw new FileNotFoundException("找不到文件。",path);
-        if(webReady)Send(new{type="status",text="正在打开 "+info.Name+"…"});
+        Log.Information("Opening {Format} in {Mode} mode",info.Extension,mode);
+        if(!info.Exists)throw new FileNotFoundException(L.Text("找不到文件。"),path);
+        if(webReady)Send(new{type="status",text=L.Text("正在打开 ")+info.Name+"…"});
         var nextKey=recordingTitle==null?$"{path}|{info.Length}|{info.LastWriteTimeUtc.Ticks}":null;
         bool package=info.Extension.Equals(".framenote",StringComparison.OrdinalIgnoreCase);
         string nextMedia=path;Review? next=null;
         if(package) (next,nextMedia)=await Task.Run(()=>Packages.Read(path,scratch,ImageDirectory));
-        else if(!ImageFormats.Contains(info.Extension.ToLowerInvariant()) && !Review.Formats.Contains(info.Extension.ToLowerInvariant())) throw new InvalidDataException("请选择支持的视频文件或 .framenote 审阅包。");
+        else if(!ImageFormats.Contains(info.Extension.ToLowerInvariant()) && !Review.Formats.Contains(info.Extension.ToLowerInvariant())) throw new InvalidDataException(L.Text("请选择支持的视频文件或 .framenote 审阅包。"));
         bool picture=ImageFormats.Contains(Path.GetExtension(nextMedia).ToLowerInvariant());
         bool playOriginal=mode==VideoOpenMode.Player && !picture && recordingTitle==null && !package;
-        var inspect=picture?null:Probe.Inspect(nextMedia,lifetime.Token);
         bool earlyPlayback=playOriginal && doc==null;
         if(earlyPlayback){
             var player=EnsurePlayer();SetPreviewFullscreen(false);
@@ -161,7 +172,7 @@ public sealed partial class Desk : Window
             player.Preparing(false,"");Title="FrameNote Player - "+info.Name;
             await player.Start(nextMedia,info.Name,0);
         }
-        var infoMedia=inspect==null?null:await inspect;
+        var infoMedia=picture?null:await Probe.Inspect(nextMedia,lifetime.Token);
         lifetime.Token.ThrowIfCancellationRequested();
         next??=new Review(picture?2:1,Guid.NewGuid(),recordingTitle??info.Name,infoMedia?.Duration??0,[]);
         if(nextKey!=null && sessionReviews.TryGetValue(nextKey,out var edited) && (!package || edited.Id==next.Id)
@@ -182,7 +193,7 @@ public sealed partial class Desk : Window
         viewingImage=false;imageFile=null;var previous=activeRecording; doc=next; openedPackage=package; media=nextMedia; sessionKey=nextKey;
         lifetime.Token.ThrowIfCancellationRequested();
         activeRecording=recordingTitle!=null?path:null;
-        Title=playOriginal?"FrameNote Player - "+doc.FileName:(activeRecording!=null?"临时录屏 · ":"")+doc.FileName+" · FrameNote";
+        Title=playOriginal?"FrameNote Player - "+doc.FileName:(activeRecording!=null?L.Text("临时录屏 · "):"")+doc.FileName+" · FrameNote";
         SetPreviewFullscreen(false);StopTimeline();playbackId=Guid.NewGuid();playbackInfo=infoMedia;deskLoaded=false;preview=nextPreview;
         needsPreview=compatibility;reviewOnly=mode==VideoOpenMode.Review;
         if(webReady)await web.ExecuteScriptAsync("transport.pause();v.removeAttribute('src');v.load();ready=false;render()");
@@ -199,38 +210,44 @@ public sealed partial class Desk : Window
     async Task Message(string raw){
         try{
             using var msg=JsonDocument.Parse(raw);var p=msg.RootElement; var op=p.GetProperty("type").GetString();
+            if(op=="diagnostic"){RuntimeLog.WebMessage(p.GetProperty("message").GetString(),p.GetProperty("error").GetBoolean());return;}
             if(op=="voiceStop"){StopVoice();return;}
             if(op=="cancelPreview"){preparing?.Cancel();return;}
-            if(op=="cancelVideoExport"){exportCancel?.Cancel();return;}
             if(op=="voiceStart"){await RecordVoice(p);return;}
             if(op=="canOpen"){reviewCanOpen=p.GetProperty("value").GetBoolean();return;}
+            if(op=="historyState"){
+                titleBar.UndoButton.IsEnabled=p.GetProperty("undo").GetBoolean();
+                titleBar.RedoButton.IsEnabled=p.GetProperty("redo").GetBoolean();
+                return;
+            }
             if(op=="previewFullscreen"){var on=p.GetProperty("on").GetBoolean();if(!on || (!viewingImage && deskLoaded && !pending && web.IsVisible))SetPreviewFullscreen(on);return;}
             if(op=="playbackVolume"){SetPlaybackVolume(p.GetProperty("value").GetInt32());return;}
-            if(op=="catalog"){await Catalog();return;}
+            if(op=="catalog"){await Catalog(p.TryGetProperty("initial",out var initialCatalog) && initialCatalog.GetBoolean());return;}
+            if(op=="capturePreferences"){SaveCapturePrefs(p.GetProperty("changes"));return;}
             if(op=="meterSources"){MeterSources(p.GetProperty("ids").Deserialize<string[]>()!);return;}
             if(op=="readMeters"){ReadMeterPeaks();return;}
             if(op=="storePicture"){
                 var request=p.GetProperty("request").GetGuid();
                 try{
-                    if(pending||configuring||doc==null)throw new InvalidOperationException("当前无法添加图片，请稍后再试。");
+                    if(pending||configuring||doc==null)throw new InvalidOperationException(L.Text("当前无法添加图片，请稍后再试。"));
                     var encoded=p.GetProperty("data").GetString();
-                    if(encoded==null||encoded.Length>ReviewImages.MaxBytes*4L/3+4)throw new InvalidDataException("图片过大。");
+                    if(encoded==null||encoded.Length>ReviewImages.MaxBytes*4L/3+4)throw new InvalidDataException(L.Text("图片过大。"));
                     var (asset,pixelWidth,pixelHeight)=ReviewImages.Store(ImageDirectory,Convert.FromBase64String(encoded));
                     Send(new{type="pictureStored",request,asset,pixelWidth,pixelHeight});
-                }catch(Exception e){Send(new{type="pictureStored",request,error=e.Message});}
+                }catch(Exception e){Log.Error(e,"Could not store annotation image");Send(new{type="pictureStored",request,error=e.Message});}
                 return;
             }
             if(op=="decodeError"){
                 var id=p.GetProperty("playbackId").GetGuid();
+                Log.Warning("Video decoder reported a playback error");
                 while(currentWork is {} work)await work.Task;
-                if(lifetime.IsCancellationRequested || configuring || media==null || playbackInfo==null || id!=playbackId || needsPreview || native?.IsVisible==true)return;
+                if(lifetime.IsCancellationRequested || configuring || media==null || playbackInfo==null || id!=playbackId || preview!=null || native?.IsVisible==true)return;
                 var us=Math.Max(0,p.GetProperty("us").GetInt64());
                 needsPreview=true;deskLoaded=false;
                 await Work(async()=>{
-                    if(!reviewOnly){await ShowPlayer(us);return;}
                     var prepared=await PrepareDeskPreview(media,playbackInfo);
-                    preview=prepared.Preview;
-                    await LoadReview(us,lifetime.Token,prepared.Frames);
+                    preview=prepared.Preview;playbackId=Guid.NewGuid();
+                    await LoadReview(us,lifetime.Token,prepared.Frames,recovering:true);
                 });return;
             }
             if(pending || configuring)return;
@@ -244,8 +261,8 @@ public sealed partial class Desk : Window
                 SendClipboardPicture(doc.Id,p.GetProperty("at").GetInt64());return;
             }
             if(op=="stop"){StopCapture();return;}
-            if(op=="clearRegion"){if(recorder==null)ResetRegion();return;}
-            if(op=="pickRegion"){PickRegion(p.GetProperty("source").GetString()!);return;}
+            if(op=="clearRegion"){if(recorder==null)ClearOutline();return;}
+            if(op=="pickRegion"){PickRegion(p.GetProperty("target"));return;}
             if(op=="record"){if(recorder==null)Record(p.GetProperty("settings").Deserialize<CaptureSettings>(Review.Json)!,p.GetProperty("gif").GetBoolean());return;}
             if(op=="gif"){await ExportGif(p.GetProperty("id").GetGuid());return;}
             if(op=="open"){await PickVideo();return;}
@@ -267,27 +284,25 @@ public sealed partial class Desk : Window
             if(op=="openLink"){
                 if(!Uri.TryCreate(p.GetProperty("url").GetString(),UriKind.Absolute,out var link) ||
                     !(link.Scheme=="http" || link.Scheme=="https") || link.Host.Length==0)
-                    throw new InvalidDataException("仅支持打开 HTTP 或 HTTPS 网页链接。");
+                    throw new InvalidDataException(L.Text("仅支持打开 HTTP 或 HTTPS 网页链接。"));
                 using var browser=Process.Start(new ProcessStartInfo(link.AbsoluteUri){UseShellExecute=true});
                 return;
             }
             if(op=="notes"){
-                var notes=p.GetProperty("notes").Deserialize<List<Note>>(Review.Json) ?? throw new InvalidDataException("批注格式有误。");
+                if(p.TryGetProperty("documentId",out var documentId)&&documentId.GetGuid()!=doc.Id)return;
+                var notes=p.GetProperty("notes").Deserialize<List<Note>>(Review.Json) ?? throw new InvalidDataException(L.Text("批注格式有误。"));
                 var updated=doc.WithNotes(notes);
+                if(p.TryGetProperty("rulerScales",out var scales))updated=updated with{RulerScales=scales.Deserialize<Dictionary<long,RulerScale>>(Review.Json)};
                 if(p.TryGetProperty("timeline",out var timeline)){var edits=timeline.Deserialize<EditTimeline>(Review.Json);updated=updated with{Timeline=edits,Version=edits==null?(viewingImage?2:1):3,DurationUs=p.GetProperty("durationUs").GetInt64()};}
                 updated.Check();
                 ApplyReviewEdits(updated);
                 return;
             }
             if(op=="save"){
-                var fd=new SaveFileDialog{FileName=Path.GetFileNameWithoutExtension(doc.FileName)+".framenote",Filter="FrameNote 审阅包|*.framenote",DefaultExt=".framenote"};
-                if(fd.ShowDialog(this)==true)await Work(async()=>{
-                    var visible=doc.WithNotes(p.GetProperty("notes").Deserialize<List<Note>>(Review.Json) ?? throw new InvalidDataException("批注格式有误。"));
-                    await Task.Run(()=>Packages.Save(fd.FileName,media,visible,ImageDirectory));
-                    Send(new{type="status",text="审阅包已保存："+fd.FileName});
-                });
+                var visible=doc.WithNotes(p.GetProperty("notes").Deserialize<List<Note>>(Review.Json) ?? throw new InvalidDataException(L.Text("批注格式有误。")));
+                await ExportPackage(visible,media);
             }
-        }catch(Exception e){Send(new{type="error",text=e.Message});}
+        }catch(Exception e){Log.Error(e,"Review command failed");Send(new{type="error",text=e.Message});}
     }
 }
 

@@ -13,15 +13,17 @@ from xml.etree import ElementTree as ET
 from PIL import Image, ImageDraw
 from playwright.sync_api import sync_playwright
 from pywinauto import Desktop
-from review_ui import launch, stop, wait, work
+from review_ui import exported_file, export_window, launch, settings, stop, wait, work
 
 profile = work / 'profile'
 profile.mkdir()
 (profile / 'updates.json').write_text('{"automatic":false}')
+(profile / 'shortcuts.json').write_text('{"record":[]}')
 os.environ['FRAMENOTE_DATA_DIR'] = str(profile)
 source = work / 'source.mp4'
 parent = work / '交付 #1'
 parent.mkdir()
+(profile/'capture.json').write_text(json.dumps({'exportDirectory':str(parent)}))
 
 
 def gray(frame):
@@ -67,44 +69,54 @@ def package(name, entries, duration, timeline=None, video=source):
 
 def export(proc, page, cancel=False):
     previous = page.locator('#status').inner_text()
-    page.evaluate("""()=>{
-        window.excelProgress=[];
-        function sample({data}){
-            if(data.type!=='exportProgress')return;
-            if(data.active)excelProgress.push($('progressBar').value);
-            else chrome.webview.removeEventListener('message',sample);
-        }
-        chrome.webview.addEventListener('message',sample);
-    }""")
-    if cancel:
-        page.evaluate("""()=>{
-            const afterFirst=({data})=>{
-                if(!data.text?.startsWith('正在导出 Excel 媒体 2/'))return;
-                chrome.webview.removeEventListener('message',afterFirst);
-                $('cancelProgress').click();
-            };
-            chrome.webview.addEventListener('message',afterFirst);
-        }""")
     page.locator('#exportExcel').click()
-    dialog = Desktop(backend='win32').window(process=proc.pid, class_name='#32770')
-    dialog.wait('ready', timeout=10)
-    time.sleep(.2)
-    dialog.child_window(class_name='Edit', found_index=0).set_edit_text(str(parent))
-    dialog.child_window(control_id=1).click()
-    # The Windows picker can navigate to the typed folder on the first submission.
-    time.sleep(.35)
-    if dialog.exists(timeout=.2) and dialog.is_visible():
-        dialog.child_window(control_id=1).click()
     if cancel:
+        dialog=export_window(proc)
+        dialog.child_window(auto_id="Message",title_re="正在导出 Excel 媒体 [2-4]/.*").wait('visible',timeout=30,retry_interval=.05)
+        assert 0 < dialog.child_window(auto_id='Bar').iface_range_value.CurrentValue < 100
+        dialog.child_window(auto_id='DismissExport').invoke()
         wait(page, "!busy && $('status').textContent.includes('已取消 Excel')")
-        assert page.locator('#taskProgress').is_hidden() and max(page.evaluate('excelProgress'))<100
         assert not list(parent.glob('.framenote-excel-*'))
         return
+    exported_file(proc)
     wait(page, "old=>!busy && $('status').textContent!==old && ($('status').textContent.startsWith('Excel 批注已导出') || $('status').classList.contains('error'))", previous, timeout=90000)
     assert not page.locator('#status').evaluate("el=>el.classList.contains('error')"), page.locator('#status').inner_text()
-    samples=page.evaluate('excelProgress')
-    assert samples==sorted(samples) and samples[0]==0 and samples[-1]==100
     return Path(page.locator('#status').inner_text().split('：', 1)[1])
+
+fields = ('Number', 'Type', 'Start', 'End', 'Text', 'Preview', 'Media')
+
+
+def choose_template(dlg, selected, source_title, zipped):
+    for control, checked in [('ExcelColumn' + name, name in selected) for name in fields] + [
+            ('ExcelShowSource', source_title), ('ExcelZip', zipped)]:
+        box = dlg.child_window(auto_id=control)
+        if bool(box.get_toggle_state()) != checked:
+            box.toggle()
+
+
+def finish_settings(dlg, confirm=True):
+    native = Desktop(backend='win32').window(handle=dlg.handle)
+    dlg.child_window(title='保存' if confirm else '取消', control_type='Button').invoke()
+    native.wait_not('exists')
+
+
+def inspect_columns(book, expected, title=True):
+    with zipfile.ZipFile(book) as archive:
+        sheet = ET.fromstring(archive.read('xl/worksheets/sheet1.xml'))
+        strings = [''.join(s.itertext()) for s in ET.fromstring(archive.read('xl/sharedStrings.xml'))]
+        rows = sheet.findall('.//{*}sheetData/{*}row')
+        headers = [strings[int(cell.findtext('{*}v'))] for cell in rows[int(title)].findall('{*}c')]
+        assert headers == expected and len(rows) == 3 + int(title), (headers, len(rows))
+        assert ('变帧率.mp4' in strings) == title
+        previews = [name for name in archive.namelist() if name.startswith('xl/media/')]
+        assert len(previews) == (2 if '画面预览' in headers else 0)
+        links = sheet.findall('.//{*}hyperlink')
+        assert len(links) == (2 if '媒体文件' in headers else 0)
+        if links:
+            rels = ET.fromstring(archive.read('xl/worksheets/_rels/sheet1.xml.rels'))
+            targets = {rel.get('Target') for rel in rels if rel.get('TargetMode') == 'External'}
+            assert targets == {'media/Mark-1.png', 'media/Region-2.gif'}
+            assert all((book.parent / target).is_file() for target in targets)
 
 
 with sync_playwright() as pw:
@@ -139,6 +151,47 @@ with sync_playwright() as pw:
     proc, page = launch(pw, variable)
     try:
         vfr_book = export(proc, page)
+        dlg = settings(proc, '表格设置')
+        assert all(dlg.child_window(auto_id='ExcelColumn'+field).get_toggle_state() for field in fields)
+        assert not dlg.child_window(auto_id='ExcelZip').get_toggle_state()
+        dlg.capture_as_image().save(work / 'spreadsheet-settings.png')
+        choose_template(dlg, [], False, True)
+        dlg.child_window(title='保存', control_type='Button').invoke()
+        dlg.child_window(title='请至少选择一列导出。', control_type='Text').wait('visible')
+        dlg.child_window(title='恢复本页默认值', control_type='Button').invoke()
+        assert all(dlg.child_window(auto_id='ExcelColumn'+field).get_toggle_state() for field in fields)
+        assert not dlg.child_window(auto_id='ExcelZip').get_toggle_state()
+        choose_template(dlg, ['Text'], False, True)
+        finish_settings(dlg, confirm=False)
+        dlg = settings(proc, '表格设置')
+        assert dlg.child_window(auto_id='ExcelColumnPreview').get_toggle_state()
+        choose_template(dlg, ['Text'], False, True)
+        finish_settings(dlg)
+    finally:
+        stop(proc)
+    proc, page = launch(pw, variable)
+    try:
+        text_zip = export(proc, page)
+        assert text_zip.suffix == '.zip'
+        with zipfile.ZipFile(text_zip) as bundle:
+            assert bundle.namelist() == [vfr_book.name]
+            bundle.extractall(work / 'only-text')
+        inspect_columns(work / 'only-text' / vfr_book.name, ['批注内容'], title=False)
+        dlg = settings(proc, '表格设置')
+        choose_template(dlg, ['Media'], False, True)
+        finish_settings(dlg)
+        media_zip = export(proc, page)
+        assert media_zip != text_zip and text_zip.is_file()
+        with zipfile.ZipFile(media_zip) as bundle:
+            assert set(bundle.namelist()) == {vfr_book.name, 'media/Mark-1.png', 'media/Region-2.gif'}
+            bundle.extractall(work / 'unpacked')
+        inspect_columns(work / 'unpacked' / vfr_book.name, ['媒体文件'], title=False)
+        dlg = settings(proc, '表格设置')
+        choose_template(dlg, ['Preview'], True, False)
+        finish_settings(dlg)
+        embedded = export(proc, page)
+        assert list(embedded.parent.iterdir()) == [embedded]
+        inspect_columns(embedded, ['画面预览'])
     finally:
         stop(proc)
 

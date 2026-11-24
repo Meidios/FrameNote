@@ -1,7 +1,7 @@
 'use strict';
 (()=>{
- const buttons='button[aria-description]:not([aria-haspopup="menu"])';
- const groups='header,#captureCommands,#transport,#timelineBar,#imageToolbar,.imageExport,#imageNav,#playlistToggle';
+ const buttons='button[aria-description]:not([aria-haspopup="menu"],[data-no-hint])';
+ const groups='header,#transport,#timelineBar,#imageToolbar,.imageExport,#imageNav,#playlistToggle,#capturePanel,.sideTitle,.rulerControls';
  const hint=document.getElementById('buttonHint');
  let group=null, target=null, fade=null;
 
@@ -51,7 +51,7 @@
  }
  document.addEventListener('pointermove',e=>{
   if(e.pointerType!=='mouse'||e.buttons)return;
-  const next=e.target.closest(groups);
+  const next=e.target.closest(groups)??e.target.closest('select');
   light(next,e.clientX,e.clientY);
   show(next?e.target.closest(buttons):null);
  });

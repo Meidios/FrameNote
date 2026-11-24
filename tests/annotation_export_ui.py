@@ -7,7 +7,7 @@ import time
 
 from playwright.sync_api import sync_playwright
 from pywinauto import Desktop
-from review_ui import at, launch, notes, stop, wait, work
+from review_ui import exported_file, at, launch, notes, stop, wait, work
 
 profile = work / 'profile'
 profile.mkdir()
@@ -21,12 +21,7 @@ subprocess.run(['ffmpeg', '-v', 'error', '-f', 'lavfi', '-i',
 
 def save(page, proc, button, path):
     page.locator('#' + button).click()
-    dialog = Desktop(backend='win32').window(process=proc.pid, class_name='#32770')
-    dialog.wait('ready', timeout=10)
-    time.sleep(.2)
-    dialog.child_window(class_name='Edit', found_index=0).set_edit_text(str(path))
-    dialog.child_window(control_id=1).click()
-    wait(page, "name=>!busy && $('status').textContent.endsWith(name)", path.name, timeout=180000)
+    exported_file(proc,path,timeout=180)
 
 
 with sync_playwright() as pw:
@@ -84,8 +79,9 @@ def cropped_frames(crop, pixel_format, stride):
     return (raw[i:i+stride] for i in range(0, len(raw), stride))
 
 
-footer_height = streams[0]['height'] - 720
-footer = cropped_frames('iw:ih-720:0:720', 'gray', 1280 * footer_height)
+# Sample the caption area above the persistent annotation progress strip.
+footer_height = streams[0]['height'] - 720 - 18
+footer = cropped_frames(f'iw:{footer_height}:0:720', 'gray', 1280 * footer_height)
 for i, pixels in enumerate(footer):
     assert (max(pixels) > 180) == (30 <= i < 60 or 90 <= i < 106 or 142 <= i), ('footer', i)
 # The source is monochrome. Sample the colored stroke of each drawing on every frame.

@@ -7,7 +7,7 @@ import time
 
 from playwright.sync_api import sync_playwright
 from pywinauto import Desktop, keyboard
-from review_ui import app, at, fixtures, launch, notes, stop, wait, work
+from review_ui import app, at, desk, fixtures, launch, notes, settings, stop, wait, work
 
 profile = work / "profile"
 profile.mkdir()
@@ -15,23 +15,6 @@ profile.mkdir()
 (profile / "shortcuts.json").write_text(json.dumps({"splitClip":{"mods":0,"vk":87},"record":{"mods":3,"vk":130}}))
 os.environ["FRAMENOTE_DATA_DIR"] = str(profile)
 clip = fixtures / "vfr.mp4"
-
-def desk(proc):
-    window=Desktop(backend="win32").window(process=proc.pid,title_re=".*FrameNote.*",found_index=0)
-    window.wait("ready",timeout=30)
-    return Desktop(backend="uia").window(handle=window.handle)
-
-def settings(proc):
-    win = desk(proc)
-    file_menu = win.child_window(title_re="文件.*", control_type="MenuItem",depth=3)
-    file_menu.expand()
-    win.child_window(title="设置", control_type="MenuItem",found_index=0).invoke()
-    window = Desktop(backend="win32").window(process=proc.pid,title="设置 · FrameNote")
-    window.wait("ready",timeout=10)
-    dlg = Desktop(backend="uia").window(handle=window.handle)
-    dlg.wait("ready")
-    assert dlg.child_window(title="打开默认应用设置", control_type="Button").exists()
-    return dlg
 
 def open_editor(dlg,name):
     button = dlg.child_window(auto_id=name, control_type="Button")
@@ -135,11 +118,14 @@ with sync_playwright() as pw:
         assert all(n["startUs"]==clock and n["endUs"] is None for n in ns)
         assert ns[-1]["text"]=="Frame comment"
         ordinary_menu(p)
-        dlg=settings(proc)
+        dlg=settings(proc,"快捷键")
         dlg.set_focus()
         assert p.evaluate("bindingLabel('splitClip')==='W'")
         assert not available_global(130)
         dlg.capture_as_image().save(work/"shortcut-settings.png")
+        dlg.child_window(title="使用说明",control_type="TabItem").select()
+        dlg.child_window(title_re=r".*分割片段（W）.*",control_type="Text").wait("exists")
+        dlg.child_window(title="快捷键",control_type="TabItem").select()
         for action in ["joinClip", "joinNextClip"]:
             dlg.child_window(auto_id=action).child_window(title="未设置",control_type="Text").wait("exists")
         listen(dlg,"joinClip")
@@ -227,13 +213,13 @@ with sync_playwright() as pw:
         assert not notes(p)
         gesture(p,"left","Shift")
         assert len(notes(p))==1
-        dlg=settings(proc)
-        dlg.child_window(title="恢复默认",control_type="Button").invoke()
+        dlg=settings(proc,"快捷键")
+        dlg.child_window(title="恢复本页默认值",control_type="Button").invoke()
         dlg.child_window(title="取消",control_type="Button").invoke()
-        Desktop(backend="win32").window(process=proc.pid,title="设置 · FrameNote").wait_not("exists")
+        Desktop(backend="win32").window(process=proc.pid,title="设置").wait_not("exists")
         assert p.evaluate("shortcutBindings.quickBox.keys[0].mods===4")
         check_clip_shortcuts(p)
-        dlg=settings(proc)
+        dlg=settings(proc,"快捷键")
         dlg.child_window(title="恢复「文件与批注」默认快捷键",control_type="Button").invoke()
         open_editor(dlg,"record")
         for label in ["删除 Ctrl+Alt+F19", "删除 Ctrl+Alt+F20"]:
@@ -263,15 +249,19 @@ try:
     end=time.monotonic()+3
     while play_hint()==before and time.monotonic()<end:time.sleep(.04)
     assert play_hint()!=before,(before,play_hint())
-    dlg=settings(player)
+    dlg=settings(player,"快捷键")
     # Another running copy may already own the default recording key.
     # Hold it here when it is free so that the failed save is deterministic.
     held_default = ctypes.windll.user32.RegisterHotKey(None, 9822, 3, 120)
-    dlg.child_window(title="恢复默认",control_type="Button").invoke()
+    dlg.child_window(title="恢复本页默认值",control_type="Button").invoke()
+    dlg.child_window(title="更新", control_type="TabItem").select()
+    dlg.child_window(auto_id="AutomaticUpdates").toggle()
+    dlg.child_window(title="快捷键", control_type="TabItem").select()
     dlg.child_window(title="保存",control_type="Button").invoke()
     try:
         dlg.child_window(title_re="无法注册全局录屏快捷键.*",control_type="Text").wait("visible")
         assert json.loads((profile/"shortcuts.json").read_text())["record"] == []
+        assert not json.loads((profile/"updates.json").read_text())["automatic"]
         assert "K / B" in play_hint()
     finally:
         if held_default:
@@ -281,8 +271,9 @@ try:
         dlg.child_window(title="删除 Ctrl+Alt+F9",control_type="Button").invoke()
         apply(dlg)
     dlg.child_window(title="保存",control_type="Button").invoke()
-    Desktop(backend="win32").window(process=player.pid,title="设置 · FrameNote").wait_not("exists")
+    Desktop(backend="win32").window(process=player.pid,title="设置").wait_not("exists")
     assert json.loads((profile/"shortcuts.json").read_text())==({} if held_default else {"record":[]})
+    assert json.loads((profile/"updates.json").read_text())["automatic"]
     assert "空格" in toggle.wrapper_object().element_info.element.CurrentHelpText
     print("PASS: restart, settings in standalone Player, shared bindings and restore defaults.",flush=True)
 finally: stop(player)

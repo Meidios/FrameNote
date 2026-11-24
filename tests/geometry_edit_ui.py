@@ -11,7 +11,7 @@ from PIL import Image
 from playwright.sync_api import sync_playwright
 from pywinauto import Desktop
 
-from review_ui import fixtures, launch, stop, wait, work
+from review_ui import exported_file, fixtures, launch, stop, wait, work
 
 profile = work / "profile"
 profile.mkdir()
@@ -88,9 +88,16 @@ def exercise(p):
         pairs = [("x","y"), ("toX","toY")]
         if kind == "angle":
             pairs.append(("thirdX","thirdY"))
-        for a,b in pairs:
-            near(moved[a], start[a]+9/w)
-            near(moved[b], start[b]+6/h)
+        if kind=="magnifier":
+            # Detaching an old inline lens preserves its original center-half sample.
+            for a,b in [("x","toX"),("y","toY")]:
+                span=start[b]-start[a]
+                near(moved[a],start[a]+span/4);near(moved[b],start[b]-span/4)
+            near(moved["preview"]["x"],start["x"]+9/w);near(moved["preview"]["y"],start["y"]+6/h)
+        else:
+            for a,b in pairs:
+                near(moved[a], start[a]+9/w)
+                near(moved[b], start[b]+6/h)
         assert p.evaluate("history.length") == previous_history + 1, kind
         p.keyboard.press("Control+z")
         assert read() == start
@@ -108,12 +115,15 @@ def exercise(p):
             near(actual[b], start[b]-3/h)
             assert {k:v for k,v in actual.items() if k not in (a,b)} == {k:v for k,v in start.items() if k not in (a,b)}
         if kind == "ruler":
+            p.locator("#rulerLength").fill("1")
+            p.locator("#calibrateRuler").click()
+            actual=read()
             x,y = center(p.locator('.shapeHandle[data-point="toX,toY"]'))
             p.mouse.move(x,y);p.mouse.down();p.mouse.move(x+16,y-5,steps=3)
             live = p.evaluate("editing.shape")
             sw,sh = p.evaluate("sourceSize()")
-            length = math.hypot((live["toX"]-live["x"])*sw, (live["toY"]-live["y"])*sh)
-            assert f"{length:.1f} px" in p.locator("#ink").text_content()
+            def length(s):return math.hypot((s["toX"]-s["x"])*sw,(s["toY"]-s["y"])*sh)
+            assert f"{length(live)/length(actual):.6g} m" in p.locator("#ink").text_content()
             assert read() == actual and live != actual
             p.evaluate("""overlay.dispatchEvent(new PointerEvent('pointercancel',
                        {pointerId:geometryDrag.pointer,bubbles:true}))""")
@@ -191,10 +201,7 @@ with sync_playwright() as pw:
             expected = p.evaluate("doc.notes")
             dest = work / ("edited-" + package.name)
             p.keyboard.press("Control+s")
-            dialog = Desktop(backend="win32").window(process=proc.pid, class_name="#32770")
-            dialog.wait("ready", timeout=10)
-            dialog.child_window(class_name="Edit",found_index=0).set_edit_text(str(dest))
-            dialog.child_window(control_id=1).click()
+            dest=exported_file(proc)
             wait(p,"!busy && $('status').textContent.startsWith('审阅包已保存')")
         finally:
             stop(proc)

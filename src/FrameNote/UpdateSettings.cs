@@ -2,7 +2,7 @@ using System.IO;
 using System.Text.Json;
 
 namespace FrameNote;
-internal record UpdatePrefs(bool Automatic=true,string? Skip=null,string? LastRun=null);
+internal record UpdatePrefs(bool Automatic=true,string? Skip=null,string? LastRun=null,string? Language=null);
 internal sealed class UpdateSettings(string root)
 {
     string FileName=>Path.Combine(root,"updates.json");
@@ -10,10 +10,16 @@ internal sealed class UpdateSettings(string root)
         try{return JsonSerializer.Deserialize<UpdatePrefs>(File.ReadAllText(FileName),Review.Json)??new();}
         catch(FileNotFoundException){return new();}catch(DirectoryNotFoundException){return new();}catch(JsonException){return new();}
     }
-    internal UpdatePrefs Change(Func<UpdatePrefs,UpdatePrefs> change){
+    internal UpdatePrefs Change(Func<UpdatePrefs,UpdatePrefs> change,Action? saveRelated=null){
         using var guard=new Mutex(false,@"Local\FrameNote.UpdatePreferences");
         try{guard.WaitOne();}catch(AbandonedMutexException){}
-        try{var old=Read();var next=change(old);if(old!=next)Packages.Atomic(FileName,s=>JsonSerializer.Serialize(s,next,Review.Json));return old;}
+        try{
+            var old=Read();var next=change(old);
+            void Write(UpdatePrefs value)=>Packages.Atomic(FileName,s=>JsonSerializer.Serialize(s,value,Review.Json));
+            if(old!=next)Write(next);
+            try{saveRelated?.Invoke();}catch{if(old!=next)Write(old);throw;}
+            return old;
+        }
         finally{guard.ReleaseMutex();}
     }
     internal static Version? Upgraded(string? last,string? installed,Version current){

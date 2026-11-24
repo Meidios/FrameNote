@@ -5,7 +5,7 @@ import win32clipboard as cb
 from PIL import Image
 from playwright.sync_api import sync_playwright
 from pywinauto import Desktop
-from review_ui import launch,stop,wait,work,fixtures
+from review_ui import exported_file, launch,stop,wait,work,fixtures
 
 profile=work/"profile";profile.mkdir();(profile/"updates.json").write_text('{"automatic":false}')
 os.environ["FRAMENOTE_DATA_DIR"]=str(profile)
@@ -15,7 +15,7 @@ def dialog(proc,path):
     d=Desktop(backend="win32").window(process=proc.pid,class_name="#32770")
     d.wait("ready",timeout=10);d.child_window(class_name="Edit",found_index=0).set_edit_text(str(path));d.child_window(control_id=1).click()
 def save(page,proc,path):
-    page.keyboard.press("Control+s");dialog(proc,path)
+    page.keyboard.press("Control+s");exported_file(proc,path)
     wait(page,"!busy && $('status').textContent.includes('已保存：')")
 def window(proc):
     handle=Desktop(backend="win32").window(process=proc.pid,title_re=".*FrameNote.*",found_index=0).handle
@@ -48,7 +48,7 @@ with sync_playwright() as pw:
         p.keyboard.press("Control+o");dialog(proc,fixtures/"capture-60.mp4")
         review=window(proc).child_window(auto_id="ReviewButton",control_type="Button")
         review.wait("ready",timeout=15);review.invoke()
-        wait(p,"ready && !imageDoc()");assert not vol(proc) and p.locator("#transport #playbackVolume").is_visible() and p.locator("header").is_visible()
+        wait(p,"ready && !imageDoc()");assert not vol(proc) and not p.locator("#playbackVolume").is_visible() and p.locator("#mutePlayback").is_visible() and p.locator("header").is_visible()
         print("PASS in-session TIFF edits, drawing after zoom, pan registration, original TIFF package and native volume",flush=True)
     finally:stop(proc)
     proc,p=launch(pw,source,"typeof imageDoc==='function' && imageDoc() && !busy")

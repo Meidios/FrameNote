@@ -15,7 +15,7 @@ public static class Capture
         var size=Recorder.GetOutputDimensionsForRecordingSources([source]).CombinedOutputSize;
         double w=source.SourceRect?.Width>0?source.SourceRect.Width:size.Width;
         double h=source.SourceRect?.Height>0?source.SourceRect.Height:size.Height;
-        if(w<=0||h<=0)throw new InvalidOperationException("所选窗口没有可录画面，请保持窗口可见。");
+        if(w<=0||h<=0)throw new InvalidOperationException(L.Text("所选窗口没有可录画面，请保持窗口可见。"));
         double k=Math.Min(1,Math.Min(1920/w,1080/h));
         var options=RecorderOptions.Default;
         options.SourceOptions=new SourceOptions{RecordingSources=[source]};
@@ -27,12 +27,13 @@ public static class Capture
             IsMp4FastStartEnabled=true};
         return Recorder.CreateRecorder(options);
     }
-    public static async Task Gif(string source,double start,double seconds,string output){
-        if(!double.IsFinite(seconds)||!double.IsFinite(start)||seconds<=0||seconds>30||start<0)throw new InvalidDataException("请选择不超过 30 秒的区间。");
+    public static async Task Gif(string source,double start,double seconds,string output,Action<int>? report=null,CancellationToken token=default){
+        if(!double.IsFinite(seconds)||!double.IsFinite(start)||seconds<=0||seconds>30||start<0)throw new InvalidDataException(L.Text("请选择不超过 30 秒的区间。"));
         var temp=Path.Combine(Path.GetDirectoryName(output)!,Guid.NewGuid().ToString("N")+".gif");
         try{
-            await Probe.Run("ffmpeg","-hide_banner","-loglevel","error","-nostdin","-ss",FormattableString.Invariant($"{start:F6}"),"-t",FormattableString.Invariant($"{seconds:F6}"),"-i",source,
-                "-an","-filter_complex","fps=12,scale='min(800,iw)':-2:flags=lanczos,split[a][b];[a]palettegen[p];[b][p]paletteuse=dither=sierra2_4a","-loop","0",temp);
+            await Probe.EncodeWithProgress(["-hide_banner","-loglevel","error","-nostdin","-ss",FormattableString.Invariant($"{start:F6}"),"-t",FormattableString.Invariant($"{seconds:F6}"),"-i",source,
+                "-an","-filter_complex","fps=12,scale='min(800,iw)':-2:flags=lanczos,split[a][b];[a]palettegen[p];[b][p]paletteuse=dither=sierra2_4a","-loop","0",temp],(long)(seconds*1e6),report??(_=>{}),token);
+            token.ThrowIfCancellationRequested();
             File.Move(temp,output,true);
         }finally{File.Delete(temp);}
     }
@@ -44,24 +45,29 @@ public sealed class CropWindow:Window
     static extern bool EnumDisplaySettings(string name,int mode,IntPtr settings);
     public ScreenRect? Crop{get;private set;}
     internal Int32Rect Bounds{get;}
-    public CropWindow(string device):this(device,[new Shortcut(0,27)]){}
-    internal CropWindow(string device,Shortcut[] cancel){
-        Title="框选录制区域";WindowStyle=WindowStyle.None;AllowsTransparency=true;ResizeMode=ResizeMode.NoResize;Topmost=true;ShowInTaskbar=false;
-        Background=new SolidColorBrush(Color.FromArgb(32,0,0,0));Cursor=Cursors.Cross;
+    internal static Int32Rect DisplayBounds(string device){
         // DEVMODEW display union: use physical pixels, including desktops with negative origins.
         var mem=System.Runtime.InteropServices.Marshal.AllocHGlobal(220);int x,y,w,h;
         try{System.Runtime.InteropServices.Marshal.Copy(new byte[220],0,mem,220);System.Runtime.InteropServices.Marshal.WriteInt16(mem,68,220);
-            if(!EnumDisplaySettings(device,-1,mem))throw new InvalidOperationException("无法读取显示器尺寸。");
+            if(!EnumDisplaySettings(device,-1,mem))return Int32Rect.Empty;
             x=System.Runtime.InteropServices.Marshal.ReadInt32(mem,76);y=System.Runtime.InteropServices.Marshal.ReadInt32(mem,80);
             w=System.Runtime.InteropServices.Marshal.ReadInt32(mem,172);h=System.Runtime.InteropServices.Marshal.ReadInt32(mem,176);
         }finally{System.Runtime.InteropServices.Marshal.FreeHGlobal(mem);}
-        Bounds=new Int32Rect(x,y,w,h);
+        return new Int32Rect(x,y,w,h);
+    }
+    public CropWindow(string device):this(device,[new Shortcut(0,27)]){}
+    internal CropWindow(string device,Shortcut[] cancel){
+        Title=L.Text("框选录制区域");WindowStyle=WindowStyle.None;AllowsTransparency=true;ResizeMode=ResizeMode.NoResize;Topmost=true;ShowInTaskbar=false;
+        Background=new SolidColorBrush(Color.FromArgb(32,0,0,0));Cursor=Cursors.Cross;
+        Bounds=DisplayBounds(device);
+        if(Bounds.IsEmpty)throw new InvalidOperationException(L.Text("无法读取显示器尺寸。"));
+        int x=Bounds.X,y=Bounds.Y,w=Bounds.Width,h=Bounds.Height;
         void FitMonitor(){var hwnd=new System.Windows.Interop.WindowInteropHelper(this).Handle;SetWindowPos(hwnd,new IntPtr(-1),x,y,w,h,0x40);}
         // Moving onto a monitor can apply WM_DPICHANGED's suggested size during startup.
         // Once WPF has rendered there, fit the client to the physical monitor bounds.
         SourceInitialized+=(_,_)=>FitMonitor();
         ContentRendered+=(_,_)=>FitMonitor();
-        var canvas=new Canvas();Content=canvas;var label=new TextBlock{Text="拖动选择录制区域"+(cancel.Length==0?"":$"　·　{cancel.Label(InputKind.Keyboard)} 取消"),Padding=new Thickness(10,5,10,5),FontSize=16};label.SetResourceReference(TextBlock.ForegroundProperty,"ink");label.SetResourceReference(TextBlock.BackgroundProperty,"card");label.SetResourceReference(TextBlock.FontFamilyProperty,"UiFont");Canvas.SetTop(label,18);Canvas.SetLeft(label,24);canvas.Children.Add(label);
+        var canvas=new Canvas();Content=canvas;var label=new TextBlock{Text=L.Text("拖动选择录制区域")+(cancel.Length==0?"":L.Format($"　·　{cancel.Label(InputKind.Keyboard)} 取消")),Padding=new Thickness(10,5,10,5),FontSize=16};label.SetResourceReference(TextBlock.ForegroundProperty,"ink");label.SetResourceReference(TextBlock.BackgroundProperty,"card");label.SetResourceReference(TextBlock.FontFamilyProperty,"UiFont");Canvas.SetTop(label,18);Canvas.SetLeft(label,24);canvas.Children.Add(label);
         var box=new System.Windows.Shapes.Rectangle{StrokeThickness=3};box.SetResourceReference(System.Windows.Shapes.Shape.StrokeProperty,"accent");canvas.Children.Add(box);
         Point Pixel(MouseEventArgs e){
             var p=canvas.PointToScreen(e.GetPosition(canvas));

@@ -9,7 +9,7 @@ import zipfile
 
 from playwright.sync_api import sync_playwright
 from pywinauto import Desktop
-from review_ui import launch, stop, wait, work
+from review_ui import exported_file, launch, stop, wait, work
 
 os.environ["FRAMENOTE_DATA_DIR"] = str(work / "profile")
 source = work / "source.mp4"
@@ -44,12 +44,7 @@ def package(name, clips, notes=(), media=source):
 def export(proc, page, name, expected):
     output = work / (name + ".mp4")
     page.locator("#exportVideo").click()
-    picker = Desktop(backend="win32").window(process=proc.pid, class_name="#32770")
-    picker.wait("ready", timeout=10)
-    time.sleep(.2)
-    picker.child_window(class_name="Edit", found_index=0).set_edit_text(str(output))
-    picker.child_window(control_id=1).click()
-    wait(page, "name=>!busy && $('status').textContent.endsWith(name)", output.name, timeout=60000)
+    output=exported_file(proc)
     data = json.loads(subprocess.check_output(["ffprobe", "-v", "error", "-show_entries",
                       "format=duration:stream=codec_type,duration", "-of", "json", str(output)]))
     lengths = {s["codec_type"]: float(s["duration"]) for s in data["streams"]}

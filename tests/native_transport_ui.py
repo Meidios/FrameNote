@@ -3,7 +3,7 @@ import io, os, subprocess, time
 from pathlib import Path
 from PIL import Image, ImageDraw
 from playwright.sync_api import sync_playwright
-from pywinauto import Desktop
+from pywinauto import Desktop, mouse
 import win32clipboard
 from review_ui import fixtures, work, launch, stop, wait
 
@@ -48,7 +48,7 @@ with sync_playwright() as pw:
         until(lambda:clockms()>800)
         click("Toggle");time.sleep(.3)
         assert el("Caption").window_text()==clip.name
-        assert not el("Hint").window_text() and len(window.descendants(control_type="Slider"))==2
+        assert not el("Hint").window_text() and not el("VolumeSlider").exists(timeout=.2)
         pic=window.wrapper_object().capture_as_image();pic.save(work/"native-player.png")
         copy()  # The normal VLC surface also supports capture before any frame stepping.
         click("Next");time.sleep(.4);first=bits(copy())
@@ -63,6 +63,9 @@ with sync_playwright() as pw:
         d.child_window(class_name="Edit",found_index=0).set_edit_text(str(dest));d.child_window(control_id=1).click()
         until(dest.exists)
         with Image.open(dest) as saved:assert saved.convert("RGB").tobytes()==previous.convert("RGB").tobytes()
+        window.set_focus()
+        center=el("Mute").rectangle().mid_point()
+        mouse.move(coords=(center.x,center.y));el("VolumeSlider").wait("visible")
         el("VolumeSlider").set_value(37);click("Mute");until(lambda:el("VolumeSlider").iface_range_value.CurrentValue==0)
         click("Mute");until(lambda:el("VolumeSlider").iface_range_value.CurrentValue==37)
         rectangle=window.rectangle();click("Full");el("ReviewButton").wait_not("visible")

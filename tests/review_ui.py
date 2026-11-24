@@ -1,5 +1,5 @@
 """Exercise the release WebView2 UI. Requires playwright and pywinauto; see README."""
-import hashlib, json, os, shutil, socket, subprocess, sys, tempfile, time, zipfile
+import hashlib, json, os, re, shutil, socket, subprocess, sys, tempfile, time, zipfile
 from pathlib import Path
 from urllib.parse import urlsplit
 from urllib.request import url2pathname
@@ -11,17 +11,68 @@ fixtures = Path(sys.argv[2]).resolve()
 work = Path(tempfile.mkdtemp(prefix="review-ui-",dir=fixtures))
 sample = work / "同步演示.mp4"
 package = work / "中文审阅.framenote"
+def desk(proc):
+    window=Desktop(backend="win32").window(process=proc.pid,title_re=".*FrameNote.*",found_index=0)
+    window.wait("ready",timeout=30)
+    return Desktop(backend="uia").window(handle=window.handle)
+
+def settings(proc, section="通用"):
+    win = desk(proc)
+    file_menu = win.child_window(title_re="文件.*", control_type="MenuItem",depth=3)
+    file_menu.expand()
+    win.child_window(title="设置", control_type="MenuItem",found_index=0).invoke()
+    window = Desktop(backend="win32").window(process=proc.pid,title="设置")
+    window.wait("ready",timeout=10)
+    dlg = Desktop(backend="uia").window(handle=window.handle)
+    dlg.wait("ready")
+    assert dlg.child_window(title="打开默认应用设置", control_type="Button").exists()
+    if section!="通用":
+        dlg.child_window(title=section,control_type="TabItem").select()
+    return dlg
+
 def wait(page,expr,arg=None,timeout=6000):
     until=time.monotonic()+timeout/1000
     while time.monotonic()<until:
         if page.evaluate(expr,arg):return
         time.sleep(.035)
     raise AssertionError((expr,page.url,page.locator('body').inner_text()[-1000:]))
+
+def export_window(proc):
+    window=Desktop(backend="win32").window(process=proc.pid,title_re=r"^(?:(?:正在导出|Exporting) .+|导出完成|Export complete|导出失败|Export failed)$")
+    window.wait("visible",timeout=15,retry_interval=.025)
+    return Desktop(backend="uia").window(handle=window.handle)
+
+def exported_file(proc, destination=None, timeout=90):
+    """Dismiss the completion prompt and read the export result from the review session."""
+    window=Desktop(backend="win32").window(process=proc.pid,title_re=r"^(导出完成|Export complete)$")
+    window.wait("visible",timeout=timeout)
+    prompt=Desktop(backend="uia").window(handle=window.handle)
+    assert not any(Path(t.window_text()).is_absolute() for t in prompt.descendants(control_type="Text"))
+    status=proc.review_page.locator("#status").text_content()
+    match=re.search(r"(?:[A-Za-z]:[\\/]|\\\\).+$",status)
+    assert match, status
+    path=Path(match.group())
+    assert path.is_file(), path
+    prompt.child_window(auto_id="DismissExport",control_type="Button").invoke()
+    window.wait_not("visible")
+    if destination is not None and path!=destination:
+        assert path.suffix==destination.suffix and not destination.exists()
+        path.rename(destination)
+        return destination
+    return path
 def launch(pw,path,condition="typeof ready!=='undefined' && ready"):
     with socket.socket() as s:
         s.bind(("127.0.0.1",0)); port=s.getsockname()[1]
     env=dict(os.environ, WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS=f"--remote-debugging-port={port} --remote-debugging-address=127.0.0.1",
              WEBVIEW2_USER_DATA_FOLDER=str(work / ("browser-"+str(port))))
+    profile=Path(env.setdefault("FRAMENOTE_DATA_DIR",str(work/"profile")))
+    if profile.is_relative_to(work):
+        profile.mkdir(parents=True,exist_ok=True)
+        config=profile/"capture.json"
+        capture=json.loads(config.read_text(encoding="utf-8-sig")) if config.exists() else {}
+        if "exportDirectory" not in capture:
+            capture["exportDirectory"]=str(work/"exports")
+            config.write_text(json.dumps(capture),encoding="utf-8")
     proc=subprocess.Popen([str(app)]+([str(path)] if path else []),env=env)
     try:
         until=time.monotonic()+30
@@ -35,6 +86,7 @@ def launch(pw,path,condition="typeof ready!=='undefined' && ready"):
         page=ctx.pages[0]
         page.wait_for_url("**/ui/index.html",wait_until="domcontentloaded",timeout=30000)
         wait(page,condition,timeout=30000)
+        proc.review_page=page
         return proc,page
     except: proc.kill();raise
 def stop(proc):
@@ -48,12 +100,14 @@ def at(page,i):
     wait(page,"i=>Math.abs(shown-frames[i])<=2",arg=i,timeout=5000)
 def notes(page):return page.evaluate("doc.notes")
 def switch_file(proc,page,path):
-    page.keyboard.press("Control+o")
+    page.locator("#open").click()
     dlg=Desktop(backend="win32").window(process=proc.pid,class_name="#32770")
     dlg.wait("ready",timeout=10)
-    dlg.child_window(class_name="Edit",found_index=0).set_edit_text(str(path))
-    dlg.child_window(control_id=1).click()
-    wait(page,"name=>!busy && doc.fileName===name && (ready || imageDoc())",path.name,timeout=20000)
+    filename=dlg.child_window(class_name="Edit",found_index=0)
+    filename.wait("ready")
+    filename.set_edit_text(str(path))
+    filename.type_keys("{ENTER}")
+    wait(page,"name=>!busy && doc?.fileName===name && (ready || imageDoc())",path.name,timeout=20000)
 if __name__ == '__main__':
     profile=work/"profile"
     os.environ["FRAMENOTE_DATA_DIR"]=str(profile)
@@ -88,14 +142,7 @@ if __name__ == '__main__':
                 page.locator(".note").last.click();page.locator("#loop").click()
                 wait(page,"!v.paused && loopId!==null");page.locator("#loop").click()
                 page.locator("#save").click()
-                dlg=Desktop(backend="win32").window(process=proc.pid,class_name="#32770");dlg.wait("ready",timeout=10)
-                filename=dlg.child_window(class_name="Edit",found_index=0)
-                filename.wait("ready");time.sleep(.35)
-                filename.set_edit_text(str(package));assert filename.window_text()==str(package)
-                dlg.child_window(control_id=1).click()
-                # The Windows filename autocomplete can consume the first submission.
-                if not package.exists() and dlg.exists(timeout=.5) and dlg.is_visible():
-                    filename.type_keys("{ENTER}")
+                package=exported_file(proc)
                 wait(page,"document.querySelector('#status').textContent.startsWith('审阅包已保存')")
                 before=notes(page);page.screenshot(path=str(work/"review.png"))
                 at(page,7);page.locator("#splitClip").click()

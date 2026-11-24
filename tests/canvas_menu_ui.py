@@ -1,9 +1,9 @@
 """Exercise tool-first Marks and targeted canvas actions in the shipping WebView."""
-import os
+import os,time
 from PIL import Image
 from playwright.sync_api import sync_playwright
 from pywinauto import Desktop
-from review_ui import at, fixtures, launch, notes, stop, wait, work
+from review_ui import exported_file, at, fixtures, launch, notes, stop, wait, work
 
 profile = work / "profile"
 profile.mkdir()
@@ -112,10 +112,7 @@ with sync_playwright() as pw:
         assert notes(p)[-1]["startUs"]==p.evaluate("frames[28]") and notes(p)[3]==photo
         expected=notes(p)
         p.locator("#save").click()
-        dlg=Desktop(backend="win32").window(process=proc.pid,class_name="#32770")
-        dlg.wait("ready",timeout=10)
-        dlg.child_window(class_name="Edit",found_index=0).set_edit_text(str(package))
-        dlg.child_window(control_id=1).click()
+        package=exported_file(proc)
         wait(p,"!busy && $('status').textContent.includes('已保存')")
     finally:
         stop(proc)

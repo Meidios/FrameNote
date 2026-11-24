@@ -23,10 +23,29 @@ AppMutex=Local\FrameNote.Installed
 CloseApplications=no
 RestartApplications=no
 MinVersion=10.0
+LanguageDetectionMethod=uilanguage
 
 [Languages]
-Name: "zh"; MessagesFile: "ChineseSimplified.isl"
 Name: "en"; MessagesFile: "compiler:Default.isl"
+Name: "zh"; MessagesFile: "ChineseSimplified.isl"
+
+[CustomMessages]
+en.PlayerOpen=Open with FrameNote Player
+zh.PlayerOpen=用 FrameNote Player 打开
+en.ReviewDescription=FrameNote video review and annotation
+zh.ReviewDescription=FrameNote 视频审阅与批注
+en.ReviewFile=FrameNote review package
+zh.ReviewFile=FrameNote 审阅包
+en.ImageFile=FrameNote image
+zh.ImageFile=FrameNote 图片
+en.LaunchFrameNote=Launch FrameNote
+zh.LaunchFrameNote=启动 FrameNote
+en.WebViewError=Could not install WebView2. Connect to the internet or install Microsoft Edge WebView2 Evergreen Runtime, then try again.
+zh.WebViewError=WebView2 未能安装。请连接网络，或先安装 Microsoft Edge WebView2 Evergreen Runtime 后重试。
+en.PlayerDescription=Play original video files with FrameNote Player
+zh.PlayerDescription=用 FrameNote Player 播放原始视频
+en.VideoFile=video
+zh.VideoFile=视频
 
 [Files]
 ; Both apphosts load FrameNote.dll. Reference one source so Inno stores it once.
@@ -43,19 +62,20 @@ Name: "{userprograms}\FrameNote"; Filename: "{app}\FrameNote.exe"
 #define public MenuMedia ".png;.apng;.jpg;.jpeg;.jfif;.bmp;.gif;.webp;.avif;.ico;.tif;.tiff;.mp4;.m4v;.mov;.webm;.mkv;.avi;.wmv;.asf;.mpg;.mpeg;.ts;.m2ts;.mts;.flv;.mxf;.vob;.ogv;.3gp;"
 #sub RegisterPlayerMenu
 #define VerbKey "Software\Classes\SystemFileAssociations\" + Copy(MenuMedia,1,Pos(";",MenuMedia)-1) + "\shell\FrameNotePlayer"
-Root: HKCU; Subkey: "{#VerbKey}"; ValueType: string; ValueData: "用 FrameNote Player 打开"; Flags: uninsdeletekey
+Root: HKCU; Subkey: "{#VerbKey}"; ValueType: string; ValueData: "{cm:PlayerOpen}"; Flags: uninsdeletekey
 Root: HKCU; Subkey: "{#VerbKey}"; ValueName: "Icon"; ValueType: string; ValueData: """{app}\FrameNote Player.exe"",0"
 Root: HKCU; Subkey: "{#VerbKey}"; ValueName: "MultiSelectModel"; ValueType: string; ValueData: "Player"
 Root: HKCU; Subkey: "{#VerbKey}\command"; ValueType: string; ValueData: """{app}\FrameNote Player.exe"" --shell-selection ""%1"""
 #endsub
 #for {MenuMedia = MenuMedia; Len(MenuMedia)>0; MenuMedia = Copy(MenuMedia, Pos(";", MenuMedia)+1, Len(MenuMedia))} RegisterPlayerMenu
 Root: HKCU; Subkey: "Software\Meidios\FrameNote"; Flags: uninsdeletekey
+Root: HKCU; Subkey: "Software\Meidios\FrameNote"; ValueType: string; ValueName: "InstallLanguage"; ValueData: "{code:InitialLanguage}"; Flags: createvalueifdoesntexist
 Root: HKCU; Subkey: "Software\Meidios\FrameNote\Capabilities"; ValueType: string; ValueName: "ApplicationName"; ValueData: "FrameNote"
-Root: HKCU; Subkey: "Software\Meidios\FrameNote\Capabilities"; ValueType: string; ValueName: "ApplicationDescription"; ValueData: "FrameNote 视频审阅与批注"
+Root: HKCU; Subkey: "Software\Meidios\FrameNote\Capabilities"; ValueType: string; ValueName: "ApplicationDescription"; ValueData: "{cm:ReviewDescription}"
 Root: HKCU; Subkey: "Software\Meidios\FrameNote\Capabilities"; ValueType: string; ValueName: "ApplicationIcon"; ValueData: """{app}\FrameNote.exe"",0"
 Root: HKCU; Subkey: "Software\Meidios\FrameNote\Capabilities\FileAssociations"; ValueType: string; ValueName: ".framenote"; ValueData: "FrameNote.Review"
 Root: HKCU; Subkey: "Software\RegisteredApplications"; ValueType: string; ValueName: "FrameNote"; ValueData: "Software\Meidios\FrameNote\Capabilities"; Flags: uninsdeletevalue
-Root: HKCU; Subkey: "Software\Classes\FrameNote.Review"; ValueType: string; ValueData: "FrameNote 审阅包"; Flags: uninsdeletekey
+Root: HKCU; Subkey: "Software\Classes\FrameNote.Review"; ValueType: string; ValueData: "{cm:ReviewFile}"; Flags: uninsdeletekey
 Root: HKCU; Subkey: "Software\Classes\FrameNote.Review\DefaultIcon"; ValueType: string; ValueData: """{app}\Assets\FrameNote_File.ico"",0"
 Root: HKCU; Subkey: "Software\Classes\FrameNote.Review\shell\open\command"; ValueType: string; ValueData: """{app}\FrameNote.exe"" ""%1"""
 Root: HKCU; Subkey: "Software\Classes\.framenote\OpenWithProgids"; ValueType: string; ValueName: "FrameNote.Review"; ValueData: ""; Flags: uninsdeletevalue uninsdeletekeyifempty
@@ -64,7 +84,7 @@ Root: HKCU; Subkey: "Software\Classes\Applications\FrameNote.exe\shell\open\comm
 Root: HKCU; Subkey: "Software\Classes\Applications\FrameNote.exe\DefaultIcon"; ValueType: string; ValueData: """{app}\Assets\FrameNote_File.ico"",0"; Flags: uninsdeletekeyifempty
 Root: HKCU; Subkey: "Software\Classes\Applications\FrameNote.exe\SupportedTypes"; ValueType: string; ValueName: ".framenote"; ValueData: ""; Flags: uninsdeletevalue uninsdeletekeyifempty
 
-Root: HKCU; Subkey: "Software\Classes\FrameNote.Image"; ValueType: string; ValueData: "FrameNote 图片"; Flags: uninsdeletekey
+Root: HKCU; Subkey: "Software\Classes\FrameNote.Image"; ValueType: string; ValueData: "{cm:ImageFile}"; Flags: uninsdeletekey
 Root: HKCU; Subkey: "Software\Classes\FrameNote.Image\DefaultIcon"; ValueType: string; ValueData: """{app}\FrameNote.exe"",0"
 Root: HKCU; Subkey: "Software\Classes\FrameNote.Image\shell\open\command"; ValueType: string; ValueData: """{app}\FrameNote.exe"" ""%1"""
 Root: HKCU; Subkey: "Software\Meidios\FrameNote\Capabilities\FileAssociations"; ValueType: string; ValueName: ".png"; ValueData: "FrameNote.Image"
@@ -110,14 +130,14 @@ Root: HKCU; Subkey: "Software\Classes\Applications\FrameNote.exe\SupportedTypes"
 #define public Classes "Software\Classes"
 Root: HKCU; Subkey: "Software\RegisteredApplications"; ValueName: "FrameNote Player"; ValueType: string; ValueData: "{#PlayerCaps}"; Flags: uninsdeletevalue
 Root: HKCU; Subkey: "{#PlayerCaps}"; ValueName: "ApplicationName"; ValueType: string; ValueData: "FrameNote Player"
-Root: HKCU; Subkey: "{#PlayerCaps}"; ValueName: "ApplicationDescription"; ValueType: string; ValueData: "Play original video files with FrameNote Player"
+Root: HKCU; Subkey: "{#PlayerCaps}"; ValueName: "ApplicationDescription"; ValueType: string; ValueData: "{cm:PlayerDescription}"
 Root: HKCU; Subkey: "{#PlayerCaps}"; ValueName: "ApplicationIcon"; ValueType: string; ValueData: """{app}\FrameNote Player.exe"",0"
 Root: HKCU; Subkey: "{#Classes}\Applications\FrameNote Player.exe"; ValueName: "FriendlyAppName"; ValueType: string; ValueData: "FrameNote Player"; Flags: uninsdeletekey
 Root: HKCU; Subkey: "{#Classes}\Applications\FrameNote Player.exe\shell\open\command"; ValueType: string; ValueData: """{app}\FrameNote Player.exe"" ""%1"""
 #define public VideoProg ""
 #define public VideoApp ""
 #sub RegisterVideoHandler
-Root: HKCU; Subkey: "{#Classes}\{#VideoProg}"; ValueType: string; ValueData: "{#VideoApp} Video"; Flags: uninsdeletekey
+Root: HKCU; Subkey: "{#Classes}\{#VideoProg}"; ValueType: string; ValueData: "{#VideoApp} {cm:VideoFile}"; Flags: uninsdeletekey
 Root: HKCU; Subkey: "{#Classes}\{#VideoProg}\Application"; ValueName: "ApplicationName"; ValueType: string; ValueData: "{#VideoApp}"
 Root: HKCU; Subkey: "{#Classes}\{#VideoProg}\Application"; ValueName: "ApplicationIcon"; ValueType: string; ValueData: """{app}\{#VideoApp}.exe"",0"
 Root: HKCU; Subkey: "{#Classes}\{#VideoProg}\DefaultIcon"; ValueType: string; ValueData: """{app}\{#VideoApp}.exe"",0"
@@ -141,7 +161,7 @@ Root: HKCU; Subkey: "{#Classes}\Applications\FrameNote Player.exe\SupportedTypes
 #for {VideoTypes = VideoTypes; Len(VideoTypes)>0; VideoTypes = Copy(VideoTypes, Pos(";", VideoTypes)+1, Len(VideoTypes))} RegisterVideoExtension
 
 [Run]
-Filename: "{app}\FrameNote.exe"; Description: "启动 FrameNote"; Flags: postinstall nowait skipifsilent
+Filename: "{app}\FrameNote.exe"; Description: "{cm:LaunchFrameNote}"; Flags: postinstall nowait skipifsilent
 
 [Code]
 const
@@ -151,6 +171,15 @@ const
   IconKey='Software\Classes\Applications\FrameNote.exe\DefaultIcon';
   LegacyKey='Software\Classes\framenote_auto_file';
   EdgeKey='SOFTWARE\Microsoft\EdgeUpdate\Clients\{F3017226-FE2A-4295-8BDF-00C3A9A7E4C5}';
+
+function GetUserDefaultUILanguage: Word;
+external 'GetUserDefaultUILanguage@kernel32.dll stdcall';
+
+function InitialLanguage(Param: String): String;
+begin
+  if (GetUserDefaultUILanguage and $03FF) = 4 then Result := 'zh-CN'
+  else Result := 'en';
+end;
 
 procedure Remember(Key, Slot: String);
 var S: String;
@@ -181,7 +210,7 @@ begin
   if not HasWebView then begin
     ExtractTemporaryFile('MicrosoftEdgeWebview2Setup.exe');
     if not Exec(ExpandConstant('{tmp}\MicrosoftEdgeWebview2Setup.exe'),'/silent /install','',SW_HIDE,ewWaitUntilTerminated,Code) or not HasWebView then
-      Result := 'WebView2 未能安装。请连接网络，或先安装 Microsoft Edge WebView2 Evergreen Runtime 后重试。';
+      Result := CustomMessage('WebViewError');
   end;
 end;
 

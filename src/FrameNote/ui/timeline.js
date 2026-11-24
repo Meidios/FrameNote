@@ -23,17 +23,23 @@
  }
  for(const area of [$('trackDesk'),$('timelineTools')])area.addEventListener('wheel',navigate,{passive:false});
  let duration=0,sourceDuration=0,id=null,frameset=[],requested=0;
+ let tickDuration=0,tickStep=0,lastLabel=-1;
  window.refreshTimeline=()=>{duration=doc?.durationUs??0;ruler();scheduleFilm()};
  function ruler(){
   if(!duration||!axis.clientWidth)return;
   const width=axis.clientWidth,ideal=duration*86/width,base=10**Math.floor(Math.log10(ideal));
   const major=[1,2,5,10].find(n=>n*base>=ideal)*base,minor=major/5;
+  // Tick positions are percentages. Resizing only changes the DOM when the
+  // interval or the last label that fits at the right edge actually changes.
+  const last=Math.floor(duration*(1-50/width)/major);
+  if(tickDuration===duration&&tickStep===major&&lastLabel===last)return;
+  tickDuration=duration;tickStep=major;lastLabel=last;
   const ticks=document.createDocumentFragment();
   for(let i=0;i*minor<=duration;i++){
    const t=i*minor,el=document.createElement('span');el.style.left=(100*t/duration)+'%';
    if(i%5===0){
     el.className='major';
-    if((1-t/duration)*width>=50){const label=document.createElement('small');label.textContent=fmt(t).slice(0,major>=1e6?-4:undefined);el.append(label)}
+    if(i/5<=last){const label=document.createElement('small');label.textContent=fmt(t).slice(0,major>=1e6?-4:undefined);el.append(label)}
    }
    ticks.append(el);
   }
@@ -58,13 +64,13 @@
   duration=m?.doc.durationUs??0;sourceDuration=m?.doc.timeline?.sourceDurationUs??duration;
   id=m?.playbackId??null;frameset=[];
   $('trackDesk').hidden=!id;film.replaceChildren();wave.removeAttribute('d');
-  $('filmState').textContent=id?'正在生成缩略图…':'';
-  $('waveState').textContent=id?'正在读取波形…':'';
+  $('filmState').textContent=id?tr('正在生成缩略图…'):'';
+  $('waveState').textContent=id?tr('正在读取波形…'):'';
   $('timeline').style.setProperty('--position','0%');ruler();
  }
  chrome.webview.addEventListener('message',({data:m})=>{
   if(m.type==='image'){reset(null);return}
-  if(m.type==='loaded'){reset(m);return}
+  if(m.type==='loaded'){if(m.recovering)id=m.playbackId;else reset(m);return}
   if(m.type!=='timelineData'||m.playbackId!==id)return;
   if(m.track==='frame'){
    frameset.length=m.data.count;frameset[m.data.i]=m.data.src;
@@ -76,17 +82,17 @@
     top.push(x+','+(16-h).toFixed(2));bottom.push(x+','+(16+h).toFixed(2));
    }
    wave.setAttribute('d',top.length?'M0,16 L'+top.join(' ')+' L'+bottom.reverse().join(' ')+' Z':'');
-   $('waveState').textContent=peaks.some(p=>p>0)?'':'静音';
-  }else if(m.track==='silent')$('waveState').textContent='无音轨';
-  else if(m.track==='waveError')$('waveState').textContent='波形不可用';
-  else if((m.track==='filmDone'||m.track==='filmError')&&!frameset.some(Boolean))$('filmState').textContent='缩略图不可用';
+   $('waveState').textContent=peaks.some(p=>p>0)?'':tr('静音');
+  }else if(m.track==='silent')$('waveState').textContent=tr('无音轨');
+  else if(m.track==='waveError')$('waveState').textContent=tr('波形不可用');
+  else if((m.track==='filmDone'||m.track==='filmError')&&!frameset.some(Boolean))$('filmState').textContent=tr('缩略图不可用');
  });
  function scrub(e){
   const r=axis.getBoundingClientRect();if(!ready||editing||!r.width)return;
   seekTimeline(Math.max(0,Math.min(1,(e.clientX-r.left)/r.width))*duration);
  }
  for(const track of document.querySelectorAll('.mediaTrack')){
-  track.onpointerdown=e=>{if(e.target.closest("[data-track]")||e.button||!ready||editing)return;track.setPointerCapture(e.pointerId);scrub(e)};
+  track.onpointerdown=e=>{if(e.target.closest("[data-track]")||e.button||!ready||editing)return;scrubber.begin(e);track.setPointerCapture(e.pointerId);scrub(e)};
   track.onpointermove=e=>{if(track.hasPointerCapture(e.pointerId))scrub(e)};
  }
 })();

@@ -2,8 +2,10 @@ using System.IO;
 using System.Runtime.InteropServices;
 using System.Text.Json;
 using System.Windows;
+using System.Windows.Controls;
 using System.Windows.Interop;
 using System.Windows.Media;
+using System.Windows.Shell;
 using Microsoft.Win32;
 
 namespace FrameNote;
@@ -11,6 +13,9 @@ namespace FrameNote;
 // Both renderers consume this palette. Native chrome remains owned by Windows.
 internal static class DeskTheme
 {
+    internal static FontFamily UiFont { get; }=new(
+        new Uri(Path.Combine(AppContext.BaseDirectory,"ui","fonts")+Path.DirectorySeparatorChar),
+        "./#Inter, ./NotoSansSC.ttf#Noto Sans SC");
     internal static event Action? Changed;
     static readonly Dictionary<string,string> colors = new();
     static readonly Color Accent = (Color)ColorConverter.ConvertFromString("#A8DDFD");
@@ -21,13 +26,19 @@ internal static class DeskTheme
         ("pressed","#18181A","#E2E7ED"), ("edge","#34373C","#AEB7C2"), ("border","#44484E","#929EAB"),
         ("ink","#ECEEF1","#1C232A"), ("muted","#A5AAB2","#495766"), ("disabled","#6E747C","#7B8794"),
         ("danger","#E04F4F","#C23D43"), ("scroll","#4E5258","#4957664D"),
-        ("shortcutSet","#A2D68D","#365E29"), ("shortcutEdge","#587849","#759669")];
+        // Preserve the capture panel's native checkbox palette in both renderers.
+        ("checkFill","#3B3B3B","#FFFFFF"), ("checkEdge","#858585","#767676"),
+        ("checkHoverEdge","#ACACAC","#4F4F4F"), ("checkPressedEdge","#6E6E6E","#8D8D8D"),
+        ("checkGlyph","#3B3B3B","#3B3B3B"), ("checkHoverFill","#DFF2FE","#DFF2FE"),
+        ("checkPressedFill","#71C8FC","#71C8FC")];
 
     internal static void Start(Application app)
     {
-        var folder=new Uri(Path.Combine(AppContext.BaseDirectory,"ui","fonts")+Path.DirectorySeparatorChar);
-        app.Resources["UiFont"]=new FontFamily(folder,"./#Noto Sans SC");
-        app.Resources["MonoFont"]=new FontFamily(folder,"./#Cascadia Mono");
+        app.Resources["UiFont"]=UiFont;
+        // Some native control templates obtain their font from a system resource.
+        app.Resources[SystemFonts.MessageFontFamilyKey]=UiFont;
+        app.Resources[SystemFonts.MenuFontFamilyKey]=UiFont;
+        app.Resources[SystemFonts.StatusFontFamilyKey]=UiFont;
         Refresh();
         app.Resources.MergedDictionaries.Add(new ResourceDictionary{Source=new Uri("/FrameNote;component/Controls.xaml",UriKind.Relative)});
         SystemEvents.UserPreferenceChanged+=PreferenceChanged;
@@ -53,6 +64,7 @@ internal static class DeskTheme
     }
     static Color Mix(Color a,Color b,double t)=>Color.FromRgb((byte)Math.Round(a.R+(b.R-a.R)*t),(byte)Math.Round(a.G+(b.G-a.G)*t),(byte)Math.Round(a.B+(b.B-a.B)*t));
     static double Contrast(Color a,Color b){double x=Luma(a)+.05,y=Luma(b)+.05;return Math.Max(x,y)/Math.Min(x,y);}
+    internal static bool UseWhiteInk(Color background) => Contrast(background,Colors.White)>Contrast(background,Colors.Black);
     static string Hex(Color c)=>$"#{c.R:X2}{c.G:X2}{c.B:X2}";
     internal static void Apply(bool dark)
     {
@@ -79,17 +91,79 @@ internal static class DeskTheme
     }
 
     [DllImport("dwmapi.dll")]static extern int DwmSetWindowAttribute(IntPtr hwnd,int attribute,ref int value,int size);
+    const int DwmCaptionColor = 35;
+    const int DwmWindowCornerPreference = 33;
+    const int DwmBorderColor = 34;
+    static int ColorRef(Color c)=>c.R | c.G << 8 | c.B << 16;
+    static void FrameBorder(Window w){
+        var handle=new WindowInteropHelper(w).Handle;
+        if(handle==IntPtr.Zero || w.WindowStyle==WindowStyle.None || !OperatingSystem.IsWindowsVersionAtLeast(10,0,22000))return;
+        var chrome=((SolidColorBrush)w.FindResource("chrome")).Color;
+        var edge=((SolidColorBrush)w.FindResource("edge")).Color;
+        // Keep one native antialiased edge against the title bar and DWM shadow.
+        int rgb=SystemParameters.HighContrast ? -1 : ColorRef(Mix(chrome,edge,w.IsActive ? .65 : .4));
+        DwmSetWindowAttribute(handle,DwmBorderColor,ref rgb,sizeof(int));
+    }
+    internal static void SetWindowCorners(Window w, bool fullscreen){
+        var handle=new WindowInteropHelper(w).Handle;
+        if(handle==IntPtr.Zero || !OperatingSystem.IsWindowsVersionAtLeast(10,0,22000))return;
+        int preference=fullscreen?1:2; // DWMWCP_DONOTROUND / DWMWCP_ROUND
+        DwmSetWindowAttribute(handle,DwmWindowCornerPreference,ref preference,sizeof(int));
+    }
     internal static void Caption(Window w){
         var handle=new WindowInteropHelper(w).Handle;
         if(handle==IntPtr.Zero || w.WindowStyle==WindowStyle.None)return;
         int dark=Dark?1:0;
         if(DwmSetWindowAttribute(handle,20,ref dark,4)!=0)DwmSetWindowAttribute(handle,19,ref dark,4);
+        var color=((SolidColorBrush)w.FindResource("chrome")).Color;
+        int rgb=ColorRef(color);
+        DwmSetWindowAttribute(handle,DwmCaptionColor,ref rgb,sizeof(int));
+        FrameBorder(w);
     }
     internal static void Window(Window w){
+        w.UseLayoutRounding=true;
+        w.Activated+=(_,_)=>FrameBorder(w);
+        w.Deactivated+=(_,_)=>FrameBorder(w);
         w.SetResourceReference(System.Windows.Controls.Control.FontFamilyProperty,"UiFont");
         w.SetResourceReference(System.Windows.Controls.Control.ForegroundProperty,"ink");
-        w.SetResourceReference(System.Windows.Controls.Control.BackgroundProperty,"bg");
-        w.SourceInitialized+=(_,_)=>Caption(w);
+        if(w.ReadLocalValue(System.Windows.Controls.Control.BackgroundProperty)==DependencyProperty.UnsetValue)
+            w.SetResourceReference(System.Windows.Controls.Control.BackgroundProperty,"bg");
+        w.SourceInitialized+=(_,_)=>{
+            Caption(w);
+            if(w.WindowStyle!=WindowStyle.None)SetWindowCorners(w,false);
+            if(System.Windows.Shell.WindowChrome.GetWindowChrome(w)!=null)
+                ((HwndSource)PresentationSource.FromVisual(w)).AddHook(WindowResize.OnMessage);
+        };
+    }
+    [DllImport("user32.dll")] static extern int GetWindowLongW(IntPtr hwnd,int index);
+    [DllImport("user32.dll")] static extern int SetWindowLongW(IntPtr hwnd,int index,int value);
+    [DllImport("user32.dll")] static extern bool SetWindowPos(IntPtr hwnd,IntPtr after,int x,int y,int width,int height,uint flags);
+
+    internal static void Dialog(Window window){
+        window.Background=Brushes.Transparent;
+        window.FontSize=14;
+        window.WindowStartupLocation=WindowStartupLocation.CenterOwner;
+        var content=(UIElement)window.Content;
+        var frame=new DockPanel();
+        var heading=(Grid)((DataTemplate)window.FindResource("DialogTitleBar")).LoadContent();
+        DockPanel.SetDock(heading,Dock.Top);frame.Children.Add(heading);
+        window.Content=frame;
+        var body=new Border{Child=content};
+        body.SetResourceReference(Border.BackgroundProperty,"chrome");frame.Children.Add(body);
+        WindowChrome.SetWindowChrome(window,new WindowChrome{
+            CaptionHeight=34,GlassFrameThickness=new Thickness(0,38,0,0),
+            UseAeroCaptionButtons=true,NonClientFrameEdges=NonClientFrameEdges.Left|NonClientFrameEdges.Right|NonClientFrameEdges.Bottom
+        });
+        Window(window);
+        window.SourceInitialized+=(_,_)=>{
+            const int styleIndex=-16,minimizeBox=0x20000,maximizeBox=0x10000;
+            const uint noSize=0x1,noMove=0x2,noZOrder=0x4,noActivate=0x10,frameChanged=0x20;
+            var hwnd=new WindowInteropHelper(window).Handle;
+            // Use the same glass-backed renderer and keep only the native Close button.
+            if(HwndSource.FromHwnd(hwnd)?.CompositionTarget is {} target)target.RenderMode=RenderMode.SoftwareOnly;
+            SetWindowLongW(hwnd,styleIndex,GetWindowLongW(hwnd,styleIndex)&~(minimizeBox|maximizeBox));
+            SetWindowPos(hwnd,IntPtr.Zero,0,0,0,0,noSize|noMove|noZOrder|noActivate|frameChanged);
+        };
     }
     internal static string WebScript(){
         var css=string.Join(";",colors.Select(k=>"--"+k.Key+":"+k.Value))+";--chevron:url(icons/"+(Dark?"chevron_dark.svg":"chevron_down.svg")+");color-scheme:"+(Dark?"dark":"light");

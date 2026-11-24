@@ -1,5 +1,8 @@
 <ResourceDictionary xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation" xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
  <!-- Lucide 0.468.0 outlines, distributed under ui/icons/LUCIDE-LICENSE.txt. -->
+ <Geometry x:Key="sc-table">M5 3h14a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2Z M3 9h18 M3 15h18 M9 3v18</Geometry>
+ <Geometry x:Key="sc-ruler">M21.3 15.3a2.4 2.4 0 0 1 0 3.4l-2.6 2.6a2.4 2.4 0 0 1-3.4 0L2.7 8.7a2.41 2.41 0 0 1 0-3.4l2.6-2.6a2.41 2.41 0 0 1 3.4 0Z M14.5 12.5l2-2 M11.5 9.5l2-2 M8.5 6.5l2-2 M17.5 15.5l2-2</Geometry>
+ <Geometry x:Key="sc-mic">M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3Z M19 10v2a7 7 0 0 1-14 0v-2 M12 19v3</Geometry>
  <Geometry x:Key="sc-open">m6 14 1.5-2.9A2 2 0 0 1 9.24 10H20a2 2 0 0 1 1.94 2.5l-1.54 6a2 2 0 0 1-1.95 1.5H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h3.9a2 2 0 0 1 1.69.9l.81 1.2a2 2 0 0 0 1.67.9H18a2 2 0 0 1 2 2v2</Geometry>
  <Geometry x:Key="sc-save">M12 22v-9 M15.17 2.21a1.67 1.67 0 0 1 1.63 0L21 4.57a1.93 1.93 0 0 1 0 3.36L8.82 14.79a1.655 1.655 0 0 1-1.64 0L3 12.43a1.93 1.93 0 0 1 0-3.36z M20 13v3.87a2.06 2.06 0 0 1-1.11 1.83l-6 3.08a1.93 1.93 0 0 1-1.78 0l-6-3.08A2.06 2.06 0 0 1 4 16.87V13 M21 12.43a1.93 1.93 0 0 0 0-3.36L8.83 2.2a1.64 1.64 0 0 0-1.63 0L3 4.57a1.93 1.93 0 0 0 0 3.36l12.18 6.86a1.636 1.636 0 0 0 1.63 0z</Geometry>
  <Geometry x:Key="sc-paste">M15 2H9a1 1 0 0 0-1 1v2c0 .6.4 1 1 1h6c.6 0 1-.4 1-1V3c0-.6-.4-1-1-1Z M8 4H6a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2M16 4h2a2 2 0 0 1 2 2v2M11 14h10 M0 0 m17 10 4 4-4 4</Geometry>
@@ -9,6 +12,13 @@
  <Geometry x:Key="sc-picture">M16 5h6 M19 2v6 M21 11.5V19a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h7.5 M0 0 m21 15-3.086-3.086a2 2 0 0 0-2.828 0L6 21 M7 9a2 2 0 1 0 4 0a2 2 0 1 0 -4 0Z</Geometry>
  <Geometry x:Key="sc-confirm">M18 6 7 17l-5-5 M0 0 m22 10-7.5 7.5L13 16</Geometry>
  <Geometry x:Key="sc-cancel">M8 3v3a2 2 0 0 1-2 2H3 M21 8h-3a2 2 0 0 1-2-2V3 M3 16h3a2 2 0 0 1 2 2v3 M16 21v-3a2 2 0 0 1 2-2h3</Geometry>
+ <Geometry x:Key="sc-duplicateNote">M8 8h12v13H8z M5 16H3V3h12v2</Geometry>
+ <Geometry x:Key="sc-copyFrame">M7 7h14v14H7z M4 16H2V2h14v2 M8 17l4-4 3 3 2-2 4 4</Geometry>
+ <Geometry x:Key="sc-fullPreview">M8 3H3v5m13-5h5v5M3 16v5h5m8 0h5v-5</Geometry>
+ <Geometry x:Key="sc-linkTracks">M10 13a5 5 0 0 0 7 0l3-3a5 5 0 0 0-7-7l-2 2 M14 11a5 5 0 0 0-7 0l-3 3a5 5 0 0 0 7 7l2-2</Geometry>
+ <Geometry x:Key="sc-rateDown">M12 5l-7 7 7 7 M20 5l-7 7 7 7</Geometry>
+ <Geometry x:Key="sc-rateUp">M4 5l7 7-7 7 M12 5l7 7-7 7</Geometry>
+ <Geometry x:Key="sc-rateReset">M3 12a9 9 0 1 0 3-6.7L3 8 M3 3v5h5 M12 7v5l3 2</Geometry>
  <Geometry x:Key="sc-play">M6 3 20 12 6 21 6 3Z</Geometry>
  <Geometry x:Key="sc-prev">M19 20 9 12 19 4 19 20Z M5 19 L5 5</Geometry>
  <Geometry x:Key="sc-next">M5 4 15 12 5 20 5 4Z M19 5 L19 19</Geometry>
@@ -34,4 +44,13 @@
  <Geometry x:Key="sc-check">M20 6 9 17l-5-5</Geometry>
  <Geometry x:Key="sc-close">M18 6 6 18 M0 0 m6 6 12 12</Geometry>
  <Geometry x:Key="sc-trash">M3 6h18 M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6 M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2 M10 11 L10 17 M14 11 L14 17</Geometry>
+ <Geometry x:Key="sc-settings">M4 6h9m4 0h3M4 12h3m4 0h9M4 18h9m4 0h3 M13 6a2 2 0 1 0 4 0 2 2 0 0 0-4 0 M7 12a2 2 0 1 0 4 0 2 2 0 0 0-4 0 M13 18a2 2 0 1 0 4 0 2 2 0 0 0-4 0</Geometry>
+ <Geometry x:Key="sc-book">M12 6C9 3 5 3 2 4v15c3-1 7-1 10 2 3-3 7-3 10-2V4c-3-1-7-1-10 2z M12 6v15</Geometry>
+ <Geometry x:Key="sc-update">M12 3v12m-5-5 5 5 5-5 M4 16v3a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-3</Geometry>
+ <Geometry x:Key="sc-info">M2 12a10 10 0 1 0 20 0 10 10 0 0 0-20 0 M12 11v6 M12 7h.01</Geometry>
+ <!-- Lucide external-link (ISC, ui/icons/LUCIDE-LICENSE.txt). -->
+ <Geometry x:Key="sc-externalLink">M15 3h6v6 M10 14 21 3 M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6</Geometry>
+ <!-- GitHub Octicons, mark-github-16 (MIT, ui/icons/OCTICONS-LICENSE.txt). -->
+ <Geometry x:Key="github-mark">M6.766 11.328c-2.063-.25-3.516-1.734-3.516-3.656 0-.781.281-1.625.75-2.188-.203-.515-.172-1.609.063-2.062.625-.078 1.468.25 1.968.703.594-.187 1.219-.281 1.985-.281.765 0 1.39.094 1.953.265.484-.437 1.344-.765 1.969-.687.218.422.25 1.515.046 2.047.5.593.766 1.39.766 2.203 0 1.922-1.453 3.375-3.547 3.64.531.344.89 1.094.89 1.954v1.625c0 .468.391.734.86.547C13.781 14.359 16 11.53 16 8.03 16 3.61 12.406 0 7.984 0 3.563 0 0 3.61 0 8.031a7.88 7.88 0 0 0 5.172 7.422c.422.156.828-.125.828-.547v-1.25c-.219.094-.5.156-.75.156-1.031 0-1.64-.562-2.078-1.609-.172-.422-.36-.672-.719-.719-.187-.015-.25-.093-.25-.187 0-.188.313-.328.625-.328.453 0 .844.281 1.25.86.313.452.64.655 1.031.655s.641-.14 1-.5c.266-.265.47-.5.657-.656</Geometry>
+ <Geometry x:Key="sc-feedback">M21 15a2 2 0 0 1-2 2H7l-5 5V5a2 2 0 0 1 2-2h15a2 2 0 0 1 2 2z M7 8h9 M7 12h6</Geometry>
 </ResourceDictionary>

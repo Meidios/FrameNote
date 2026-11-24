@@ -22,9 +22,9 @@ with sync_playwright() as pw:
                 page.evaluate("()=>new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)))")
                 m=page.evaluate("""()=>{let r=s=>{let t=document.querySelector(s).getBoundingClientRect();return [t.x,t.y,t.width,t.height,t.bottom]};
                     return {viewport:[innerWidth,innerHeight],scroll:document.scrollingElement.scrollHeight,s:r('#stage'),o:r('#overlay'),
-                    transport:r('#transport'),timeline:r('#scroll'),footer:r('footer')}}""")
+                    transport:r('#transport'),timeline:r('#scroll'),workspace:r('main'),footer:!!document.querySelector('footer')}}""")
                 w,h=m["viewport"];x,y,sw,sh,sb=m["s"];ox,oy,ow,oh,_=m["o"]
-                assert m["scroll"]==h and sb<=m["transport"][1]+1 and m["timeline"][4]<=m["footer"][1]+1 and m["footer"][4]<=h+1,m
+                assert not m["footer"] and m["scroll"]==h and sb<=m["transport"][1]+1 and m["timeline"][4]<=h+1 and abs(m["workspace"][4]-h)<=1,m
                 scale=min(sw/width,sh/height);fw,fh=width*scale,height*scale
                 assert abs(ow-fw)<1 and abs(oh-fh)<1 and abs(ox-x-(sw-fw)/2)<1 and abs(oy-y-(sh-fh)/2)<1,m
                 corners=[(.08,.08,(255,0,0)),(.92,.08,(0,255,0)),(.08,.92,(0,0,255)),(.92,.92,(255,255,255))]
