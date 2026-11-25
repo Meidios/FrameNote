@@ -13,13 +13,13 @@ internal sealed class CaptureAudioMix : IDisposable
     internal IEnumerable<Task> Workers=>audio.Select(t=>t.Track.Completion);
     internal float RecordedPeak(string id)=>audio.FirstOrDefault(t=>t.Track.DeviceId==id).Track?.RecordedPeak??0;
 
-    internal CaptureAudioMix(IEnumerable<CaptureInput> sources,string directory){
+    internal CaptureAudioMix(IEnumerable<CaptureInput> sources,string directory,CapturePauses? pauses=null){
         try{
             foreach(var source in sources){
                 if(source.GainDb is < -60 or > 0)throw new ArgumentOutOfRangeException(nameof(sources));
                 if(source.Muted)continue;
                 var path=Path.Combine(directory,$"audio-{audio.Count}.mka");
-                audio.Add((new TimestampedAudio(source.Id,source.Loopback,path,Epoch),source.GainDb));
+                audio.Add((new TimestampedAudio(source.Id,source.Loopback,path,Epoch,pauses),source.GainDb));
             }
         }catch{Dispose();throw;}
     }

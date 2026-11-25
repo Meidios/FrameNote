@@ -53,6 +53,10 @@ with sync_playwright() as pw:
         package=Path(sys.argv[4]);expected=package.with_suffix(".gif").read_bytes()
         proc,p=launch(pw,package)
         try:
+            filename=Path(p.evaluate("doc.fileName")).stem+"_批注.gif"
+            if "--range" in sys.argv:
+                i=sys.argv.index("--range")
+                p.evaluate("([startUs,endUs])=>setTimeSelection({startUs,endUs})",list(map(int,sys.argv[i+1:i+3])))
             assert Desktop(backend="win32").window(process=proc.pid,title_re=".*FrameNote.*",found_index=0).exists()
             p.locator("#exportGif").hover()
             p.get_by_role("menuitem",name="复制GIF到粘贴板").click()
@@ -67,7 +71,7 @@ with sync_playwright() as pw:
         try:
             assert cb.GetClipboardData(cb.RegisterClipboardFormat("image/gif"))==expected
             dropped,=cb.GetClipboardData(cb.CF_HDROP)
-            assert Path(dropped).name=="source_批注.gif"
+            assert Path(dropped).name==filename
             assert Path(dropped).read_bytes()==expected
         finally:cb.CloseClipboard()
         print("PASS clipboard animation bytes and pastable file survive app exit",flush=True)

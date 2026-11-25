@@ -1,5 +1,5 @@
 'use strict';
-const shapeNames={arrow:tr('箭头'),box:tr('框选'),line:tr('线'),angle:tr('角度'),ruler:tr('距离标尺'),magnifier:tr('放大镜'),text:tr('文字框')};
+const shapeNames={arrow:tr('箭头'),box:tr('框选'),line:tr('线'),brush:tr('画笔'),angle:tr('角度'),ruler:tr('距离标尺'),magnifier:tr('放大镜'),text:tr('文字框')};
 let originalImageSize=null;
 function sourceSize(){const im=$('openedImage');return imageDoc()?(originalImageSize??[im.naturalWidth,im.naturalHeight]):[v.videoWidth,v.videoHeight]}
 const metresPerUnit={mm:.001,cm:.01,m:1,px:.0254/96};
@@ -48,10 +48,31 @@ function withMeasurementText(n,scales){
  return n.autoMeasurementText&&n.text===text?n:{...n,text,autoMeasurementText:true};
 }
 function shapeRect(s,w,h,minSize=1){return {x:Math.min(s.x,s.toX)*w,y:Math.min(s.y,s.toY)*h,width:Math.max(minSize,Math.abs(s.toX-s.x)*w),height:Math.max(minSize,Math.abs(s.toY-s.y)*h)}}
+function curveMidpoint(s){return [s.thirdX??(s.x+s.toX)/2,s.thirdY??(s.y+s.toY)/2]}
+function splinePath(s,w,h){
+ const points=s.points.map(p=>[p.x*w,p.y*h]),k=(s.smoothness??1)/6;
+ let path='M'+points[0].join(' '),tangent;
+ for(let i=1;i<points.length;i++){
+  const a=points[i-1],b=points[i],prev=points[Math.max(0,i-2)],next=points[Math.min(points.length-1,i+1)];
+  const c1=[a[0]+(b[0]-prev[0])*k,a[1]+(b[1]-prev[1])*k];
+  const c2=[b[0]-(next[0]-a[0])*k,b[1]-(next[1]-a[1])*k];
+  path+='C'+c1.join(' ')+' '+c2.join(' ')+' '+b.join(' ');
+  tangent=k===0?a:c2;
+ }
+ return {path,tangent};
+}
+function brushWidth(size,w,h,source){return size*Math.max(w,h)/Math.max(1,Math.min(1600,Math.max(...source)))}
+function brushPath(points,w,h){
+ return points.map((p,i)=>(i?'L':'M')+p.x*w+' '+p.y*h).join('')+(points.length===1?'l0 0':'');
+}
 function magnifierLayout(s,w,h){
  const rect=shapeRect(s,w,h,0),{x,y,width,height}=rect;
- if(!s.preview)return {source:{x:x+width/4,y:y+height/4,width:width/2,height:height/2},target:rect,scale:2};
- const scale=Math.min(2,w/width,h/height),tw=Math.min(w,width*scale),th=Math.min(h,height*scale);
+ const zoom=s.zoom??2;
+ if(!s.preview){
+  const sw=width/zoom,sh=height/zoom;
+  return {source:{x:x+(width-sw)/2,y:y+(height-sh)/2,width:sw,height:sh},target:rect,scale:zoom};
+ }
+ const scale=Math.min(zoom,w/width,h/height),tw=Math.min(w,width*scale),th=Math.min(h,height*scale);
  const target={x:clamp(s.preview.x*w,0,w-tw),y:clamp(s.preview.y*h,0,h-th),width:tw,height:th};
  return {source:rect,target,scale};
 }
@@ -85,7 +106,9 @@ function drawMagnifiers(ctx,source,notes,w,h){
  const sw=source.videoWidth||source.naturalWidth||source.width,sh=source.videoHeight||source.naturalHeight||source.height;
  for(const n of notes){if(n.shape?.kind!=='magnifier')continue;
   const {source:r,target:t}=magnifierLayout(n.shape,w,h);
+  ctx.save();ctx.globalAlpha=noteOpacity(n)/100;
   if(r.width&&r.height)ctx.drawImage(source,r.x*sw/w,r.y*sh/h,r.width*sw/w,r.height*sh/h,t.x,t.y,t.width,t.height);
+  ctx.restore();
  }
 }
 let liveMagnifiers=[];
@@ -104,7 +127,7 @@ function drawLiveMagnifiers(group,notes,w,h){
   if(n.shape?.kind!=='magnifier')continue;
   const {source,target}=magnifierLayout(n.shape,w,h);
   if(!target.width||!target.height)continue;
-  const foreign=svg('foreignObject',{...target,'pointer-events':'none'}),canvas=document.createElement('canvas');
+  const foreign=svg('foreignObject',{...target,opacity:noteOpacity(n)/100,'pointer-events':'none'}),canvas=document.createElement('canvas');
   canvas.width=Math.ceil(target.width);canvas.height=Math.ceil(target.height);
   canvas.style.cssText='width:100%;height:100%;display:block';
   liveMagnifiers.push({ctx:canvas.getContext('2d'),rect:source,w,h});
@@ -120,8 +143,16 @@ function drawShape(group,n,w,h,measurement){
  function label(text,x,y){const el=svg('text',{x,y,fill:c,stroke:'#17191d','stroke-width':3,'paint-order':'stroke','font-size':14,'font-weight':600});if(s.kind==='ruler'||s.kind==='angle')el.classList.add('measurementLabel');el.textContent=text;group.append(el)}
  let shape;
  if(['arrow','line','ruler','angle'].includes(s.kind)){
-  shape=line(x1,y1,x2,y2);
-  if(s.kind==='arrow'){const a=Math.atan2(y2-y1,x2-x1)*180/Math.PI;group.append(svg('path',{d:'M0 0 L-13 -6 L-13 6 Z',transform:`translate(${x2} ${y2}) rotate(${a})`,fill:c}))}
+  let cx=x1,cy=y1;
+  if(s.points){
+   const curve=splinePath(s,w,h);[cx,cy]=curve.tangent;
+   shape=svg('path',{...base,d:curve.path});group.append(shape);
+  }else if((s.kind==='arrow'||s.kind==='line')&&s.thirdX!=null){
+   cx=2*s.thirdX*w-(x1+x2)/2;cy=2*s.thirdY*h-(y1+y2)/2;
+   shape=svg('path',{...base,d:`M${x1} ${y1}Q${cx} ${cy} ${x2} ${y2}`});group.append(shape);
+   if(cx===x2&&cy===y2){cx=x1;cy=y1}
+  }else shape=line(x1,y1,x2,y2);
+  if(s.kind==='arrow'){const a=Math.atan2(y2-cy,x2-cx)*180/Math.PI;group.append(svg('path',{d:'M0 0 L-13 -6 L-13 6 Z',transform:`translate(${x2} ${y2}) rotate(${a})`,fill:c}))}
   if(s.kind==='ruler'){
    const a=Math.atan2(y2-y1,x2-x1),dx=Math.sin(a)*7,dy=-Math.cos(a)*7;
    line(x1-dx,y1-dy,x1+dx,y1+dy);line(x2-dx,y2-dy,x2+dx,y2+dy);
@@ -135,6 +166,9 @@ function drawShape(group,n,w,h,measurement){
    group.append(svg('path',{d:`M${x2+radius*Math.cos(a)} ${y2+radius*Math.sin(a)} A${radius} ${radius} 0 0 ${delta>=0?1:0} ${x2+radius*Math.cos(b)} ${y2+radius*Math.sin(b)}`,...base}));
    label(degrees,x2+8,y2-10);
   }
+ }else if(s.kind==='brush'){
+  shape=svg('path',{...base,'stroke-width':brushWidth(s.brushSize,w,h,measurement?.size??sourceSize()),d:brushPath(s.points,w,h)});
+  group.append(shape);
  }else if(s.kind==='magnifier'){
   const {source,target,scale}=magnifierLayout(s,w,h);
   if(s.preview){

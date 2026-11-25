@@ -21,6 +21,18 @@ public sealed partial class Desk
                 Directory.CreateDirectory(stage);
                 if((template.Columns & (ExcelColumns.Preview|ExcelColumns.Media))!=0)
                     await PrepareExcelMedia(review,notes,template.Columns,stage,working,token);
+                foreach(var note in notes.Where(n=>n.Voice!=null)){
+                    token.ThrowIfCancellationRequested();
+                    var voice=note.Voice!;
+                    string audioPath=Path.Combine(stage,ExcelReview.AudioFile(note));
+                    Directory.CreateDirectory(Path.GetDirectoryName(audioPath)!);
+                    string src=voice.Original is {} original?Path.Combine(ImageDirectory,original.Asset+".original"):ReviewVoice.PathFor(ImageDirectory,voice.Asset,voice.Format);
+                    if(voice.Original==null && voice.Format==null)
+                        await Probe.Run(token,"ffmpeg","-nostdin","-v","error","-i",src,"-vn","-ac","1","-c:a","libmp3lame","-b:a","64k",audioPath);
+                    else{
+                        using var input=File.OpenRead(src);using var output=File.Create(audioPath);await input.CopyToAsync(output,token);
+                    }
+                }
                 ReportExport(L.Text("正在写入 Excel 工作簿"),95);
                 await Task.Run(()=>ExcelReview.Write(stage,working,review.FileName,notes,template,token),token);
                 token.ThrowIfCancellationRequested();
@@ -35,7 +47,7 @@ public sealed partial class Desk
                 }
                 Send(new{type="status",text=L.Text("Excel 批注已导出：")+path});
                 // The media links in the workbook resolve relative to the exported folder.
-                if(!template.Zip && template.Columns.HasFlag(ExcelColumns.Media))return new DirectoryInfo(Path.GetDirectoryName(path)!);
+                if(!template.Zip && (template.Columns.HasFlag(ExcelColumns.Media)||notes.Any(n=>n.Voice!=null)))return new DirectoryInfo(Path.GetDirectoryName(path)!);
                 return new FileInfo(path);
             }finally{
                 if(Directory.Exists(working))await RetrySharingViolation(()=>Directory.Delete(working,true),CancellationToken.None);
@@ -119,7 +131,8 @@ public sealed partial class Desk
             var (rect,crop)=VideoAnnotations.LensBounds(lens,width,height);
             if(rect.Width>=1 && rect.Height>=1){
                 filters.Add("[base]split[background][zoom]");
-                filters.Add($"[zoom]crop={crop.Width}:{crop.Height}:{crop.X}:{crop.Y}:exact=1,scale={(int)rect.Width}:{(int)rect.Height}[glass]");
+                var alpha=note.Alpha.ToString(System.Globalization.CultureInfo.InvariantCulture);
+                filters.Add($"[zoom]crop={crop.Width}:{crop.Height}:{crop.X}:{crop.Y}:exact=1,scale={(int)rect.Width}:{(int)rect.Height},format=rgba,colorchannelmixer=aa={alpha}[glass]");
                 filters.Add($"[background][glass]overlay={(int)rect.X}:{(int)rect.Y}:format=rgb[scene]");
                 scene="scene";
             }

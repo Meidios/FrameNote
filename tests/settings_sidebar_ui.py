@@ -13,11 +13,11 @@ profile.mkdir()
 (profile / "updates.json").write_text('{"automatic":false}')
 (profile / "shortcuts.json").write_text('{"record":[]}')
 os.environ["FRAMENOTE_DATA_DIR"] = str(profile)
-sections = ["通用", "录制设置", "表格设置", "快捷键", "使用说明", "更新", "问题反馈", "关于"]
+sections = ["通用", "批注工具", "录制设置", "表格设置", "快捷键", "使用说明", "更新", "问题反馈", "关于"]
 
 
 def section(dlg, name):
-    return dlg.child_window(title=name, control_type="TabItem")
+    return dlg.child_window(title=name, control_type="TabItem", visible_only=False)
 
 
 def release_text(label):
@@ -52,13 +52,12 @@ with sync_playwright() as pw:
         dlg.capture_as_image().save(work / "settings-general.png")
         unit.select("厘米（cm）")
 
-        section(dlg, "通用").set_focus()
-        keyboard.send_keys("{DOWN}")
-        dlg.child_window(auto_id="SaveCopy").wait("exists")
-        keyboard.send_keys("{DOWN}")
-        dlg.child_window(auto_id="ExcelZip").wait("exists")
-        keyboard.send_keys("{DOWN}")
-        dlg.child_window(auto_id="point", control_type="Button").wait("exists")
+        for source,target,field in [("通用","批注工具","DefaultOpacity"),("批注工具","录制设置","SaveCopy"),
+                                    ("录制设置","表格设置","ExcelZip"),("表格设置","快捷键","point")]:
+            section(dlg,source).set_focus()
+            keyboard.send_keys("{DOWN}")
+            assert section(dlg,target).is_selected(),[t.window_text() for t in tabs if t.is_selected()]
+            dlg.child_window(auto_id=field).wait("exists")
         section(dlg, "使用说明").select()
         guide = dlg.child_window(auto_id="GuideScroll")
         heading = guide.child_window(auto_id="GuideOverviewTitle")
@@ -162,6 +161,6 @@ with sync_playwright() as pw:
         assert popup.child_window(control_type="ComboBox").selected_text() == current
         assert displayed_entries(popup) == release_text(current)
         history.close()
-        print("PASS: eight sections, feedback links, compact scrolling, release history, update dialogs, save and cancel.", flush=True)
+        print("PASS: nine sections, feedback links, compact scrolling, release history, update dialogs, save and cancel.", flush=True)
     finally:
         stop(proc)

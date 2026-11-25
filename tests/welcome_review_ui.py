@@ -52,10 +52,12 @@ def assert_no_player(proc):
 
 def assert_welcome_toolbar(page):
     buttons = page.locator("#timelineBar").get_by_role("button")
-    assert buttons.evaluate_all("els => els.map(el => el.id)") == [
-        "point", "arrow", "box", "line", "angle", "toolRuler", "magnifier", "text",
-        "voiceRecord", "addPicture", "removePicture", "clear", "linkTracks", "splitClip", "joinClip", "joinNextClip", "deleteClip",
-    ]
+    alignment = ["moreEdits"] if page.locator("#moreEdits").is_visible() else ["joinClip","joinNextClip"]
+    visible = buttons.evaluate_all("els => els.map(el => el.id)")
+    assert visible == [
+        "point", "arrow", "box", "line", "brush", "angle", "toolRuler", "magnifier", "text",
+        "voiceRecord", "addPicture", "removePicture", "clear", "linkTracks", "splitClip", *alignment, "deleteClip",
+    ], visible
     assert buttons.evaluate_all("els => els.every(el => el.matches(':disabled'))")
     assert page.locator("#linkTracks").evaluate("el => getComputedStyle(el).color === getComputedStyle($('point')).color")
 

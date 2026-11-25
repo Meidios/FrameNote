@@ -11,7 +11,7 @@ internal sealed record ExportBarOptions(bool Enabled,string Background,string Fi
 [Flags]
 internal enum ExcelColumns
 {
-    Number=1, Type=2, Start=4, End=8, Text=16, Preview=32, Media=64,
+    Number=1, Type=2, Start=4, End=8, Text=16, Preview=32, Media=64, AudioAttachment=128,
     All=Number|Type|Start|End|Text|Preview|Media
 }
 
@@ -20,7 +20,7 @@ internal sealed record ExcelTemplate(ExcelColumns Columns,bool ShowSource,bool Z
     internal static readonly ExcelTemplate Defaults=new(ExcelColumns.All,true,false);
 }
 
-internal sealed record OutputSettings(int Fps,string Quality,bool SaveCopy,string CopyDirectory,string ExportDirectory,ExportBarOptions ExportBar,ExcelTemplate Excel)
+internal sealed record OutputSettings(int Fps,string Quality,bool SaveCopy,string CopyDirectory,string ExportDirectory,ExportBarOptions ExportBar,ExcelTemplate Excel,bool HideWhileRecording=true)
 {
     static string Folder(Environment.SpecialFolder location,string child)=>
         Path.Combine(Environment.GetFolderPath(location,Environment.SpecialFolderOption.DoNotVerify),"FrameNote",child);
@@ -39,7 +39,8 @@ internal sealed record OutputSettings(int Fps,string Quality,bool SaveCopy,strin
             new(fields.GetValueOrDefault("exportBarEnabled").ValueKind!=JsonValueKind.False,
                 Color("exportBarBackground",defaults.ExportBar.Background),Color("exportBarFill",defaults.ExportBar.Fill)),
             new(columns==0?ExcelColumns.All:columns,fields.GetValueOrDefault("excelShowSource").ValueKind!=JsonValueKind.False,
-                fields.GetValueOrDefault("excelZip").ValueKind==JsonValueKind.True));
+                fields.GetValueOrDefault("excelZip").ValueKind==JsonValueKind.True),
+            fields.GetValueOrDefault("hideWhileRecording").ValueKind!=JsonValueKind.False);
     }
 
     internal void ApplyChanges(OutputSettings old,Dictionary<string,JsonElement> fields){
@@ -47,6 +48,7 @@ internal sealed record OutputSettings(int Fps,string Quality,bool SaveCopy,strin
             if(!Equals(value,previous))fields[key]=JsonSerializer.SerializeToElement(value);
         }
         Set("fps",Fps,old.Fps);Set("quality",Quality,old.Quality);Set("saveCopy",SaveCopy,old.SaveCopy);
+        Set("hideWhileRecording",HideWhileRecording,old.HideWhileRecording);
         Set("copyDirectory",CopyDirectory,old.CopyDirectory);Set("exportDirectory",ExportDirectory,old.ExportDirectory);
         Set("exportBarEnabled",ExportBar.Enabled,old.ExportBar.Enabled);
         Set("exportBarBackground",ExportBar.Background,old.ExportBar.Background);Set("exportBarFill",ExportBar.Fill,old.ExportBar.Fill);

@@ -7,20 +7,25 @@ public sealed partial class Desk
     Shortcuts shortcutStore=null!;
     ShortcutMap shortcuts=null!;
     string defaultRulerUnit=RulerScale.DefaultUnit;
+    double defaultLensZoom=Drawing.DefaultZoom;
+    int defaultOpacity=80;
+    ToolbarEntry[] annotationToolbar=ToolbarEntry.Defaults();
+    string[] presetColors=Note.DefaultColors;
     void InitShortcuts(){
         shortcutStore=new(root);
-        (shortcuts,defaultRulerUnit)=shortcutStore.Read();
+        (shortcuts,defaultRulerUnit,defaultLensZoom,presetColors,defaultOpacity,annotationToolbar)=shortcutStore.Read();
         Activated+=(_,_)=>{
             var latest=shortcutStore.Read();
-            if(defaultRulerUnit!=latest.RulerUnit||!shortcuts.All(p=>latest.Bindings[p.Key].SequenceEqual(p.Value)))ApplyPreferences(latest);
+            if(defaultOpacity!=latest.DefaultOpacity||!annotationToolbar.SequenceEqual(latest.Toolbar)||defaultRulerUnit!=latest.RulerUnit||defaultLensZoom!=latest.LensZoom||!presetColors.SequenceEqual(latest.PresetColors)||
+                !shortcuts.All(p=>latest.Bindings[p.Key].SequenceEqual(p.Value)))ApplyPreferences(latest);
             else if(recordHotkeys.Count!=shortcuts["record"].Length)UpdateRecordHotkey(shortcuts["record"]);
         };
     }
     object ShortcutPayload()=>Shortcuts.Actions.ToDictionary(a=>a.Id,a=>new{
         keys=shortcuts[a.Id],label=shortcuts[a.Id].Label(a.Kind)});
-    void SendEditorPreferences()=>Send(new{type="shortcuts",bindings=ShortcutPayload(),defaultRulerUnit});
+    void SendEditorPreferences()=>Send(new{type="shortcuts",bindings=ShortcutPayload(),defaultRulerUnit,defaultLensZoom,presetColors,defaultOpacity,annotationToolbar});
     void ApplyPreferences(EditorPreferences next){
-        (shortcuts,defaultRulerUnit)=next;
+        (shortcuts,defaultRulerUnit,defaultLensZoom,presetColors,defaultOpacity,annotationToolbar)=next;
         UpdateRecordHotkey(shortcuts["record"]);
         native?.SetShortcuts(shortcuts);
         titleBar.SetHistoryShortcuts(shortcuts);

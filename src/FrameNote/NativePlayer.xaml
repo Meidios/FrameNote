@@ -54,7 +54,13 @@
      <Button x:Name="Next" Style="{StaticResource ToolButton}" Content="{StaticResource next}" ToolTip="{i18n:Tr '下一帧（→）'}"/>
      <TextBlock x:Name="Clock" Typography.NumeralAlignment="Tabular" Margin="7,0" VerticalAlignment="Center"/>
     </StackPanel>
-    <TextBlock x:Name="Hint" Grid.Column="1" Margin="8,0" VerticalAlignment="Center" TextTrimming="CharacterEllipsis"/>
+    <Grid Grid.Column="1" Margin="8,0" VerticalAlignment="Center">
+     <TextBlock x:Name="Hint" TextTrimming="CharacterEllipsis"/>
+     <StackPanel x:Name="MediaLoad" Visibility="Collapsed" MaxWidth="200" HorizontalAlignment="Left">
+      <TextBlock x:Name="MediaLoadText"/>
+      <ProgressBar x:Name="MediaLoadBar" Style="{x:Null}" Foreground="{DynamicResource accent}" Height="4" MinWidth="120" Margin="0,3,0,0" Maximum="100" AutomationProperties.LabeledBy="{Binding ElementName=MediaLoadText}"/>
+     </StackPanel>
+    </Grid>
     <StackPanel x:Name="Output" Grid.Column="2" Orientation="Horizontal" Background="Transparent">
      <Button x:Name="CopyFrame" Style="{StaticResource ToolButton}" Content="{StaticResource image_copy}" ToolTip="{i18n:Tr '复制当前帧'}"/>
      <Button x:Name="SaveFrame" Style="{StaticResource ToolButton}" Content="{StaticResource save_image}" ToolTip="{i18n:Tr '另存当前帧为 PNG'}"/>

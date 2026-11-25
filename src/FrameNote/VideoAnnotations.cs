@@ -42,9 +42,10 @@ internal sealed class VideoAnnotations
         foreach(var n in notes){
             var color=new SolidColorBrush((Color)ColorConverter.ConvertFromString(n.DisplayColor()));
             string body=n.DisplayMeasurementText(review.RulerScales,sourceWidth,sourceHeight,defaultRulerUnit);
-            if(string.IsNullOrWhiteSpace(body))body=n.Voice!=null?L.Text("语音批注"):n.Shape!=null?L.Text("图形批注"):n.Pictures is {Count:>0}?L.Text("图片批注"):L.Text("待填写批注");
+            if(string.IsNullOrWhiteSpace(body))body=n.Voice?.Original?.Name??(n.Voice!=null?L.Text("语音批注"):n.Shape!=null?L.Text("图形批注"):n.Pictures is {Count:>0}?L.Text("图片批注"):L.Text("待填写批注"));
             var text=Text($"#{n.Number}  {body}",16*unit,Brushes.White,width-pad*3);
-            dc?.DrawRectangle(color,null,new Rect(pad,y,3*unit,text.Height));dc?.DrawText(text,new Point(pad*2,y));y+=text.Height+pad;
+            dc?.PushOpacity(n.Alpha);
+            dc?.DrawRectangle(color,null,new Rect(pad,y,3*unit,text.Height));dc?.DrawText(text,new Point(pad*2,y));dc?.Pop();y+=text.Height+pad;
         }
         return Math.Max(48*unit,y-height);
     }
@@ -60,6 +61,7 @@ internal sealed class VideoAnnotations
             if(OutputHeight>height)dc.DrawRectangle(new SolidColorBrush(Color.FromRgb(28,30,33)),null,new Rect(0,height,width,OutputHeight-height));
             foreach(var n in notes){
                 var brush=new SolidColorBrush((Color)ColorConverter.ConvertFromString(n.DisplayColor()));var pen=new Pen(brush,3*unit){StartLineCap=PenLineCap.Round,EndLineCap=PenLineCap.Round,LineJoin=PenLineJoin.Round};
+                double opacity=n.Alpha;dc.PushOpacity(opacity);
                 double badgeX=4,badgeY=4;
                 foreach(var p in n.Pictures??[]){dc.DrawImage(Picture(p.Asset),new Rect(p.X*width,p.Y*height,p.Width*width,p.Width*width*p.PixelHeight/p.PixelWidth));badgeX=p.X*width;badgeY=p.Y*height-22*unit;}
                 if(n.Shape is {} s){
@@ -67,7 +69,29 @@ internal sealed class VideoAnnotations
                     void Line(Point p,Point q)=>dc.DrawLine(pen,p,q);
                     void Label(string value,Point at){var text=Text(value,14*unit,brush,width);var geometry=text.BuildGeometry(at);dc.DrawGeometry(null,new Pen(Brushes.Black,3*unit),geometry);dc.DrawGeometry(brush,null,geometry);}
                     if(s.Kind is "arrow" or "line" or "ruler" or "angle"){
-                        Line(a,b);double angle=Math.Atan2(b.Y-a.Y,b.X-a.X);
+                        var tangentStart=a;
+                        if(s.Points is {Count:>=2} knots){
+                            var points=knots.Select(p=>new Point(p.X*width,p.Y*height)).ToArray();
+                            double factor=(s.Smoothness??1)/6;
+                            var curve=new StreamGeometry();
+                            using(var path=curve.Open()){
+                                path.BeginFigure(a,false,false);
+                                for(int i=1;i<points.Length;i++){
+                                    var p=points[i-1];var q=points[i];
+                                    var c1=p+(q-points[Math.Max(0,i-2)])*factor;
+                                    var c2=q-(points[Math.Min(points.Length-1,i+1)]-p)*factor;
+                                    path.BezierTo(c1,c2,q,true,false);tangentStart=c2==q?p:c2;
+                                }
+                            }
+                            dc.DrawGeometry(null,pen,curve);
+                        }else if(s.Kind is "line" or "arrow" && s.ThirdX is double mx && s.ThirdY is double my){
+                            var control=new Point(2*mx*width-(a.X+b.X)/2,2*my*height-(a.Y+b.Y)/2);
+                            var curve=new StreamGeometry();
+                            using(var path=curve.Open()){path.BeginFigure(a,false,false);path.QuadraticBezierTo(control,b,true,false);}
+                            dc.DrawGeometry(null,pen,curve);
+                            if(control!=b)tangentStart=control;
+                        }else Line(a,b);
+                        double angle=Math.Atan2(b.Y-tangentStart.Y,b.X-tangentStart.X);
                         if(s.Kind=="arrow"){
                             var geo=new StreamGeometry();using(var g=geo.Open()){
                                 g.BeginFigure(b,true,true);g.LineTo(new Point(b.X-unit*(13*Math.Cos(angle)-6*Math.Sin(angle)),b.Y-unit*(13*Math.Sin(angle)+6*Math.Cos(angle))),true,false);
@@ -84,6 +108,20 @@ internal sealed class VideoAnnotations
                             double radius=Math.Min(24*unit,Math.Min((a-b).Length,(c-b).Length)/2);
                             if(radius>0){var geo=new StreamGeometry();using(var g=geo.Open()){g.BeginFigure(new Point(b.X+radius*Math.Cos(first),b.Y+radius*Math.Sin(first)),false,false);g.ArcTo(new Point(b.X+radius*Math.Cos(last),b.Y+radius*Math.Sin(last)),new Size(radius,radius),0,false,delta>=0?SweepDirection.Clockwise:SweepDirection.Counterclockwise,true,false);}dc.DrawGeometry(null,pen,geo);}
                             Label((Math.Abs(delta)*180/Math.PI).ToString("F1",CultureInfo.InvariantCulture)+"°",new Point(b.X+8*unit,b.Y-24*unit));
+                        }
+                    }else if(s.Kind=="brush"){
+                        var points=s.Points!;
+                        double thickness=s.BrushSize!.Value*Math.Max(width,height)/(double)Math.Min(1600,Math.Max(sourceWidth,sourceHeight));
+                        Point Position(StrokePoint point)=>new(point.X*width,point.Y*height);
+                        if(points.Count==1)dc.DrawEllipse(brush,null,Position(points[0]),thickness/2,thickness/2);
+                        else{
+                            pen.Thickness=thickness;
+                            var stroke=new StreamGeometry();
+                            using(var path=stroke.Open()){
+                                path.BeginFigure(Position(points[0]),false,false);
+                                foreach(var point in points.Skip(1))path.LineTo(Position(point),true,false);
+                            }
+                            dc.DrawGeometry(null,pen,stroke);
                         }
                     }else if(s.Kind=="magnifier"){
                         var (sample,preview)=LensFrames(s,width,height);
@@ -120,7 +158,8 @@ internal sealed class VideoAnnotations
                     }
                 }
                 var badge=new Rect(badgeX,badgeY,badgeWidth,badgeHeight);badges.Add(badge);
-                labels.Add(()=>{dc.DrawRoundedRectangle(brush,null,badge,3*unit,3*unit);dc.DrawText(tag,new Point(badge.X+4*unit,badge.Y+unit));});
+                dc.Pop();
+                labels.Add(()=>{dc.PushOpacity(opacity);dc.DrawRoundedRectangle(brush,null,badge,3*unit,3*unit);dc.DrawText(tag,new Point(badge.X+4*unit,badge.Y+unit));dc.Pop();});
             }
             foreach(var label in labels)label();
             if(OutputHeight>height)Footer(dc,notes);
@@ -170,7 +209,10 @@ internal sealed class VideoAnnotations
     }
     static (Rect Source,Rect Target) LensFrames(Drawing s,int width,int height){
         var rect=new Rect(new Point(s.X*width,s.Y*height),new Point(s.ToX*width,s.ToY*height));
-        if(s.Preview is not {} p)return (new Rect(rect.X+rect.Width/4,rect.Y+rect.Height/4,rect.Width/2,rect.Height/2),rect);
+        if(s.Preview is not {} p){
+            double sw=rect.Width/s.LensScale,sh=rect.Height/s.LensScale;
+            return (new Rect(rect.X+(rect.Width-sw)/2,rect.Y+(rect.Height-sh)/2,sw,sh),rect);
+        }
         double w=Math.Min(width,rect.Width*s.LensScale),h=Math.Min(height,rect.Height*s.LensScale);
         return (rect,new Rect(Math.Clamp(p.X*width,0,width-w),Math.Clamp(p.Y*height,0,height-h),w,h));
     }
@@ -200,7 +242,7 @@ internal sealed class VideoAnnotations
             dc.DrawImage(source,new Rect(0,0,width,height));
             foreach(var n in notes.Where(n=>n.Shape?.Kind=="magnifier")){
                 var (rect,bounds)=LensBounds(n.Shape!,width,height);
-                dc.DrawImage(new CroppedBitmap(source,bounds),rect);
+                dc.PushOpacity(n.Alpha);dc.DrawImage(new CroppedBitmap(source,bounds),rect);dc.Pop();
             }
             dc.DrawDrawing(Layer(notes));
         }

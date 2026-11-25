@@ -9,7 +9,7 @@ internal enum InputKind { Keyboard, Drag, Click, Wheel, Modifier }
 internal readonly record struct Shortcut(int Mods,int Vk,
     [property:System.Text.Json.Serialization.JsonIgnore(Condition=System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingDefault)] int With=0)
 {
-    internal const int Wheel=256;
+    internal const int Wheel=256,ReverseWheel=257;
     internal static Shortcut Pair(Shortcut first,int second)=>new(first.Mods,Math.Min(first.Vk,second),Math.Max(first.Vk,second));
     internal bool Includes(Shortcut key)=>With!=0 && key.Mods==Mods && (Vk==key.Vk||With==key.Vk);
     internal static Shortcut From(KeyEventArgs e){
@@ -23,7 +23,7 @@ internal readonly record struct Shortcut(int Mods,int Vk,
         if((Mods&4)!=0)parts.Add("Shift");
         if((Mods&8)!=0)parts.Add("Win");
         if(Vk!=0){
-            var key=Vk switch{1=>L.Text("鼠标左键"),2=>L.Text("鼠标右键"),4=>L.Text("鼠标中键"),5=>L.Text("鼠标侧键 1"),6=>L.Text("鼠标侧键 2"),Wheel=>L.Text("滚轮"),27=>"Esc",13=>"Enter",
+            var key=Vk switch{1=>L.Text("鼠标左键"),2=>L.Text("鼠标右键"),4=>L.Text("鼠标中键"),5=>L.Text("鼠标侧键 1"),6=>L.Text("鼠标侧键 2"),Wheel=>L.Text("滚轮"),ReverseWheel=>L.Text("鼠标滚轮 - 反转"),27=>"Esc",13=>"Enter",
                 32=>L.Text("空格"),37=>"←",38=>"↑",39=>"→",40=>"↓",46=>"Delete",188=>",",190=>".",>=48 and <=57=>((char)Vk).ToString(),
                 _=>new KeyConverter().ConvertToString(KeyInterop.KeyFromVirtualKey(Vk))??Vk.ToString()};
             parts.Add(key+(kind==InputKind.Drag?L.Text("拖拽"):kind==InputKind.Click?L.Text("点击"):""));
@@ -41,7 +41,12 @@ internal static class ShortcutLabels{
     internal static string Label(this Shortcut[] bindings,InputKind kind)=>string.Join(" / ",bindings.Select(b=>b.Label(kind)));
 }
 
-internal sealed record EditorPreferences(ShortcutMap Bindings,string RulerUnit=RulerScale.DefaultUnit);
+internal sealed record EditorPreferences(ShortcutMap Bindings,string RulerUnit,double LensZoom,string[] PresetColors,int DefaultOpacity,ToolbarEntry[] Toolbar){
+    internal EditorPreferences(ShortcutMap bindings):this(bindings,RulerScale.DefaultUnit,Drawing.DefaultZoom,Note.DefaultColors,80,ToolbarEntry.Defaults()){}
+    internal static bool ValidPalette(string[]? colors)=>colors is {Length:>=1 and <=10} &&
+        colors.All(c=>c is {Length:7} && c[0]=='#' && c.Skip(1).All(Uri.IsHexDigit)) &&
+        colors.Distinct(StringComparer.OrdinalIgnoreCase).Count()==colors.Length;
+}
 
 internal sealed class Shortcuts(string root)
 {
@@ -71,6 +76,8 @@ internal sealed class Shortcuts(string root)
         new("noSnap",L.Text("拖动时暂停吸附"),Timeline,new(1,0),InputKind.Modifier),
         new("quickBox",L.Text("画框"),Canvas,new(2,1),InputKind.Drag),new("quickArrow",L.Text("画箭头"),Canvas,new(2,2),InputKind.Drag),
         new("quickText",L.Text("输入文字批注"),Canvas,new(2,4),InputKind.Click),
+        new("cycleColor",L.Text("切换批注预设颜色"),Canvas,new(1,Shortcut.Wheel),InputKind.Wheel),
+        new("opacity",L.Text("调整批注不透明度"),Canvas,new(4,Shortcut.Wheel),InputKind.Wheel),
         new("record",L.Text("开始 / 停止录屏（全局）"),L.Text("录屏"),new(3,0x78))
     ];
     internal static ShortcutMap Defaults()=>Actions.ToDictionary(a=>a.Id,a=>a.Defaults);
@@ -80,9 +87,10 @@ internal sealed class Shortcuts(string root)
             if(Problem(a,new(value.Mods,value.With)) is {} invalid)return invalid;
         }
         if(value.Mods<0 || value.Mods>(a.Kind==InputKind.Keyboard?7:15))return L.Text("这个修饰键组合不可用。");
+        if((a.Id is "cycleColor" or "opacity") && value.Mods==0)return L.Text("请选择一个修饰键，普通滚轮用于调整批注。");
         bool valid=a.Kind switch{
             InputKind.Drag or InputKind.Click=>value.Mods!=0 && value.Vk is 1 or 2 or 4 or 5 or 6,
-            InputKind.Wheel=>value.Vk==Shortcut.Wheel,
+            InputKind.Wheel=>value.Vk is Shortcut.Wheel or Shortcut.ReverseWheel,
             InputKind.Modifier=>value.Mods!=0 && value.Vk==0,
             _=>value.Vk is >=8 and <255 and not (16 or 17 or 18 or 91 or 92 or >=160 and <=165 or 229)
                 && KeyInterop.KeyFromVirtualKey(value.Vk)!=Key.None
@@ -95,7 +103,7 @@ internal sealed class Shortcuts(string root)
     string FileName=>Path.Combine(root,"shortcuts.json");
     internal static bool Overlap(ShortcutAction a,Shortcut x,ShortcutAction b,Shortcut y){
         if(a.BindingScope!=b.BindingScope)return false;
-        if(x==y)return true;
+        if(x==y || a.Kind==InputKind.Wheel && b.Kind==InputKind.Wheel && x.Mods==y.Mods)return true;
         // A speed key may also be half of the reset gesture. Its single action runs on release.
         static bool Speed(ShortcutAction action)=>action.Id is "rateDown" or "rateUp" or "rateReset";
         return (x.With==0 && y.Includes(x) && !Speed(a)) || (y.With==0 && x.Includes(y) && !Speed(b));
@@ -114,6 +122,17 @@ internal sealed class Shortcuts(string root)
             using var saved=JsonDocument.Parse(File.ReadAllText(FileName));
             if(saved.RootElement.ValueKind!=JsonValueKind.Object)return new(map);
             var unit=saved.RootElement.TryGetProperty("defaultRulerUnit",out var stored)&&stored.ValueKind==JsonValueKind.String?stored.GetString():null;
+            double zoom=saved.RootElement.TryGetProperty("defaultLensZoom",out var lens) && lens.ValueKind==JsonValueKind.Number &&
+                lens.TryGetDouble(out double value) && Drawing.ValidZoom(value)?value:Drawing.DefaultZoom;
+            var colors=saved.RootElement.TryGetProperty("presetColors",out var palette) && palette.ValueKind==JsonValueKind.Array &&
+                palette.GetArrayLength()<=10 && palette.EnumerateArray().All(c=>c.ValueKind==JsonValueKind.String)
+                ?palette.EnumerateArray().Select(c=>c.GetString()!.ToLowerInvariant()).ToArray():null;
+            int opacity=saved.RootElement.TryGetProperty("defaultOpacity",out var alpha) && alpha.ValueKind==JsonValueKind.Number &&
+                alpha.TryGetInt32(out var percent) && percent is >=0 and <=100?percent:80;
+            var toolbar=ToolbarEntry.Defaults();
+            if(saved.RootElement.TryGetProperty("annotationToolbar",out var layout) && layout.ValueKind==JsonValueKind.Array){
+                try{toolbar=ToolbarEntry.Normalize(layout.Deserialize<ToolbarEntry[]>(Review.Json));}catch(JsonException){}
+            }
             var savedKeys=new ShortcutMap();
             foreach(var a in Actions){
                 if(!saved.RootElement.TryGetProperty(a.Id,out var raw))continue;
@@ -128,16 +147,22 @@ internal sealed class Shortcuts(string root)
                 foreach(var a in Actions)map[a.Id]=savedKeys.TryGetValue(a.Id,out var keys)?keys:a.Defaults
                     .Where(key=>!Actions.Any(b=>savedKeys.TryGetValue(b.Id,out var other) && other.Any(k=>Overlap(a,key,b,k)))).ToArray();
             }
-            return new(map,RulerScale.SupportsUnit(unit)?unit!:RulerScale.DefaultUnit);
+            return new(map,RulerScale.SupportsUnit(unit)?unit!:RulerScale.DefaultUnit,zoom,EditorPreferences.ValidPalette(colors)?colors!:Note.DefaultColors,opacity,toolbar);
         }catch(Exception e) when(e is IOException or JsonException or UnauthorizedAccessException){return new(Defaults());}
     }
     internal EditorPreferences Save(EditorPreferences original,EditorPreferences edited,Action<Shortcut[],Shortcut[]> register){
         if(!RulerScale.SupportsUnit(edited.RulerUnit))throw new InvalidDataException(L.Text("请选择有效的标尺单位。"));
+        if(!Drawing.ValidZoom(edited.LensZoom)||!EditorPreferences.ValidPalette(edited.PresetColors))
+            throw new InvalidDataException(L.Text("请检查放大倍率和预设颜色。"));
         using var guard=new Mutex(false,@"Local\FrameNote.ShortcutPreferences");
         try{guard.WaitOne();}catch(AbandonedMutexException){}
         try{
             var latest=Read();
             var unit=original.RulerUnit==edited.RulerUnit?latest.RulerUnit:edited.RulerUnit;
+            var zoom=original.LensZoom==edited.LensZoom?latest.LensZoom:edited.LensZoom;
+            var colors=original.PresetColors.SequenceEqual(edited.PresetColors)?latest.PresetColors:edited.PresetColors;
+            int opacity=original.DefaultOpacity==edited.DefaultOpacity?latest.DefaultOpacity:Math.Clamp(edited.DefaultOpacity,0,100);
+            var toolbar=original.Toolbar.SequenceEqual(edited.Toolbar)?latest.Toolbar:ToolbarEntry.Normalize(edited.Toolbar);
             var next=latest.Bindings;
             var previousRecord=next["record"];
             foreach(var a in Actions)if(!original.Bindings[a.Id].SequenceEqual(edited.Bindings[a.Id]))next[a.Id]=edited.Bindings[a.Id];
@@ -147,10 +172,14 @@ internal sealed class Shortcuts(string root)
             try{
                 var values=next.Where(p=>!DefaultsMap[p.Key].SequenceEqual(p.Value)).ToDictionary(p=>p.Key,p=>(object)p.Value);
                 if(unit!=RulerScale.DefaultUnit)values["defaultRulerUnit"]=unit;
+                if(zoom!=Drawing.DefaultZoom)values["defaultLensZoom"]=zoom;
+                if(!colors.SequenceEqual(Note.DefaultColors))values["presetColors"]=colors;
+                if(opacity!=80)values["defaultOpacity"]=opacity;
+                if(!toolbar.SequenceEqual(ToolbarEntry.Defaults()))values["annotationToolbar"]=toolbar;
                 Packages.Atomic(FileName,s=>JsonSerializer.Serialize(s,values,Review.Json));
             }
             catch{if(changed)register(previousRecord,previousRecord);throw;}
-            return new(next,unit);
+            return new(next,unit,zoom,colors,opacity,toolbar);
         }finally{guard.ReleaseMutex();}
     }
     static readonly ShortcutMap DefaultsMap=Defaults();

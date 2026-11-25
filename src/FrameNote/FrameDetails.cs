@@ -37,18 +37,19 @@ internal static class FrameDetails
             string timestamp=time is {} t?"　·　"+Stamp(TimeSpan.FromMilliseconds((t.Ticks+5000)/10000)):"";
             Line(L.Format($"{source}{timestamp}　·　{notes.Count} 条批注"),15,Bold,Brushes.White,pad);
             foreach(var note in notes.OrderBy(n=>n.Number)){
+                dc.PushOpacity(note.Alpha);
                 y+=11*unit;double top=y;
                 string range=time==null?L.Text("图片批注"):note.EndUs is long end?L.Format($"区间批注　{Stamp(note.StartUs)} – {Stamp(end)}"):L.Format($"点批注　{Stamp(note.StartUs)}");
-                string voice=note.Voice is {} audio?L.Format($"　·　语音 {audio.DurationUs/1e6:F1} 秒"):"";
+                string voice=note.Voice?.Original is {} original?"　·　"+original.Name:note.Voice is {} audio?L.Format($"　·　语音 {audio.DurationUs/1e6:F1} 秒"):"";
                 string attachment=note.Pictures is {Count:>0} pics?L.Format($"　·　参考图 ×{pics.Count}"):"";
-                string shape=note.Shape?.Kind switch{"arrow"=>L.Text("　·　箭头"),"box"=>L.Text("　·　框选"),"line"=>L.Text("　·　线"),"angle"=>L.Text("　·　角度"),"ruler"=>L.Text("　·　距离标尺"),"magnifier"=>"　·　"+note.Shape.LensLabel+L.Text(" 放大镜"),"text"=>L.Text("　·　文字框"),_=>""};
+                string shape=note.Shape?.Kind switch{"arrow"=>L.Text("　·　箭头"),"box"=>L.Text("　·　框选"),"line"=>L.Text("　·　线"),"brush"=>"　·　"+L.Text("画笔"),"angle"=>L.Text("　·　角度"),"ruler"=>L.Text("　·　距离标尺"),"magnifier"=>"　·　"+note.Shape.LensLabel+L.Text(" 放大镜"),"text"=>L.Text("　·　文字框"),_=>""};
                 var color=new SolidColorBrush((Color)ColorConverter.ConvertFromString(note.DisplayColor()));
                 Line($"#{note.Number}　{range}{shape}{attachment}{voice}",14,Bold,muted,x);
                 string body=note.DisplayMeasurementText(scales,frame.PixelWidth,imageHeight,rulerUnit);
                 if(!string.IsNullOrWhiteSpace(body)){
                     y+=3*unit;Line(body.ReplaceLineEndings("\n"),17,Normal,Brushes.White,x);
                 }
-                dc.DrawRectangle(color,null,new Rect(pad,top,4*unit,y-top));
+                dc.DrawRectangle(color,null,new Rect(pad,top,4*unit,y-top));dc.Pop();
             }
         }
         int height=checked((int)Math.Ceiling(y+pad));CheckHeight(height);

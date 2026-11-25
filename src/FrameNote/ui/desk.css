@@ -15,7 +15,7 @@ button.accent:hover:not(:disabled){background:var(--accentHover)}
 button.accent:active:not(:disabled){background:var(--accentPressed)}
 button.active:not(:disabled){background:var(--selection);border-color:var(--accent)}
 button:is(.active,[aria-pressed=true]):focus-visible{outline-color:var(--ink)}
-button.accent:focus-visible,#loop[aria-pressed=true]:focus-visible{outline-color:var(--onAccent)}
+button.accent:focus-visible{outline-color:var(--onAccent)}
 option{background:var(--card);color:var(--ink)}
 input[type=number]{min-width:0;padding:4px;background:var(--card);color:var(--ink);border:1px solid var(--border);border-radius:var(--radius-control)}
 main{display:grid;grid-template-columns:minmax(0,1fr) clamp(290px,30vw,400px);min-height:0}#viewer{display:grid;grid-template-rows:minmax(0,1fr) auto auto auto auto;min-width:0}#stage{position:relative;background:var(--canvas);overflow:hidden;display:grid;place-items:center}video{width:100%;height:100%;min-height:0;object-fit:contain}#overlay{position:absolute;pointer-events:none;overflow:visible}#overlay.drawing{pointer-events:auto;cursor:crosshair;touch-action:none}#welcome{position:absolute;text-align:center}small{font-weight:650;letter-spacing:.18em}h1{font-size:34px;line-height:46px;margin:9px 0}p{color:var(--muted);margin:0 0 22px}#transport{padding:0 16px}time,.stamp,#rangeHint{font-variant-numeric:tabular-nums}time{color:var(--blue)}#scroll{overflow-x:auto;margin:0 16px}#timeline{position:relative}#seek{width:100%;margin:0;accent-color:var(--blue)}aside{background:var(--panel);border-left:1px solid var(--edge);display:flex;min-height:0;flex-direction:column;padding:16px;gap:12px}h2{font-size:17px;line-height:22px;margin:0}.sideTitle{justify-content:space-between}#count{color:var(--muted)}kbd{font-size:11px}#rangeHint{font-size:12px}#list{flex:1;overflow:auto;min-height:40px}.note{display:block;text-align:left;width:100%;padding:10px;margin-bottom:6px;white-space:normal;overflow-wrap:anywhere}.stamp{display:block;color:var(--blue);font-size:12px;margin-bottom:4px}.note.selected{border-color:var(--blue)}#editor{border-top:1px solid var(--edge);padding-top:12px}textarea{width:100%;padding:8px;resize:vertical;max-height:150px;margin:8px 0}.bar{flex-wrap:wrap;gap:5px}.bar+.bar{margin-top:8px}.actions button{padding:5px 8px}.empty{font-size:13px;color:var(--muted);padding:15px 0}[hidden]{display:none!important}body.busy main,body.busy header{pointer-events:none;opacity:.65}
@@ -24,6 +24,8 @@ main{grid-template-columns:var(--capture-column) minmax(0,1fr) clamp(220px,24vw,
 #viewer{min-height:0;container:viewer / inline-size}
 #mediaViewport,#video{position:absolute;inset:0}
 #mediaViewport{transform-origin:top left}
+#stage.trimPreview #video{visibility:visible!important}
+#stage.trimPreview #overlay{visibility:hidden}
 #stage{overflow:clip}
 #capturePanel{overflow-y:auto;border-left:0;border-right:1px solid var(--edge)}
 .captureBlock{border:0;padding:0;margin:0;min-width:0;display:grid;gap:8px;flex:none}
@@ -58,6 +60,7 @@ header{padding-inline-start:0}
 }
 #record.active .captureDetail{transform:scale(.08);opacity:0}
 #recordGif.active .captureDetail{transform:translateY(5px) rotate(16deg) scale(.28);opacity:0}
+#captureCommands.finalizing :is(button,.captureContour,.captureDetail){transition:none}
 @media(prefers-reduced-motion:reduce){
  #captureCommands button,#captureCommands .captureContour,#captureCommands .captureDetail{transition:none}
 }
@@ -106,21 +109,21 @@ header > .iconAction > svg,#exportGif > svg{width:22px;height:22px}
 #status.error:not(.actionName){position:fixed;z-index:30;top:12px;left:50%;transform:translateX(-50%);max-width:min(90vw,60ch);padding:8px 12px;overflow-wrap:anywhere;pointer-events:none;border:1px solid var(--danger);border-radius:var(--radius-card);background:var(--panel);color:var(--ink)}
 /* One viewport-space light crosses the fixed hit areas of adjacent buttons. */
 @property --light-strength{syntax:"<percentage>";inherits:false;initial-value:17%}
-:is(button[aria-description],button.hoverButton,select){
+:is(button.iconAction,button.hoverButton,select){
  --pointer-light:radial-gradient(circle 64px at var(--light-x,-100px) var(--light-y,-100px),color-mix(in srgb,var(--ink) var(--light-strength),transparent),transparent);
  transition:background-color 120ms,border-color 120ms,--light-strength 140ms}
-button:is([aria-description],.hoverButton){position:relative;overflow:clip}
-button:is([aria-description],.hoverButton)::after{content:"";position:absolute;inset:0;pointer-events:none;opacity:0;transition:opacity 140ms;background:var(--pointer-light) fixed}
-:is(.hoverLighting button,button.hoverLighting):is([aria-description],.hoverButton):enabled::after{opacity:1}
-button[aria-description]:enabled:hover:not(.accent,.active,[aria-pressed=true]),button.hoverButton:enabled:hover,select:enabled:hover{border-color:color-mix(in srgb,var(--border) 55%,var(--ink))}
+button:is(.iconAction,.hoverButton){position:relative;overflow:clip}
+button:is(.iconAction,.hoverButton)::after{content:"";position:absolute;inset:0;pointer-events:none;opacity:0;transition:opacity 140ms;background:var(--pointer-light) fixed}
+:is(.hoverLighting button,button.hoverLighting):is(.iconAction,.hoverButton):enabled::after{opacity:1}
+button.iconAction:enabled:hover:not(.accent,.active,[aria-pressed=true]),button.hoverButton:enabled:hover,select:enabled:hover{border-color:color-mix(in srgb,var(--border) 55%,var(--ink))}
 select:enabled:hover{background-color:var(--hover)}
 select:enabled:is(:focus-within,:open),textarea:focus,input[type=number]:focus{outline:none;border-color:var(--blue)}
 :is(.hoverLighting select,select.hoverLighting):enabled{--light-strength:17%}
-#buttonHint{position:fixed;z-index:30;left:0;top:0;width:max-content;max-width:min(32ch,calc(100vw - 8px));padding:2px 7px;border-radius:var(--radius-compact);
+#buttonHint{position:fixed;z-index:30;inset:auto;margin:0;border:0;width:max-content;max-width:min(32ch,calc(100vw - 8px));padding:2px 7px;border-radius:var(--radius-compact);
  background:color-mix(in srgb,var(--panel) 94%,transparent);color:var(--ink);font-size:12px;line-height:17px;text-align:center;overflow-wrap:anywhere;
  pointer-events:none;user-select:none;opacity:0;transition:opacity 100ms}
 #buttonHint.visible{opacity:1}
-@media(prefers-reduced-motion:reduce){:is(button[aria-description],button.hoverButton,select),button:is([aria-description],.hoverButton)::after,#buttonHint{transition:none}}
+@media(prefers-reduced-motion:reduce){:is(button.iconAction,button.hoverButton,select),button:is(.iconAction,.hoverButton)::after,#buttonHint{transition:none}}
 #transport{flex-wrap:wrap;align-content:center;gap:var(--toolbar-gap);padding-block:5px}
 .transportGroup,.transportClock{display:flex;align-items:center;flex:none}
 .transportGroup{gap:var(--toolbar-gap)}
@@ -139,7 +142,6 @@ select:enabled:is(:focus-within,:open),textarea:focus,input[type=number]:focus{o
 #volumePercent{position:absolute;bottom:calc(100% + 5px);left:50%;transform:translateX(-50%);min-width:var(--toolbar-button-size);
  border-radius:var(--radius-compact);background:var(--panel);color:var(--ink);font:12px/20px var(--ui);font-variant-numeric:tabular-nums;text-align:center;pointer-events:none}
 @media(prefers-reduced-motion:reduce){.volumeCard{transform:none;transition:none}.volumePopover{transition-delay:15ms}}
-#loop[aria-pressed=true]{background:var(--accent);color:var(--onAccent)}
 .previewFullscreen #viewer{position:fixed;inset:0;z-index:5;width:100%;height:100%;background:var(--canvas);grid-template-rows:minmax(0,1fr) auto}
 .previewFullscreen :is(header,aside),.previewFullscreen #viewer :is(#timelineBar,#rangeHint,#trackDesk){display:none}
 #timelineBar{display:grid;grid-template-columns:auto minmax(0,1fr) auto;align-items:center;gap:var(--toolbar-gap);padding:3px 6px;border-top:1px solid var(--edge)}
@@ -169,6 +171,7 @@ select:enabled:is(:focus-within,:open),textarea:focus,input[type=number]:focus{o
 #timelineBar #alignClips:popover-open button{width:auto;display:flex;align-items:center;gap:8px;padding:0 8px;justify-content:start;border-color:transparent}
 @container viewer (max-width:730px){
  #timelineBar #editTools #moreEdits{display:grid}
+ #timelineBar #annotationTools{--toolbar-button-size:31px;--toolbar-gap:2px}
 }
 @media(max-width:1100px){
  body:not(.imageView) main{grid-template-columns:minmax(0,1fr) clamp(220px,24vw,340px)}
@@ -176,8 +179,13 @@ select:enabled:is(:focus-within,:open),textarea:focus,input[type=number]:focus{o
  #capturePanel:popover-open{position:fixed;inset:58px auto 0 0;margin:0;width:var(--capture-column);height:auto;max-height:none;max-width:none;border:0;border-right:1px solid var(--edge);color:var(--ink)}
  #captureCommands{padding-inline:0 8px}
 }
-#timelineBar #voiceRecord,#timelineBar #clear{margin-inline-start:5px}
-#imageToolbar #addPicture,#imageToolbar #clear{margin-inline-start:3px}
+#annotationTools [data-toolbar-hidden]:not(#voiceRecord.recording){display:none!important}
+#annotationTools .toolSeparator{align-self:center;flex:none;width:1px;height:20px;background:var(--border);margin-inline:2px}
+#timelineBar #annotationTools button.doubleWidth{width:calc(2 * var(--toolbar-button-size) + var(--toolbar-gap))}
+#imageToolbar #annotationTools .iconAction{width:28px;flex:0 0 28px}
+#imageToolbar #annotationTools button.doubleWidth{width:59px;flex-basis:59px}
+#timelineBar:has(#inBtn[hidden])>#annotationTools{grid-column:1 / 3}
+.opacityRow .rulerControls input{max-width:74px}
 
 #viewer>#rangeHint:not(:empty){padding:0 16px 4px}
 #stage{grid-row:1}#transport{grid-row:2}#timelineBar{grid-row:3}#rangeHint{grid-row:4}#trackDesk{grid-row:5}
@@ -225,6 +233,12 @@ select:enabled:is(:focus-within,:open),textarea:focus,input[type=number]:focus{o
 #waveform{width:100%;height:100%;display:block;fill:var(--muted);opacity:.85}
 #marks{min-height:26px}
 .headAxis{pointer-events:none;z-index:2}
+.timeRangeAxis{pointer-events:none;z-index:4}
+#timeRange{position:absolute;inset-block:0;border-inline:1px solid var(--blue);border-top:3px solid var(--blue);background:color-mix(in srgb,var(--blue) 15%,transparent)}
+#timeRange [data-time-edge]{position:absolute;top:-3px;height:var(--ruler-h);width:12px;pointer-events:auto;touch-action:none;cursor:ew-resize}
+#timeRange [data-time-edge=start]{left:-7px}
+#timeRange [data-time-edge=end]{right:-7px}
+#timeRange [data-time-edge]:hover::after{content:"";display:block;width:3px;height:100%;margin:auto;background:var(--blue)}
 #playhead{position:absolute;left:var(--position,0%);inset-block:0;width:1px;background:var(--ink)}
 #playhead::before{content:"";position:absolute;left:-4px;top:0;width:9px;height:9px;background:var(--ink);clip-path:polygon(0 0,100% 0,100% 55%,50% 100%,0 55%)}
 #timeline:has(#seek:focus-visible) #playhead::before{background:var(--accent);transform:scale(1.35);transform-origin:top center}
@@ -319,8 +333,7 @@ kbd{font-family:var(--ui);display:inline-block;width:.5em;line-height:11px;text-
 .imageView #imageToolbar{display:flex;flex:none;align-items:center;gap:3px;margin:0 -9px 20px}
 #imageToolbar #point{display:grid;place-items:center;width:32px;height:28px;padding:0}
 #imageToolbar #point svg{width:20px;height:20px}
-#imageToolbar #annotationTools{flex:1;flex-wrap:nowrap;gap:3px}
-#imageToolbar .attachmentActions{display:contents}
+#imageToolbar #annotationTools{flex:1;flex-wrap:wrap;gap:3px}
 #imageToolbar .iconAction{flex:1 1 28px;min-width:0}
 body.imageView .imageExport{display:flex;justify-content:flex-end;margin-inline:-9px}
 #reviewPanel{gap:0;min-width:0}
@@ -346,9 +359,8 @@ body.imageView .imageExport{display:flex;justify-content:flex-end;margin-inline:
 .editorColors #colors{margin:0;flex-wrap:wrap;gap:4px}
 .editorFields textarea{display:block;margin:3px 0 6px}
 #reviewPanel .imageExport{flex:none;padding-top:6px}
-#annotationTools,.attachmentActions{gap:var(--toolbar-gap)}
+#annotationTools{gap:var(--toolbar-gap)}
 #annotationTools{min-width:0;margin:0;padding:0;border:0}
-.attachmentActions{display:inline-flex}
 #annotationTools .iconAction{width:28px;height:28px}
 #annotationTools svg,#editTools svg,#trackNames svg{width:18px;height:18px;fill:none;stroke:currentColor;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}
 #voiceRecord.recording{color:var(--danger);border-color:var(--danger)}
@@ -366,12 +378,14 @@ body.imageView .imageExport{display:flex;justify-content:flex-end;margin-inline:
  .editorFields textarea{max-height:clamp(48px,calc(100dvh - 452px),150px)}
  #voiceStatus{margin-bottom:4px}
 }
-#linkTracks[aria-pressed=true]:enabled{color:var(--accent,#8ddcff);border-color:currentColor}
-.clipLane{z-index:3;pointer-events:none;height:100%;container-type:inline-size}.editClip{pointer-events:auto;position:absolute;top:1px;height:calc(100% - 2px);min-width:3px;padding:0;border:1px solid #7ba6c9;border-radius:3px;color:#ecf5fa;text-align:left;overflow:hidden;white-space:nowrap;cursor:grab;touch-action:none;font-size:11px}
+:is(#linkTracks,#loop)[aria-pressed=true]:enabled{color:var(--accent,#8ddcff);border-color:currentColor}
+.clipLane{z-index:3;pointer-events:none;height:100%;container-type:inline-size}.editClip{pointer-events:auto;position:absolute;top:5px;height:calc(100% - 6px);min-width:3px;padding:0;border:1px solid #7ba6c9;border-radius:3px;color:#ecf5fa;text-align:left;overflow:hidden;white-space:nowrap;cursor:grab;touch-action:none;font-size:11px}
+#clipMarquee{position:absolute;z-index:5;pointer-events:none;border:1px solid var(--blue);background:color-mix(in srgb,var(--blue) 18%,transparent)}
 #videoClips .editClip{background:rgb(45 83 106 / 24%)}
 #audioClips .editClip{background:rgb(55 107 94 / 28%);border-color:#77b5a2}#voiceClips .editClip{background:rgb(118 91 136 / 32%);border-color:#b799cb}.editClip[aria-pressed=true]{outline:2px solid #d4ebff;outline-offset:-2px}.editClip.snapped{border-color:#fff;box-shadow:inset 0 0 0 2px #8de3af}
 .clipHandle{position:absolute;top:0;bottom:0;width:7px;cursor:ew-resize;background:#ffffff30}.clipHandle.left{left:0}.clipHandle.right{right:0}.editClip:hover .clipHandle,#markLanes button:hover .clipHandle{background:#ffffff80}
 #markLanes .clipHandle{width:5px;background:transparent}
+.editClip .clipHandle{width:min(7px,24%)}
 #markLanes .short .clipHandle{top:-3px}
 #markLanes .short .clipHandle.left{left:calc((100% - var(--label-width))/2)}
 #markLanes .short .clipHandle.right{right:calc((100% - var(--label-width))/2)}
@@ -382,11 +396,16 @@ body.imageView .imageExport{display:flex;justify-content:flex-end;margin-inline:
 #taskProgress{position:fixed;inset:0;margin:auto;width:min(344px,calc(100vw - 32px));padding:22px 24px 20px;border:1px solid var(--border);border-radius:var(--radius-pane);background:var(--panel);color:var(--ink);text-align:center}
 #taskProgress::backdrop{background:rgb(0 0 0 / 42%)}
 body:has(#taskProgress[open]) #welcome{visibility:hidden}
-#taskProgress .loadingHeading{display:flex;align-items:baseline;justify-content:space-between;gap:16px}
-#progressPercent{font:14px var(--ui);font-variant-numeric:tabular-nums;color:var(--blue)}
+#mediaLoading{position:absolute;z-index:3;width:min(300px,calc(100% - 32px));padding:16px 20px;border:1px solid var(--border);border-radius:var(--radius-pane);background:var(--panel);color:var(--ink);pointer-events:none}
+#stage:has(#mediaLoading:not([hidden])) #welcome,body:has(#taskProgress[open]) #mediaLoading{visibility:hidden}
+body.busy:has(#mediaLoading:not([hidden])) main{opacity:1}
+.loadingHeading{display:flex;align-items:baseline;justify-content:space-between;gap:16px}
+#progressPercent,#mediaLoadPercent{font:14px var(--ui);font-variant-numeric:tabular-nums;color:var(--blue)}
+#mediaLoadBar{display:block;width:100%;height:8px;margin:10px 0 0;accent-color:var(--accent)}
 #progressBar{display:block;appearance:none;width:100%;height:8px;margin:10px 0 16px;border:0}
-#progressBar::-webkit-progress-bar{background:var(--edge);border-radius:4px;overflow:hidden}
-#progressBar::-webkit-progress-value{background:var(--accent);border-radius:4px}
+#mediaLoadBar[value]{appearance:none;border:0}
+:is(#progressBar,#mediaLoadBar[value])::-webkit-progress-bar{background:var(--edge);border-radius:4px;overflow:hidden}
+:is(#progressBar,#mediaLoadBar[value])::-webkit-progress-value{background:var(--accent);border-radius:4px}
 #noteTiming{display:grid;gap:4px}
 #noteTiming label{display:flex;align-items:center;gap:6px;color:var(--muted);font-size:12px}
 #noteStart{width:90px}
@@ -415,3 +434,22 @@ body:has(#taskProgress[open]) #welcome{visibility:hidden}
 .customColor{display:inline-flex;align-items:center;justify-content:center;padding:0;width:23px;height:23px;border-radius:50%}
 .customColor:is([aria-pressed=true],[aria-checked=true]){background:var(--custom);color:var(--badge-ink);outline:2px solid var(--ink);outline-offset:-1px}
 #noteColorPicker{position:fixed;width:1px;height:1px;margin:0;padding:0;border:0;opacity:0;pointer-events:none}
+
+#noteTiming label{display:grid;grid-template-columns:2em 90px}
+#noteTiming input{width:100%}
+#detailFields .opacityRow{display:flex;align-items:center;gap:6px;width:calc(2 * 12px + 6px + 90px);flex-wrap:nowrap}
+#detailFields .opacityRow label{flex:none}
+#detailFields .opacityRow .rulerControls{position:relative;flex:1;min-width:0}
+#detailFields .opacityRow input{width:100%;min-width:0;max-width:none}
+#detailFields .opacityRow .rulerControls span{position:absolute;left:calc(100% + 5px)}
+
+.mediaTrack.dropAudio{outline:1px solid var(--blue);outline-offset:-1px;background:color-mix(in srgb,var(--blue) 16%,transparent)}
+
+#marks,#markLanes{height:26px;min-height:26px;max-height:26px}
+#marks{overflow:hidden}
+#marks .markCount{bottom:3px;z-index:3;padding:0 3px;font-size:11px;background:var(--panel)}
+#noteGroupMenu{position:fixed;inset:auto;margin:0;padding:4px;max-width:min(320px,90vw);max-height:200px;overflow:auto;border:1px solid var(--border);background:var(--panel);color:var(--ink);border-radius:var(--radius-card)}
+#noteGroupMenu button{display:block;width:100%;text-align:left;overflow:hidden;text-overflow:ellipsis;border:0;border-inline-start:3px solid var(--mark)}
+
+#clipMenu{position:fixed;inset:auto;margin:0;padding:4px;background:var(--panel);border:1px solid var(--border);border-radius:var(--radius-card);color:var(--ink)}
+#clipMenu button{display:flex;justify-content:space-between;gap:22px;width:100%;border:0}

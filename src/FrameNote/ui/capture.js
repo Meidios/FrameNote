@@ -1,5 +1,6 @@
 'use strict';
-let catalog=null, region=null, recording=null, starting=false;
+let catalog=null, region=null, recording=null, starting=false, finalizingRecording=false;
+let pendingRecordingReview=null;
 let capturePrefs={};
 function saveCapture(changes){
  Object.assign(capturePrefs,changes);
@@ -9,13 +10,14 @@ function populate(id,items,value){
  const el=$(id);el.replaceChildren(...items.map(d=>new Option(d.name,d.id)));
  if(items.some(d=>d.id===value))el.value=value;
 }
-function captureTarget({id,name,app,pid,model,monitorId}){return {id,name,app,pid,model,monitorId}}
+function captureTarget({id,name,app,pid,model,monitorId,self}){return {id,name,app,pid,model,monitorId,self}}
 function matchTarget(mode,items,saved){
  if(!saved?.id)return items[0];
  if(mode!=='window'){
   if(saved.monitorId)return items.find(d=>d.monitorId===saved.monitorId);
   return items.find(d=>d.id===saved.id && d.model===saved.model);
  }
+ if(saved.self)return items.find(d=>d.self);
  const live=items.find(d=>d.id===saved.id && d.app===saved.app && d.pid===saved.pid && (d.pid || d.name===saved.name));
  if(live)return live;
  const matches=items.filter(d=>saved.app && d.app===saved.app && d.name===saved.name);
@@ -114,7 +116,7 @@ function strip(ch,isMic){
  ch.meter.setAttribute('aria-label',ch.name+tr(' 设备电平（应用录制增益，dBFS）'));
  ch.meter.title=tr('录制前显示所选设备电平；录制中显示实际采集电平（已计入增益和静音）');
  function update(){
-  mute.setAttribute('aria-pressed',String(ch.muted));mute.title=ch.muted?tr('取消静音'):tr('静音');
+  mute.setAttribute('aria-pressed',String(ch.muted));mute.ariaDescription=ch.muted?tr('取消静音'):tr('静音');
   mute.querySelector('use').setAttribute('href',ch.muted?'#icon-speaker_mute':'#icon-speaker_2');
   slider.value=ch.gainDb;value.textContent=ch.gainDb+' dB';slider.setAttribute('aria-valuetext',value.textContent);paintPeak(ch);
  }
@@ -136,18 +138,31 @@ function renderMixer(){
 }
 window.captureButtons=()=>{
  const usable=!!catalog && !!$('source').value && ($('mode').value!=='region'||region?.device===$('source').value);
+ $('captureCommands').classList.toggle('finalizing',finalizingRecording);
  for(const [id,kind,label] of [['record','video',tr('录制视频')],['recordGif','gif',tr('录制 GIF')]]){
   const stopping=recording===kind, action=stopping?tr('停止录制'):label;
   const hint=kind==='video'?shortcutSuffix('record'):stopping?' GIF':tr('（最长 30 秒）');
   setIconAction(id,null,action,action+hint);
-  $(id).disabled=starting||(recording?recording!==kind:(!usable||!!editing||(kind==='video'&&channels().some(ch=>ch.offline))));
+  $(id).disabled=starting||finalizingRecording||busy||(recording?recording!==kind:(!usable||!!editing||(kind==='video'&&channels().some(ch=>ch.offline))));
   $(id).classList.toggle('active',recording===kind);
  }
- for(const group of $('capturePanel').querySelectorAll('fieldset'))group.disabled=!!recording||starting||(!catalog&&!group.contains($('refreshSources')));
+ for(const group of $('capturePanel').querySelectorAll('fieldset'))group.disabled=!!recording||starting||finalizingRecording||(!catalog&&!group.contains($('refreshSources')));
  $('mode').disabled=$('source').disabled=!catalog;
 };
+function leaveRecordingControls(){
+ if(recording==='video')pendingRecordingReview??={play:false,playbackId:null};
+ const button=$(recording==='gif'?'recordGif':'record');
+ if(document.activeElement===button)$('stage').focus({preventScroll:true});
+}
+document.addEventListener('keydown',e=>{
+ if(!pendingRecordingReview||e.isComposing||!bound('play',e))return;
+ if(e.target!==document.body && e.target!==$('stage') && e.target!==$('record'))return;
+ // The file may still be closing or decoding. Apply the shortcut to its first frame.
+ e.preventDefault();e.stopPropagation();
+ if(!e.repeat)pendingRecordingReview.play=!pendingRecordingReview.play;
+},true);
 function capture(gif){
- if(recording){send('stop');return}
+ if(recording){leaveRecordingControls();send('stop');return}
  if($(gif?'recordGif':'record').disabled)return;
  starting=true;window.captureButtons();send('record',{gif,settings:{mode:$('mode').value,source:$('source').value,
  mixer:mixerSettings(),cursor:$('cursor').checked,region}});
@@ -179,8 +194,27 @@ chrome.webview.addEventListener('message',({data:m})=>{
   renderMixer();
  }else if(m.type==='meters'){meterPending=false;latestLevels=m.levels}
  else if(m.type==='region'){capturePrefs.crop=m.crop;sources();}
- else if(m.type==='recording'){starting=false;recording=m.value?(m.gif?'gif':'video'):null;window.captureButtons()}
+ else if(m.type==='recording'){
+  if(!m.value&&recording)leaveRecordingControls();
+  if(m.value)pendingRecordingReview=null;
+  starting=finalizingRecording=false;recording=m.value?(m.gif?'gif':'video'):null;window.captureButtons();
+ }
+ else if(m.type==='loaded'||m.type==='image'){
+  if(m.temporary&&pendingRecordingReview)pendingRecordingReview.playbackId=m.playbackId;
+  else pendingRecordingReview=null;
+ }
+ else if(m.type==='captureStopping'){
+  if(recording==='video')showMediaLoad('正在整理录制文件…');
+  leaveRecordingControls();recording=null;starting=false;finalizingRecording=true;window.captureButtons();
+ }
+ else if(m.type==='busy')window.captureButtons();
+ else if(m.type==='recordingPlayShortcut'&&pendingRecordingReview)pendingRecordingReview.play=!pendingRecordingReview.play;
+ else if(m.type==='recordingRestored'){leaveRecordingControls();$('stage').focus({preventScroll:true})}
  else if(m.type==='recordShortcut')capture(false);
- else if(m.type==='error' && starting){starting=false;window.captureButtons()}
+ else if(m.type==='error'){
+  if(pendingRecordingReview)showMediaLoad(null);
+  pendingRecordingReview=null;
+  if(starting){starting=false;window.captureButtons()}
+ }
 });
 window.captureButtons();send('catalog',{initial:true});

@@ -38,7 +38,7 @@
   const item=e.target.closest('[role=menuitem]');
   if(!item||menu.inert)return;
   setOpen(false);trigger.focus({preventScroll:true});
-  finishEdit();transport.pause();send('exportGif',{copy:item.id==='copyGif'});
+  exportTimelineMedia('exportGif',{copy:item.id==='copyGif'});
  };
  new MutationObserver(()=>{if(trigger.disabled)setOpen(false)}).observe(trigger,{attributes:true,attributeFilter:['disabled']});
  chrome.webview.addEventListener('message',({data})=>{if(data.type==='busy'&&data.value)setOpen(false)});

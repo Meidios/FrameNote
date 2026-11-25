@@ -4,7 +4,7 @@ const clamp=(value,min,max)=>Math.max(min,Math.min(max,value));
 const rectangularShape=s=>['box','magnifier','text'].includes(s.kind);
 function shapePoints(s){
  const points=[['x','y'],['toX','toY']];
- if(s.kind==='angle')points.push(['thirdX','thirdY']);
+ if(s.kind==='angle'||s.thirdX!=null&&['line','arrow'].includes(s.kind))points.push(['thirdX','thirdY']);
  return points;
 }
 
@@ -21,22 +21,45 @@ function drawEditHandles(ink,n,w,h){
    group.append(svg('rect',{x:x+a*width-5,y:y+b*height-5,width:10,height:10,rx:2,
     class:'pictureHandle','data-picture':pictureIndex,'data-corner':[a,b],cursor:a===b?'nwse-resize':'nesw-resize'}));
   }
- }else if(s){
+ }else if(s?.points&&s.kind!=='brush'){
+  s.points.forEach((p,i)=>group.append(svg('circle',{cx:p.x*w,cy:p.y*h,r:5,class:'shapeHandle',
+   'data-shape':'','data-point':'knot,'+i,cursor:'crosshair'})));
+ }else if(s&&s.kind!=='brush'){
   const box=rectangularShape(s);
-  const handles=box?[['x','y'],['toX','y'],['x','toY'],['toX','toY']]:shapePoints(s);
+  const curve=s.kind==='line'||s.kind==='arrow';
+  const handles=box?[['x','y'],['toX','y'],['x','toY'],['toX','toY']]:curve?[['x','y'],['toX','toY']]:shapePoints(s);
   for(const [x,y] of handles){
    const diagonal=(s[x]===Math.min(s.x,s.toX))===(s[y]===Math.min(s.y,s.toY));
    group.append(svg('circle',{cx:s[x]*w,cy:s[y]*h,r:5,class:'shapeHandle',
     'data-shape':'','data-point':[x,y],cursor:box?(diagonal?'nwse-resize':'nesw-resize'):'crosshair'}));
+  }
+  if(curve){
+   const [x,y]=curveMidpoint(s);
+   group.append(svg('circle',{cx:x*w,cy:y*h,r:5,class:'shapeHandle','data-shape':'','data-point':'thirdX,thirdY',cursor:'crosshair'}));
   }
  }
  ink.append(group);
 }
 
 function dragShape(shape,start,point,dx,dy){
+ if(start.points&&start.kind!=='brush'){
+  const index=point?Number(point[1]):-1;
+  const affected=point?[start.points[index]]:start.points;
+  dx=clamp(dx,-Math.min(...affected.map(p=>p.x)),1-Math.max(...affected.map(p=>p.x)));
+  dy=clamp(dy,-Math.min(...affected.map(p=>p.y)),1-Math.max(...affected.map(p=>p.y)));
+  shape.points=start.points.map((p,i)=>index<0||i===index?{x:clamp(p.x+dx,0,1),y:clamp(p.y+dy,0,1)}:p);
+  const first=shape.points[0],last=shape.points.at(-1);
+  Object.assign(shape,{x:first.x,y:first.y,toX:last.x,toY:last.y});return;
+ }
  if(point){
   const [x,y]=point;
-  shape[x]=clamp(start[x]+dx,0,1);shape[y]=clamp(start[y]+dy,0,1);
+  const mid=x==='thirdX'&&start.kind!=='angle'?curveMidpoint(start):[start[x],start[y]];
+  shape[x]=clamp(mid[0]+dx,0,1);shape[y]=clamp(mid[1]+dy,0,1);
+  if(shape.kind==='magnifier'&&shape.preview&&shape.zoom){
+   const oppositeX=start[x==='x'?'toX':'x'],oppositeY=start[y==='y'?'toY':'y'];
+   const factor=Math.max(1,shape.zoom*Math.max(Math.abs(shape[x]-oppositeX),Math.abs(shape[y]-oppositeY)));
+   shape[x]=oppositeX+(shape[x]-oppositeX)/factor;shape[y]=oppositeY+(shape[y]-oppositeY)/factor;
+  }
   return;
  }
  const points=shapePoints(start),xs=points.map(([x])=>start[x]),ys=points.map(([,y])=>start[y]);
@@ -45,12 +68,13 @@ function dragShape(shape,start,point,dx,dy){
  for(const [x,y] of points){
   shape[x]=clamp(start[x]+dx,0,1);shape[y]=clamp(start[y]+dy,0,1);
  }
+ if(start.kind==='brush')shape.points=start.points.map(p=>({x:clamp(p.x+dx,0,1),y:clamp(p.y+dy,0,1)}));
 }
 
 function moveLensPreview(shape,start,dx,dy){
  const {source,target}=magnifierLayout(start,1,1);
  if(!start.preview){
-  // Old packages stored the outer lens; its middle half was the original sample.
+  // Inline lenses store the outer frame; detach the actual sampled rectangle.
   Object.assign(shape,{x:source.x,y:source.y,toX:source.x+source.width,toY:source.y+source.height});
  }
  shape.preview={x:clamp(target.x+dx,0,1-target.width),y:clamp(target.y+dy,0,1-target.height)};
@@ -62,8 +86,8 @@ function endGeometryDrag(commitChange){
  geometryDrag=null;
  if(overlay.hasPointerCapture(drag.pointer))overlay.releasePointerCapture(drag.pointer);
  if(!commitChange){
+  for(const key of Object.keys(drag.target))if(!(key in drag.start))delete drag.target[key];
   Object.assign(drag.target,drag.start);
-  if(drag.preview&&!('preview' in drag.start))delete drag.target.preview;
  }
  else if(drag.moved)persistEdit();
  paint();
@@ -95,13 +119,15 @@ document.addEventListener('DOMContentLoaded',()=>{
   transport.pause();activePicture=i;
   const target=picture?editing.pictures[i]:editing.shape;
   const preview=e.target.hasAttribute('data-lens-preview')&&!picture;
-  geometryDrag={pointer:e.pointerId,at:pos(e),target,start:{...target},picture,corner,point,preview,moved:false};
+  geometryDrag={pointer:e.pointerId,at:[e.clientX,e.clientY],bounds:overlay.getBoundingClientRect(),
+   target,start:{...target},picture,corner,point,preview,moved:false};
   overlay.setPointerCapture(e.pointerId);
   e.preventDefault();e.stopImmediatePropagation();render();
  },true);
  function update(e){
-  const {at,target,start,picture,corner,point,preview}=geometryDrag,[x,y]=pos(e);
-  const dx=x-at[0],dy=y-at[1],bounds=overlay.getBoundingClientRect();
+  // Selecting a note can wrap the toolbar and reposition the viewport during capture.
+  const {at,bounds,target,start,picture,corner,point,preview}=geometryDrag;
+  const dx=(e.clientX-at[0])/bounds.width,dy=(e.clientY-at[1])/bounds.height;
   if(!geometryDrag.moved && Math.hypot(dx*bounds.width,dy*bounds.height)<2)return;
   geometryDrag.moved=true;
   if(picture)dragPicture(target,start,corner,dx,dy,bounds);

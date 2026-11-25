@@ -8,10 +8,17 @@ using System.Text.Json.Serialization;
 namespace FrameNote;
 
 public record LensPosition(double X,double Y);
+public record StrokePoint(double X,double Y);
 public record Drawing(string Kind, double X, double Y, double ToX, double ToY, double? ThirdX=null, double? ThirdY=null,
     [property:JsonIgnore(Condition=JsonIgnoreCondition.WhenWritingNull)] long? RulerFrame=null,
-    [property:JsonIgnore(Condition=JsonIgnoreCondition.WhenWritingNull)] LensPosition? Preview=null){
-    internal double LensScale=>Preview==null?2:Math.Min(2,1/Math.Max(Math.Abs(ToX-X),Math.Abs(ToY-Y)));
+    [property:JsonIgnore(Condition=JsonIgnoreCondition.WhenWritingNull)] LensPosition? Preview=null,
+    [property:JsonIgnore(Condition=JsonIgnoreCondition.WhenWritingNull)] double? Zoom=null,
+    [property:JsonIgnore(Condition=JsonIgnoreCondition.WhenWritingNull)] List<StrokePoint>? Points=null,
+    [property:JsonIgnore(Condition=JsonIgnoreCondition.WhenWritingNull)] int? BrushSize=null,
+    [property:JsonIgnore(Condition=JsonIgnoreCondition.WhenWritingNull)] double? Smoothness=null){
+    internal const double DefaultZoom=3,MaxZoom=16;
+    internal static bool ValidZoom(double value)=>value is >=1 and <=MaxZoom && value*2==Math.Truncate(value*2);
+    internal double LensScale=>Preview==null?Zoom??2:Math.Min(Zoom??2,1/Math.Max(Math.Abs(ToX-X),Math.Abs(ToY-Y)));
     internal string LensLabel=>LensScale.ToString("0.##",System.Globalization.CultureInfo.InvariantCulture)+"×";
 }
 public record RulerScale(double MetresPerWidth,double Aspect,string Unit){
@@ -31,17 +38,22 @@ public record RulerScale(double MetresPerWidth,double Aspect,string Unit){
         return length.ToString("G6",System.Globalization.CultureInfo.InvariantCulture)+" "+Unit;
     }
 }
-public record Voice(string Asset, long DurationUs);
+public record OriginalAudio(string Asset,string Name);
+public record Voice(string Asset, long DurationUs,
+    [property:JsonIgnore(Condition=JsonIgnoreCondition.WhenWritingNull)] string? Format=null,
+    [property:JsonIgnore(Condition=JsonIgnoreCondition.WhenWritingNull)] OriginalAudio? Original=null);
 public record Note(Guid Id, long StartUs, long? EndUs, string Text, Drawing? Shape, int Number=0, string? Color=null, List<Picture>? Pictures=null, Voice? Voice=null,
-    [property:JsonIgnore(Condition=JsonIgnoreCondition.WhenWritingDefault)] bool AutoMeasurementText=false)
+    [property:JsonIgnore(Condition=JsonIgnoreCondition.WhenWritingDefault)] bool AutoMeasurementText=false,
+    [property:JsonIgnore(Condition=JsonIgnoreCondition.WhenWritingNull)] int? Opacity=null)
 {
+    internal double Alpha=>(Opacity??100)/100d;
     internal string DisplayMeasurementText(IReadOnlyDictionary<long,RulerScale>? scales,int width,int height,string unit)=>
         Shape is {Kind:"ruler"} ruler && (AutoMeasurementText||Text.Length==0)
             ?L.Text("距离标尺 ")+RulerScale.Label(ruler,scales,width,height,unit):Text;
     public string ReaperName() => $"#{Number} {(Text.Length==0?(Voice!=null?L.Text("语音批注"):Shape!=null?L.Text("图形批注"):Pictures is {Count:>0}?L.Text("图片批注"):L.Text("批注")):Text.ReplaceLineEndings(" "))}";
     // Legacy notes without an explicit color use the same numbered swatches as the desk.
-    static readonly string[] legacyColors=["#ffd886","#8ddcff","#8de3af","#ff9d97","#cfb1ff","#ffaed8"];
-    public string DisplayColor() => Color??legacyColors[(Number-1)%legacyColors.Length];
+    internal static readonly string[] DefaultColors=["#ffd886","#8ddcff","#8de3af","#ff9d97","#cfb1ff","#ffaed8"];
+    public string DisplayColor() => Color??DefaultColors[(Number-1)%DefaultColors.Length];
     public string ReaperRow(bool colors) {
         var row=$"{StartUs}\t{EndUs??-1}\t{Convert.ToHexString(Encoding.UTF8.GetBytes(ReaperName()))}";
         return colors?row+"\t"+DisplayColor()[1..]:row;
@@ -77,17 +89,25 @@ public record Review(int Version, Guid Id, string FileName, long DurationUs, Lis
         foreach (var n in Notes)if(n==null||!ids.Add(n.Id)||!numbers.Add(n.Number))throw new InvalidDataException(L.Text("批注编号或标识重复。"));
         foreach (var (n,limit) in Notes.Select(n=>(n,DurationUs)).Concat((Timeline?.Trimmed??[]).Select(p=>p.Note).OfType<Note>().Select(n=>(n,Timeline!.SourceDurationUs))))
         {
-            if (n == null || n.Id == Guid.Empty || n.Number<=0 || n.Number>LastNoteNumber || n.Text==null || n.Text.Length > 4000 ||
+            if (n == null || n.Id == Guid.Empty || n.Number<=0 || n.Number>LastNoteNumber || n.Text==null || n.Text.Length > 4000 || n.Opacity is <0 or >100 ||
                 n.Text.Any(c => char.IsControl(c) && c != '\n' && c != '\r' && c != '\t') ||
                 (image ? n.StartUs!=0 || n.EndUs!=null : n.StartUs < 0 || n.StartUs >= limit || (n.EndUs is long e && (e <= n.StartUs || e > limit))))
                 throw new InvalidDataException(L.Text("批注时间、文字或编号无效。"));
-            if (n.Shape is Drawing d && (!(d.Kind is "arrow" or "box" or "line" or "angle" or "ruler" or "magnifier" or "text") ||
+            if (n.Shape is Drawing d && (!(d.Kind is "arrow" or "box" or "line" or "angle" or "ruler" or "magnifier" or "text" or "brush") ||
                 new[]{d.X,d.Y,d.ToX,d.ToY}.Any(x => !double.IsFinite(x) || x < 0 || x > 1) ||
+                (d.Zoom is {} zoom && (d.Kind!="magnifier" || !Drawing.ValidZoom(zoom))) ||
+                (d.Kind=="brush" ? d.BrushSize is not (>=1 and <=64) || d.Points is not {Count:>=1} : d.BrushSize!=null) ||
+                (d.Points is {} points && (points.Count>8192 || points.Any(p=>p==null || !double.IsFinite(p.X+p.Y) || p.X is <0 or >1 || p.Y is <0 or >1) ||
+                    d.Kind!="brush" && (d.Kind is not ("arrow" or "line") || points.Count<2 || d.ThirdX!=null ||
+                    points[0]!=new StrokePoint(d.X,d.Y) || points[^1]!=new StrokePoint(d.ToX,d.ToY)))) ||
+                (d.Smoothness is {} smooth && (d.Kind is not ("arrow" or "line") || d.Points==null || smooth is <0 or >2 || !double.IsFinite(smooth))) ||
+                (d.Kind is "line" or "arrow" && d.ThirdX.HasValue!=d.ThirdY.HasValue) ||
                 (d.Preview is {} preview && (d.Kind!="magnifier" || !double.IsFinite(preview.X+preview.Y) || preview.X is <0 or >1 || preview.Y is <0 or >1)) ||
                 (d.Kind=="angle" && (d.ThirdX==null || d.ThirdY==null)) ||
                 new[]{d.ThirdX,d.ThirdY}.Any(x=>x.HasValue && (!double.IsFinite(x.Value)||x<0||x>1))))
                 throw new InvalidDataException(L.Text("画面标记无效。"));
-            if(n.Voice is {} voice && (image || voice.Asset is not {Length:64} || !voice.Asset.All(c=>char.IsAsciiDigit(c)||c is >= 'a' and <= 'f') || voice.DurationUs<=0 || voice.DurationUs>600_000_000))
+            if(n.Voice is {} voice && (image || voice.Asset is not {Length:64} || !voice.Asset.All(c=>char.IsAsciiDigit(c)||c is >= 'a' and <= 'f') || !ReviewVoice.ValidFormat(voice.Format) || voice.DurationUs<=0 || voice.DurationUs>(voice.Original==null?600_000_000L:604800000000L) ||
+                voice.Original is {} original && !ReviewVoice.ValidOriginal(original)))
                 throw new InvalidDataException(L.Text("语音批注无效。"));
             if(n.Color is {} color && (color.Length!=7 || color[0]!='#' || !color.Skip(1).All(Uri.IsHexDigit)))
                 throw new InvalidDataException(L.Text("批注颜色无效。"));

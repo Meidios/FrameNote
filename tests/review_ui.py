@@ -135,12 +135,18 @@ if __name__ == '__main__':
                 assert page.locator(".noteNumber").all_text_contents()==["#1","#2"]
                 at(page,0);page.keyboard.press("m");page.locator("#body").fill("片头");page.keyboard.press("Control+Enter")
                 assert page.locator(".noteNumber").all_text_contents()==["#3","#1","#2"]
-                assert page.locator("#marks button").first.get_attribute("title").startswith("#3 ")
+                assert page.locator("#marks button").first.get_attribute("aria-description").startswith("#3 ")
                 page.locator(".note.selected .noteDelete").click();page.keyboard.press("Control+z")
                 assert page.locator(".noteNumber").first.inner_text()=="#3"
                 page.locator(".note").first.click();page.locator(".note.selected .noteDelete").click()
-                page.locator(".note").last.click();page.locator("#loop").click()
-                wait(page,"!v.paused && loopId!==null");page.locator("#loop").click()
+                region=page.locator(".note").last
+                region.click();assert page.locator("#loop").is_disabled()
+                region.dblclick()
+                wait(page,"!v.paused && $('loop').getAttribute('aria-pressed')==='true'")
+                expected_region=notes(page)[1]
+                assert page.evaluate("timeSelection")=={k:expected_region[k] for k in ("startUs","endUs")}
+                page.locator("#loop").click()
+                page.keyboard.press("Escape");assert page.locator("#loop").is_disabled()
                 page.locator("#save").click()
                 package=exported_file(proc)
                 wait(page,"document.querySelector('#status').textContent.startsWith('审阅包已保存')")

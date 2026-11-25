@@ -19,6 +19,8 @@ internal partial class ShortcutDialog : Window
     readonly Dictionary<string,DockPanel> groupHeaders=new();
     Shortcut? searchBinding;
     readonly List<Shortcut> working=[];
+    readonly List<string> presetColors=[];
+    readonly List<ToolbarEntry> toolbar=[];
     ShortcutAction? action;
     int editIndex=-1;
     Shortcut? draft;
@@ -35,6 +37,11 @@ internal partial class ShortcutDialog : Window
         AboutIcon.Source=icon.Frames.MaxBy(frame=>frame.PixelWidth);
         Owner=desk=owner;this.save=save;edited=new(current.Bindings);
         DefaultRulerUnit.SelectedValue=current.RulerUnit;
+        for(double zoom=1;zoom<=Drawing.MaxZoom;zoom+=.5)
+            DefaultLensZoom.Items.Add(new ComboBoxItem{Tag=zoom,Content=zoom.ToString("0.#")+"×"});
+        DefaultLensZoom.SelectedValue=current.LensZoom;
+        DefaultOpacity.Text=current.DefaultOpacity.ToString();toolbar.AddRange(current.Toolbar);RefreshToolbar();
+        presetColors.AddRange(current.PresetColors);RefreshPresetRows();
         AutomaticUpdates.IsChecked=automatic;
         InterfaceLanguage.SelectedValue=language;
         ExportDirectory.Text=output.ExportDirectory;SetExportBar(output.ExportBar);SetRecordingFields(output);
@@ -80,7 +87,7 @@ internal partial class ShortcutDialog : Window
 
     void PageChanged(object sender,SelectionChangedEventArgs e){
         if(e.OriginalSource!=Pages||ResetButton==null)return;
-        ResetButton.Visibility=GeneralTab.IsSelected||ShortcutsTab.IsSelected||RecordingTab.IsSelected||ExcelTab.IsSelected?Visibility.Visible:Visibility.Collapsed;
+        ResetButton.Visibility=GeneralTab.IsSelected||AnnotationTab.IsSelected||ShortcutsTab.IsSelected||RecordingTab.IsSelected||ExcelTab.IsSelected?Visibility.Visible:Visibility.Collapsed;
         if(UpdatesTab.IsSelected && ReleaseVersions.ItemsSource==null){
             Desk.BindReleaseNotes(ReleaseVersions,ReleaseText,()=>{
                 ReleaseScroll.ScrollToTop();
@@ -142,7 +149,7 @@ internal partial class ShortcutDialog : Window
         var visibleGroups=new HashSet<string>();
         foreach(var a in Shortcuts.Actions){
             bool match=byKey
-                ? searchBinding is not {} binding || edited[a.Id].Contains(binding)
+                ? searchBinding is not {} binding || edited[a.Id].Any(k=>k==binding || binding.Vk==Shortcut.Wheel && a.Kind==InputKind.Wheel && k.Mods==binding.Mods)
                 : a.Name.Contains(query,StringComparison.CurrentCultureIgnoreCase);
             rows[a.Id].Visibility=match?Visibility.Visible:Visibility.Collapsed;
             if(match)visibleGroups.Add(a.Group);
@@ -214,6 +221,7 @@ internal partial class ShortcutDialog : Window
     void SetRecordingFields(OutputSettings options){
         RecordingFps.SelectedValue=options.Fps==30?"30":"60";RecordingQuality.SelectedValue=options.Quality;
         SaveCopy.IsChecked=options.SaveCopy;CopyDirectory.Text=options.CopyDirectory;
+        HideWhileRecording.IsChecked=options.HideWhileRecording;
     }
     void SetExcelTemplate(ExcelTemplate template){
         ExcelShowSource.IsChecked=template.ShowSource;ExcelZip.IsChecked=template.Zip;
@@ -244,19 +252,131 @@ internal partial class ShortcutDialog : Window
         AutomationProperties.SetHelpText(button,hex);
     }
     sealed class ColorDialogOwner(IntPtr handle):System.Windows.Forms.IWin32Window { public IntPtr Handle=>handle; }
+    string? PickColor(string initial){
+        using var picker=new System.Windows.Forms.ColorDialog{FullOpen=true,Color=System.Drawing.ColorTranslator.FromHtml(initial)};
+        return picker.ShowDialog(new ColorDialogOwner(new WindowInteropHelper(this).Handle))==System.Windows.Forms.DialogResult.OK
+            ?$"#{picker.Color.R:X2}{picker.Color.G:X2}{picker.Color.B:X2}":null;
+    }
     void ChooseBarColor(object sender,RoutedEventArgs e){
         var button=(Button)sender;
-        using var picker=new System.Windows.Forms.ColorDialog{FullOpen=true,Color=System.Drawing.ColorTranslator.FromHtml((string)button.Tag)};
-        if(picker.ShowDialog(new ColorDialogOwner(new WindowInteropHelper(this).Handle))==System.Windows.Forms.DialogResult.OK)
-            SetColorButton(button,$"#{picker.Color.R:X2}{picker.Color.G:X2}{picker.Color.B:X2}");
+        if(PickColor((string)button.Tag) is {} color)SetColorButton(button,color);
+    }
+    void EditPreset(int index){
+        bool add=index==presetColors.Count;
+        if(PickColor(add?"#FFFFFF":presetColors[index]) is not {} picked)return;
+        string color=picked.ToLowerInvariant();
+        int existing=presetColors.IndexOf(color);
+        if(existing>=0 && existing!=index){
+            Message(SaveError,L.Text("预设中已有这个颜色。"));return;
+        }
+        if(add)presetColors.Add(color);else presetColors[index]=color;
+        RefreshPresetRows();
+    }
+    void AddPresetColor(object sender,RoutedEventArgs e)=>EditPreset(presetColors.Count);
+    void MovePreset(int index,int other){
+        (presetColors[index],presetColors[other])=(presetColors[other],presetColors[index]);
+        RefreshPresetRows();
+    }
+    void EnableRowDrag<T>(DockPanel row,List<T> items,int index,Action refresh){
+        Point? start=null;
+        string format="FrameNote.Settings."+typeof(T).Name;
+        row.Background=Brushes.Transparent;row.AllowDrop=true;
+        var grip=new Border{Width=20,Cursor=Cursors.SizeNS,Background=Brushes.Transparent,Child=MakeIcon("grip",13),ToolTip=L.Text("拖动排序")};
+        row.Children.Add(grip);
+        row.PreviewMouseLeftButtonDown+=(_,e)=>start=e.GetPosition(this);
+        row.PreviewMouseMove+=(_,e)=>{
+            if(e.LeftButton!=MouseButtonState.Pressed){start=null;return;}
+            if(start is not {} from)return;
+            var delta=e.GetPosition(this)-from;
+            if(Math.Abs(delta.Y)<SystemParameters.MinimumVerticalDragDistance && Math.Abs(delta.X)<SystemParameters.MinimumHorizontalDragDistance)return;
+            start=null;Mouse.Capture(null);e.Handled=true;
+            DragDrop.DoDragDrop(row,new DataObject(format,index),DragDropEffects.Move);
+        };
+        row.PreviewDragOver+=(_,e)=>{
+            if(!e.Data.GetDataPresent(format))return;
+            e.Effects=DragDropEffects.Move;e.Handled=true;row.SetResourceReference(Panel.BackgroundProperty,"card");row.BringIntoView();
+        };
+        row.DragLeave+=(_,_)=>row.Background=Brushes.Transparent;
+        row.PreviewDrop+=(_,e)=>{
+            if(e.Data.GetData(format) is not int source||source<0||source>=items.Count)return;
+            row.Background=Brushes.Transparent;e.Handled=true;
+            int dest=index+(e.GetPosition(row).Y>row.ActualHeight/2?1:0);
+            if(dest>source)dest--;
+            if(dest==source)return;
+            T item=items[source];items.RemoveAt(source);items.Insert(dest,item);refresh();
+        };
+    }
+    void RefreshPresetRows(){
+        Message(SaveError,null);
+        PresetRows.Children.Clear();AddPreset.IsEnabled=presetColors.Count<10;
+        for(int i=0;i<presetColors.Count;i++){
+            int index=i;
+            var row=new DockPanel{Margin=new Thickness(0,2,0,2)};
+            EnableRowDrag(row,presetColors,index,RefreshPresetRows);
+            void Command(string icon,string label,bool enabled,Action click){
+                var button=IconButton(icon,label,click);button.IsEnabled=enabled;
+                DockPanel.SetDock(button,Dock.Right);row.Children.Add(button);
+            }
+            Command("trash",L.Text("删除颜色"),presetColors.Count>1,()=>{presetColors.RemoveAt(index);RefreshPresetRows();});
+            Command("nextNote",L.Text("下移颜色"),i+1<presetColors.Count,()=>MovePreset(index,index+1));
+            Command("prevNote",L.Text("上移颜色"),i>0,()=>MovePreset(index,index-1));
+            var swatch=new Button{HorizontalAlignment=HorizontalAlignment.Left};
+            SetColorButton(swatch,presetColors[i]);swatch.Click+=(_,_)=>EditPreset(index);
+            AutomationProperties.SetName(swatch,L.Text("修改颜色")+" "+presetColors[i]);
+            row.Children.Add(swatch);PresetRows.Children.Add(row);
+        }
+    }
+    void OpacityWheel(object sender,MouseWheelEventArgs e){
+        if(int.TryParse(DefaultOpacity.Text,out int value))
+            DefaultOpacity.Text=Math.Clamp((long)value+5*Math.Sign(e.Delta),0,100).ToString();
+        e.Handled=true;
+    }
+    void AddSeparator(object sender,RoutedEventArgs e){toolbar.Add(new(ToolbarEntry.Separator));RefreshToolbar();((FrameworkElement)ToolbarRows.Children[toolbar.Count-1]).BringIntoView();}
+    void RefreshToolbar(){
+        ToolbarRows.Children.Clear();
+        for(int i=0;i<toolbar.Count;i++){
+            int index=i;
+            var entry=toolbar[i];
+            var row=new DockPanel{Margin=new Thickness(0,2,0,2)};
+            EnableRowDrag(row,toolbar,index,RefreshToolbar);
+            void Command(string icon,string label,bool enabled,Action action){
+                var button=IconButton(icon,label,action);button.IsEnabled=enabled;
+                DockPanel.SetDock(button,Dock.Right);row.Children.Add(button);
+            }
+            void Move(int other){(toolbar[index],toolbar[other])=(toolbar[other],toolbar[index]);RefreshToolbar();}
+            Command("nextNote",L.Text("下移"),i<toolbar.Count-1,()=>Move(index+1));
+            Command("prevNote",L.Text("上移"),i>0,()=>Move(index-1));
+            if(entry.Id==ToolbarEntry.Separator){
+                Command("trash",L.Text("删除分隔线"),true,()=>{toolbar.RemoveAt(index);RefreshToolbar();});
+                row.Children.Add(new TextBlock{Text=L.Text("分隔线"),VerticalAlignment=VerticalAlignment.Center});
+            }else{
+                var wide=new CheckBox{Content=L.Text("双宽"),IsChecked=entry.Wide,Margin=new Thickness(5,0,12,0),VerticalAlignment=VerticalAlignment.Center};
+                void SetWidth(object sender,RoutedEventArgs e)=>toolbar[index]=toolbar[index] with{Wide=wide.IsChecked==true};
+                wide.Checked+=SetWidth;wide.Unchecked+=SetWidth;
+                DockPanel.SetDock(wide,Dock.Right);row.Children.Add(wide);
+                var visible=new CheckBox{Content=L.Text(ToolbarEntry.Names[entry.Id]),IsChecked=entry.Visible,VerticalAlignment=VerticalAlignment.Center};
+                void SetVisible(object sender,RoutedEventArgs e)=>toolbar[index]=toolbar[index] with{Visible=visible.IsChecked==true};
+                visible.Checked+=SetVisible;visible.Unchecked+=SetVisible;
+                string icon=entry.Id switch{"point"=>"point","toolRuler"=>"ruler","voiceRecord"=>"mic",_=>"tool-"+entry.Id};
+                var graphic=MakeIcon(icon,16);graphic.Margin=new Thickness(3,0,7,0);
+                row.Children.Add(graphic);row.Children.Add(visible);
+            }
+            ToolbarRows.Children.Add(row);
+        }
     }
     void ResetPage(object sender,RoutedEventArgs e){
         if(ExcelTab.IsSelected){SetExcelTemplate(ExcelTemplate.Defaults);Message(SaveError,null);return;}
         if(RecordingTab.IsSelected){SetRecordingFields(OutputSettings.Defaults);return;}
         if(ShortcutsTab.IsSelected){Reset(Shortcuts.Actions);return;}
+        if(AnnotationTab.IsSelected){
+            DefaultLensZoom.SelectedValue=Drawing.DefaultZoom;DefaultOpacity.Text="80";
+            presetColors.Clear();presetColors.AddRange(Note.DefaultColors);RefreshPresetRows();
+            toolbar.Clear();toolbar.AddRange(ToolbarEntry.Defaults());RefreshToolbar();return;
+        }
         if(GeneralTab.IsSelected){
             InterfaceLanguage.SelectedValue=L.DefaultLanguage;
             DefaultRulerUnit.SelectedValue=RulerScale.DefaultUnit;
+
             ExportDirectory.Text=OutputSettings.Defaults.ExportDirectory;
             SetExportBar(ExportBarOptions.Defaults);
         }
@@ -290,8 +410,10 @@ internal partial class ShortcutDialog : Window
             bool copy=SaveCopy.IsChecked==true;
             var output=new OutputSettings(Equals(RecordingFps.SelectedValue,"30")?30:60,(string)RecordingQuality.SelectedValue,copy,
                 copy?OutputSettings.DirectoryPath(CopyDirectory.Text):CopyDirectory.Text,OutputSettings.DirectoryPath(ExportDirectory.Text),
-                new(ExportBarEnabled.IsChecked==true,(string)ExportBarBackground.Tag,(string)ExportBarFill.Tag),ReadExcelTemplate());
-            save(new(edited,(string)DefaultRulerUnit.SelectedValue),AutomaticUpdates.IsChecked==true,(string)InterfaceLanguage.SelectedValue,output);DialogResult=true;
+                new(ExportBarEnabled.IsChecked==true,(string)ExportBarBackground.Tag,(string)ExportBarFill.Tag),ReadExcelTemplate(),HideWhileRecording.IsChecked==true);
+            if(!int.TryParse(DefaultOpacity.Text,out int opacity) || opacity is <0 or >100)throw new InvalidDataException(L.Text("不透明度须为 0 到 100 之间的整数。"));
+            save(new(edited,(string)DefaultRulerUnit.SelectedValue,(double)DefaultLensZoom.SelectedValue,[..presetColors],opacity,[..toolbar]),
+                AutomaticUpdates.IsChecked==true,(string)InterfaceLanguage.SelectedValue,output);DialogResult=true;
         }catch(Exception ex) when(ex is IOException or InvalidDataException or UnauthorizedAccessException or InvalidOperationException or ArgumentException or NotSupportedException){Message(SaveError,ex.Message);}
     }
 
@@ -367,9 +489,9 @@ internal partial class ShortcutDialog : Window
             MouseChoice.Items.Clear();
             bool modifierOnly=action.Kind==InputKind.Modifier;
             MouseChoice.Visibility=GestureCaption.Visibility=modifierOnly?Visibility.Collapsed:Visibility.Visible;
-            int[] choices=action.Kind==InputKind.Wheel?[Shortcut.Wheel]:modifierOnly?[]:[1,2,4,5,6];
+            int[] choices=action.Kind==InputKind.Wheel?[Shortcut.Wheel,Shortcut.ReverseWheel]:modifierOnly?[]:[1,2,4,5,6];
             foreach(int vk in choices)MouseChoice.Items.Add(new ComboBoxItem{Content=new Shortcut(0,vk).Label(action.Kind),Tag=vk});
-            MouseChoice.SelectedIndex=draft is {} saved?Array.IndexOf(choices,saved.Vk):choices.Length==1?0:-1;
+            MouseChoice.SelectedIndex=draft is {} saved?Array.IndexOf(choices,saved.Vk):action.Kind==InputKind.Wheel?0:-1;
             updating=false;ReadGesture();
         }
         AddBinding.IsEnabled=!Recording;UpdateDraft();
@@ -386,7 +508,7 @@ internal partial class ShortcutDialog : Window
     string? Problem(Shortcut key){
         var current=action!;
         if(Shortcuts.Problem(current,key) is {} invalid)return invalid;
-        if(working.Where((_,i)=>i!=editIndex).Contains(key))return L.Text("这个操作已使用此快捷键。");
+        if(working.Where((_,i)=>i!=editIndex).Any(k=>Shortcuts.Overlap(current,k,current,key)))return L.Text("这个操作已使用此快捷键。");
         var owner=Shortcuts.Actions.FirstOrDefault(a=>a!=current && edited[a.Id].Any(other=>Shortcuts.Overlap(a,other,current,key)));
         return owner==null?null:L.Format($"此快捷键已用于「{owner.Name}」，请换一个。");
     }

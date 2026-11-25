@@ -3,7 +3,7 @@
  const buttons='button[aria-description]:not([aria-haspopup="menu"],[data-no-hint])';
  const groups='header,#transport,#timelineBar,#imageToolbar,.imageExport,#imageNav,#playlistToggle,#capturePanel,.sideTitle,.rulerControls';
  const hint=document.getElementById('buttonHint');
- let group=null, target=null, fade=null;
+ let group=null, target=null, fade=null,timer=0;
 
  function light(next,x,y){
   if(group!==next){
@@ -33,34 +33,45 @@
  }
  const changes=new MutationObserver(update);
  const bounds=new ResizeObserver(position);
- function show(button){
-  if(target===button)return;
+ function show(button,immediate=false){
+  if(target===button&&!(immediate&&timer))return;
+  clearTimeout(timer);timer=0;
   changes.disconnect();
   bounds.disconnect();
   fade?.cancel();
   target=button;
-  hint.classList.toggle('visible',!!button);
-  if(button){
+  hint.classList.remove('visible');
+  if(hint.matches(':popover-open'))hint.hidePopover();
+  if(!button)return;
+  function reveal(){
+   timer=0;
+   if(!button.isConnected||!button.getClientRects().length){show(null);return}
+   hint.showPopover();
    changes.observe(button,{attributes:true,attributeFilter:['aria-description','hidden']});
    bounds.observe(button);
    update();
-   if(target&&!matchMedia('(prefers-reduced-motion: reduce)').matches){
+   if(!target)return;
+   hint.classList.add('visible');
+   if(!matchMedia('(prefers-reduced-motion: reduce)').matches){
     fade=hint.animate([{opacity:0},{opacity:1}],{duration:120,easing:'ease-out'});
    }
   }
+  if(immediate)reveal();else timer=setTimeout(reveal,1000);
  }
  document.addEventListener('pointermove',e=>{
   if(e.pointerType!=='mouse'||e.buttons)return;
   const next=e.target.closest(groups)??e.target.closest('select');
   light(next,e.clientX,e.clientY);
-  show(next?e.target.closest(buttons):null);
+  show(e.target.closest(buttons));
  });
  function clear(){light(null);show(null)}
  document.addEventListener('pointerout',e=>{
-  if(!e.relatedTarget||!group?.contains(e.relatedTarget))clear();
+  if(!e.relatedTarget){clear();return}
+  if(target&&!target.contains(e.relatedTarget))show(null);
+  if(group&&!group.contains(e.relatedTarget))light(null);
  });
  document.addEventListener('focusin',e=>{
-  if(e.target.matches(buttons+':focus-visible'))show(e.target);
+  if(e.target.matches(buttons+':focus-visible'))show(e.target,true);
  });
  document.addEventListener('focusout',e=>{if(e.target===target)show(null)});
  document.addEventListener('pointerdown',clear,true);

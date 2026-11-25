@@ -11,11 +11,14 @@ public static class Probe
         return File.Exists(bundled)?bundled:name+".exe";
     }
     public static Task<string> Run(string name,params string[] args)=>Run(default,name,args);
-    public static async Task<string> Run(CancellationToken token,string name,params string[] args) {
-        token.ThrowIfCancellationRequested();
+    static Process StartReader(string name,params string[] args){
         var start=new ProcessStartInfo(Tool(name)){UseShellExecute=false,CreateNoWindow=true,RedirectStandardOutput=true,RedirectStandardError=true};
         foreach(var a in args)start.ArgumentList.Add(a);
-        using var p=Process.Start(start)??throw new IOException(L.Text("无法启动媒体工具。"));
+        return Process.Start(start)??throw new IOException(L.Text("无法启动媒体工具。"));
+    }
+    public static async Task<string> Run(CancellationToken token,string name,params string[] args) {
+        token.ThrowIfCancellationRequested();
+        using var p=StartReader(name,args);
         using var cancel=token.Register(()=>Kill(p));
         var stdout=p.StandardOutput.ReadToEndAsync();var stderr=p.StandardError.ReadToEndAsync();
         await p.WaitForExitAsync();var error=await stderr;var output=await stdout;
@@ -83,12 +86,37 @@ public static class Probe
     public static Task<string> DecodeFrame(string source,long us,string file,CancellationToken token)=>
         Run(token,"ffmpeg","-nostdin","-v","error","-ss",(us/1e6).ToString("F6",CultureInfo.InvariantCulture),
             "-i",source,"-map","0:v:0","-frames:v","1","-threads","1",file);
-    public static async Task<long[]> Frames(string path,Info info,CancellationToken token=default){
-        var packets=await Run(token,"ffprobe","-v","error","-select_streams","v:0","-show_entries","packet=pts_time","-of","csv=p=0","-i",path);
-        if(packets.Contains("N/A") || string.IsNullOrWhiteSpace(packets))
-            packets=await Run(token,"ffprobe","-v","error","-select_streams","v:0","-show_entries","frame=best_effort_timestamp_time","-of","csv=p=0","-i",path);
-        var pts=packets.Split('\n',StringSplitOptions.RemoveEmptyEntries).Select(l=>l.Trim().Split(',')[0]).Where(l=>double.TryParse(l,CultureInfo.InvariantCulture,out _)).Select(s=>Us(s)-info.Origin).Where(t=>t>=0 && t<info.Duration).Distinct().Order().ToArray();
-        if(pts.Length==0)throw new InvalidDataException(L.Text("无法读取视频帧时间。"));
-        return pts;
-    }
+    public static Task<long[]> Frames(string path,Info info,CancellationToken token=default,IProgress<int>? progress=null)=>Task.Run(()=>{
+        int lastPercent=-1;
+        foreach(var entry in new[]{"packet=pts_time","frame=best_effort_timestamp_time"}){
+            token.ThrowIfCancellationRequested();
+            using var process=StartReader("ffprobe","-v","error","-select_streams","v:0","-show_entries",entry,"-of","csv=p=0","-i",path);
+            using var cancel=token.Register(()=>Kill(process));
+            var error=process.StandardError.ReadToEndAsync();
+            var times=new List<long>();
+            bool missing=false;
+            while(process.StandardOutput.ReadLine() is {} line){
+                var field=line.AsSpan();
+                int comma=field.IndexOf(',');
+                if(comma>=0)field=field[..comma];
+                if(!double.TryParse(field,CultureInfo.InvariantCulture,out double seconds)){
+                    if(field.SequenceEqual("N/A"))missing=true;
+                    continue;
+                }
+                long us=(long)Math.Round(seconds*1e6)-info.Origin;
+                if(us<0||us>=info.Duration)continue;
+                times.Add(us);
+                if(progress==null)continue;
+                int percent=Math.Min(99,(int)(100d*us/info.Duration));
+                if(percent>lastPercent){progress.Report(percent);lastPercent=percent;}
+            }
+            process.WaitForExit();token.ThrowIfCancellationRequested();
+            if(process.ExitCode!=0)throw new InvalidDataException(error.GetAwaiter().GetResult().Trim());
+            if(times.Count==0 || missing && entry=="packet=pts_time")continue;
+            var result=times.Distinct().Order().ToArray();
+            progress?.Report(100);
+            return result;
+        }
+        throw new InvalidDataException(L.Text("无法读取视频帧时间。"));
+    },token);
 }

@@ -105,7 +105,7 @@ def exercise(p):
         assert read() == moved
         if kind in ("box","text","magnifier"):
             pairs += [("x","toY"), ("toX","y")]
-        assert p.locator(".shapeHandle").count() == len(pairs)
+        assert p.locator(".shapeHandle").count() == len(pairs) + (kind in ("arrow","line"))
         for a,b in pairs:
             start = read()
             handle = p.locator(f'.shapeHandle[data-point="{a},{b}"]')
@@ -163,6 +163,8 @@ def exercise(p):
     p.keyboard.press("Escape")
 
     # Move all three angle vertices together against the top-left boundary.
+    overlay = p.locator("#overlay").bounding_box()
+    w,h = overlay["width"],overlay["height"]
     s = old[2]["shape"]
     x,y = screen((s["x"]+s["toX"])/2, (s["y"]+s["toY"])/2)
     drag(p, x, y, -w, -h)

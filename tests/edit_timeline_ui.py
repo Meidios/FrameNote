@@ -34,8 +34,9 @@ def check_trim_preview(p,before,first,last):
     video=p.locator('#videoClips .editClip').bounding_box()
     audio=p.locator('#audioClips .editClip').bounding_box()
     assert abs(video['x']-audio['x'])<1 and abs(video['width']-audio['width'])<1,(video,audio)
-    for old,shown in zip(before,media_images(p)):
-        box=(round(first*old.width),5,round(last*old.width),old.height-5)
+    for track,clip,old,shown in zip(('video','audio'),(video,audio),before,media_images(p)):
+        top=round(clip['y']-p.locator('#'+track+'Clips').bounding_box()['y'])
+        box=(round(first*old.width),top+4,round(last*old.width),old.height-5)
         retained=old.crop(box)
         assert len(retained.getcolors(retained.width*retained.height))>2
         difference=ImageChops.difference(retained,shown.crop(box))
@@ -44,6 +45,88 @@ def check_trim_preview(p,before,first,last):
             tint=ImageStat.Stat(channel).median[0]
             matching=sum(channel.histogram()[max(0,tint-2):tint+3])
             assert matching>.98*channel.width*channel.height,(tint,matching,box)
+
+def check_marquee(proc,p):
+    for sec in (2,4,6,9,12):
+        p.evaluate('us=>seekUs(us)',sec*1000000)
+        wait(p,'us=>!v.seeking && Math.abs(shown-us)<1000',sec*1000000)
+        p.locator('#splitClip').click()
+    baseline=p.evaluate('doc.timeline')
+    def state():
+        return p.evaluate('doc.timeline')
+    def selected():
+        return set(p.locator('.editClip[aria-pressed=true]').evaluate_all('els=>els.map(el=>el.dataset.id)'))
+    def ids(track,starts):
+        return {c['id'] for c in baseline['clips'] if c['track']==track and c['startUs']/1000000 in starts}
+    def point(sec,track,strip=False):
+        row=p.locator('#'+track+'Clips').bounding_box()
+        return (row['x']+row['width']*sec/14,row['y']+(2 if strip else row['height']/2))
+    def marquee(a,b,expected,shift=False,cancel=False):
+        if shift:p.keyboard.down('Shift')
+        p.mouse.move(*a);p.mouse.down();p.mouse.move(*b,steps=6)
+        assert p.locator('#clipMarquee').is_visible() and selected()==expected,(expected,selected())
+        if cancel:p.keyboard.press('Escape')
+        p.mouse.up()
+        if shift:p.keyboard.up('Shift')
+        assert p.locator('#clipMarquee').is_hidden()
+    pair=ids('video',(4,6))
+    marquee(point(4.2,'video',True),point(8,'video',True),pair)
+    assert selected()==pair and p.locator('#deleteClip').is_enabled()
+    all_tracks=pair|ids('audio',(4,6))|ids('voice',(6,))
+    marquee(point(8,'voice'),point(4.2,'video'),all_tracks,shift=True,cancel=True)
+    assert selected()==pair and state()==baseline,(selected(),pair,state()==baseline,p.locator('#status').text_content())
+    marquee(point(8,'voice'),point(4.2,'video'),all_tracks,shift=True)
+    assert selected()==all_tracks
+    marquee(point(8,'video'),point(4.2,'video'),pair,shift=True)
+    p.mouse.move(*point(6,'video'));p.keyboard.down('Control');p.mouse.wheel(0,-120);p.keyboard.up('Control')
+    wait(p,"$('timeline').style.width==='200%' && $('scroll').scrollLeft>0")
+    marquee(point(8,'audio',True),point(4.2,'video',True),pair|ids('audio',(4,6)))
+    p.keyboard.down('Control');p.mouse.wheel(0,120);p.keyboard.up('Control')
+    wait(p,"$('timeline').style.width==='100%'")
+    marquee(point(4.2,'video',True),point(8,'video'),pair)
+    member=next(iter(ids('video',(4,))))
+    clip='[data-id="'+member+'"]'
+    def preview():
+        assert state()==baseline and selected()==pair
+        assert abs(p.locator(clip).evaluate('el=>parseFloat(el.style.left)*doc.durationUs/100')-7000000)<2
+    drag(p,clip,6400000,while_held=preview,cancel=True)
+    assert state()==baseline and selected()==pair
+    drag(p,clip,6400000,while_held=preview)
+    reordered=state()
+    for track in ('video','audio'):
+        assert sorted((c['sourceUs']//1000000,c['startUs']//1000000) for c in reordered['clips'] if c['track']==track)==[(0,0),(2,2),(4,7),(6,9),(9,4),(12,12)]
+    assert p.evaluate("doc.notes[0].startUs===9000000 && doc.timeline.clips.find(c=>c.track==='voice').startUs===9000000")
+    p.keyboard.press('Control+z')
+    assert state()==baseline and selected()==pair
+    p.keyboard.press('Control+Shift+z')
+    assert state()==reordered and selected()==pair
+    saved_group=work/'group.framenote'
+    p.locator('#save').click();exported_file(proc,saved_group)
+    p.keyboard.press('Control+z');p.keyboard.press('Delete')
+    assert len(state()['clips'])==8 and not p.evaluate('doc.notes') and not selected()
+    p.keyboard.press('Control+z');assert state()==baseline and selected()==pair
+    p.locator('#linkTracks').click()
+    p.locator('#deleteClip').click()
+    remaining=state()['clips']
+    assert [c for c in remaining if c['track']!='video']==[c for c in baseline['clips'] if c['track']!='video']
+    assert {c['id'] for c in remaining}=={c['id'] for c in baseline['clips']}-pair
+    before_move=state()
+    first_pair=ids('video',(0,2))
+    marquee(point(.3,'video',True),point(3.5,'video'),first_pair)
+    first='[data-id="'+next(iter(ids('video',(0,))))+'"]'
+    # Move both clips into the gap, with snapping disabled for this drag.
+    p.keyboard.down('Alt');drag(p,first,4300000);p.keyboard.up('Alt')
+    start_by_id={c['id']:c['startUs'] for c in state()['clips']}
+    shifts=[start_by_id[c['id']]-c['startUs'] for c in remaining if c['id'] in first_pair]
+    assert len(set(shifts))==1 and abs(shifts[0]-4300000)<40000,shifts
+    assert all(start_by_id[c['id']]==c['startUs'] for c in remaining if c['id'] not in first_pair)
+    p.keyboard.press('Control+z');assert state()==before_move
+    p.keyboard.press('Control+z');p.keyboard.press('Control+z')
+    assert state()==baseline
+    for _ in range(5):p.keyboard.press('Control+z')
+    assert state() is None
+    print('PASS: live marquee, reverse cross-track selection, cancel, group move and reorder, both delete controls and undo/redo.',flush=True)
+    return saved_group,reordered
 
 def check_reorder(proc,p):
     def split_at(us):
@@ -131,6 +214,7 @@ with sync_playwright() as pw:
             return images.length>0 && images.every(im=>im.hasAttribute('href')) && $('sourceWave').hasAttribute('d')}""",timeout=15000)
         assert '#1' in p.locator('#markLanes').inner_text()
         check_reorder(proc,p)
+        saved_group,reordered=check_marquee(proc,p)
         p.locator('#trackDesk').screenshot(path=str(work/'timeline-clips.png'))
         join=tools.get_by_role('button',name='贴到上一片段')
         join_next=tools.get_by_role('button',name='贴到下一片段')
@@ -265,6 +349,12 @@ with sync_playwright() as pw:
     finally:stop(proc)
     assert not images.parent.exists(),images.parent
     assert not (profile/'Drafts').exists()
+    proc,p=launch(pw,saved_group)
+    try:
+        actual=p.evaluate('doc.timeline')
+        assert {c['id']:(c['startUs'],c['sourceUs'],c['durationUs']) for c in actual['clips']}=={c['id']:(c['startUs'],c['sourceUs'],c['durationUs']) for c in reordered['clips']}
+        assert p.evaluate('doc.notes[0].startUs')==9000000
+    finally:stop(proc)
     proc,p=launch(pw,package)
     try:
         assert p.evaluate('doc.timeline == null && doc.notes[0].startUs===6000000')

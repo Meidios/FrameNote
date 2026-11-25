@@ -7,8 +7,25 @@ function bindingText(ids,before,after=''){
 }
 const shortcutSuffix=id=>bindingText(id,tr('（'),tr('）'));
 const shortcutHint=(label,id)=>label+shortcutSuffix(id);
-function bound(id,e,vk=e.keyCode){
- return window.shortcutBindings[id].keys.some(b=>!b.with&&b.vk===vk&&b.mods===keyMods(e));
+function bound(id,e,vk=e.keyCode,mods=keyMods(e)){
+ return window.shortcutBindings[id].keys.some(b=>!b.with&&b.vk===vk&&b.mods===mods);
+}
+function wheelDirection(id,e){
+ const key=window.shortcutBindings[id].keys.find(b=>b.mods===keyMods(e));
+ return key?.vk===256?1:key?.vk===257?-1:0;
+}
+function applyAnnotationToolbar(entries){
+ const bar=$('annotationTools');
+ bar.querySelectorAll('.toolSeparator').forEach(el=>el.remove());
+ for(const item of entries){
+  if(item.id==='separator'){
+   const separator=document.createElement('span');separator.className='toolSeparator';
+   separator.setAttribute('role','separator');bar.append(separator);continue;
+  }
+  const button=$(item.id);if(!button)continue;
+  button.toggleAttribute('data-toolbar-hidden',!item.visible);
+  button.classList.toggle('doubleWidth',item.wide);bar.append(button);
+ }
 }
 // If a speed key also starts a two-key reset, wait for release before changing speed.
 const speedKeys=(()=>{
@@ -54,14 +71,20 @@ function refreshShortcutHints(){
   if(id==='inBtn'||id==='outBtn')el.setAttribute('aria-label',el.ariaDescription);
   const badge=el.querySelector('kbd');if(badge)badge.textContent=bindingLabel(action);
  }
+ const pathHint=tr('拖拽绘制，或单击连续落点。右键、双击或 Enter 完成，Esc 取消。');
+ $('arrow').ariaDescription+=' · '+pathHint;
+ $('line').ariaDescription=tr('线')+' · '+pathHint;
  $('welcome').querySelector('p').textContent=tr('打开视频、图片或审阅包')+bindingText('paste',tr('，或按 '),tr(' 查看剪贴板图片'))+tr('。');
  $('timelineTools').title=[bindingText('zoomTimeline','',tr('缩放时间线')),bindingText('panTimeline','',tr('平移时间线'))].filter(Boolean).join(tr('，'));
  $('play').ariaDescription=shortcutHint(transport.paused?tr('播放'):tr('暂停'),'play');
  $('fullPreview').ariaDescription=shortcutHint(isFullPreview()?tr('退出全屏'):tr('全屏预览'),'fullPreview');
- if(inUs!==null)$('rangeHint').textContent=tr('起点 ')+fmt(inUs)+bindingText('outBtn',tr('　定位后按 '));
  window.captureButtons?.();
 }
 document.addEventListener('DOMContentLoaded',refreshShortcutHints);
 chrome.webview.addEventListener('message',({data:m})=>{
- if(m.type==='shortcuts'){speedKeys.clear();window.shortcutBindings=m.bindings;refreshShortcutHints();setDefaultRulerUnit(m.defaultRulerUnit)}
+ if(m.type==='shortcuts'){
+  speedKeys.clear();window.shortcutBindings=m.bindings;refreshShortcutHints();setDefaultRulerUnit(m.defaultRulerUnit);
+  defaultLensZoom=m.defaultLensZoom;defaultOpacity=m.defaultOpacity;applyAnnotationToolbar(m.annotationToolbar);
+  buildPalette(m.presetColors);refreshDetails();
+ }
 });

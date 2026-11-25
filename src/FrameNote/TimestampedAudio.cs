@@ -25,7 +25,7 @@ sealed class TimestampedAudio : IDisposable
 
     public static long Now100ns() => (long)(Stopwatch.GetTimestamp()*(10_000_000.0/Stopwatch.Frequency));
 
-    public TimestampedAudio(string id,bool loopback,string path,long epoch)
+    public TimestampedAudio(string id,bool loopback,string path,long epoch,CapturePauses? pauses=null)
     {
         Path=path;
         DeviceId=id;
@@ -45,6 +45,22 @@ sealed class TimestampedAudio : IDisposable
                 var writer=new EbmlWriter(file);
                 Header(writer,Channels);
                 var bytes=Array.Empty<byte>();long previousQpc=-1,previousDevice=0;
+                int transition=0;long omitted=0;
+                void WriteFrames(IntPtr ptr,bool silent,int offset,int frames,long timestamp){
+                    int length=checked(frames*format.BlockAlign);
+                    if(bytes.Length<length+4)bytes=new byte[length+4];
+                    bytes[0]=0x81;bytes[1]=bytes[2]=0;bytes[3]=0x80;
+                    if(silent)Array.Clear(bytes,4,length);
+                    else Marshal.Copy(IntPtr.Add(ptr,offset*format.BlockAlign),bytes,4,length);
+                    using var cluster=writer.StartMasterElement(Id(0x1F43B675));
+                    cluster.Write(Id(0xE7),(ulong)((timestamp-epoch)/10));
+                    cluster.Write(Id(0xA3),bytes,0,length+4);HasPackets=true;
+                    int max=0;
+                    foreach(short sample in MemoryMarshal.Cast<byte,short>(bytes.AsSpan(4,length)))
+                        max=Math.Max(max,Math.Abs((int)sample));
+                    Volatile.Write(ref peak,max/32768f);
+                    Volatile.Write(ref peakAt,Stopwatch.GetTimestamp());
+                }
                 client.Start();ready.SetResult();
                 try {
                     while(!stop.IsCancellationRequested){
@@ -58,19 +74,19 @@ sealed class TimestampedAudio : IDisposable
                                 }
                                 if(qpc<epoch || qpc<=previousQpc || count==0)continue;
                                 previousQpc=qpc;previousDevice=position;
-                                int length=checked(count*format.BlockAlign);
-                                if(bytes.Length<length+4)bytes=new byte[length+4];
-                                bytes[0]=0x81;bytes[1]=bytes[2]=0;bytes[3]=0x80; // track 1, cluster-relative time 0, keyframe
-                                if((state&AudioClientBufferFlags.Silent)!=0)Array.Clear(bytes,4,length);
-                                else Marshal.Copy(ptr,bytes,4,length);
-                                using var cluster=writer.StartMasterElement(Id(0x1F43B675));
-                                cluster.Write(Id(0xE7),(ulong)((qpc-epoch)/10)); // microsecond time base
-                                cluster.Write(Id(0xA3),bytes,0,length+4);HasPackets=true;
-                                int max=0;
-                                foreach(short sample in MemoryMarshal.Cast<byte,short>(bytes.AsSpan(4,length)))
-                                    max=Math.Max(max,Math.Abs((int)sample));
-                                Volatile.Write(ref peak,max/32768f);
-                                Volatile.Write(ref peakAt,Stopwatch.GetTimestamp());
+                                var cuts=pauses?.Changes??Array.Empty<long>();
+                                int offset=0;
+                                while(offset<count){
+                                    long timestamp=qpc+(long)offset*10_000_000/Rate;
+                                    while(transition<cuts.Length && cuts[transition]<=timestamp){
+                                        if(transition%2==1)omitted+=cuts[transition]-cuts[transition-1];
+                                        transition++;
+                                    }
+                                    // Round up to the first sample at or after this transition.
+                                    int next=transition<cuts.Length?(int)Math.Min(count,((cuts[transition]-qpc)*Rate+9_999_999)/10_000_000):count;
+                                    if(transition%2==0)WriteFrames(ptr,(state&AudioClientBufferFlags.Silent)!=0,offset,next-offset,timestamp-omitted);
+                                    offset=next;
+                                }
                             } finally {capture.ReleaseBuffer(count);}
                         }
                         stop.Token.WaitHandle.WaitOne(4);

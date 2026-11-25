@@ -57,6 +57,8 @@ with sync_playwright() as pw:
         assert gap_light.getpixel((column,gap_light.height-2))!=baseline.getpixel((column,baseline.height-2))
         assert gap_light.getpixel((column,gap_light.height-1))==baseline.getpixel((column,baseline.height-1))
         box.hover(position={"x":2,"y":12})
+        p.wait_for_timeout(700)
+        assert not p.locator("#buttonHint").evaluate("el=>el.classList.contains('visible')")
         r=check_hint(p,"box")
         assert r["y"]+r["height"]<size["y"]
         p.wait_for_timeout(160)
@@ -66,9 +68,17 @@ with sync_playwright() as pw:
         assert ImageChops.difference(left,snapshot(arrow)).getbbox(), "Light did not follow pointer"
         assert box.bounding_box()==size
         p.locator("#text").hover()
+        p.wait_for_timeout(700)
+        assert not p.locator("#buttonHint").evaluate("el=>el.classList.contains('visible')")
         check_hint(p,"text")
         p.keyboard.press("Escape")
         wait(p,"!$('buttonHint').classList.contains('visible')")
+        clip=p.locator("#videoClips .editClip").first
+        clip.hover();p.wait_for_timeout(350);p.mouse.move(2,2)
+        p.wait_for_timeout(750)
+        assert not p.locator("#buttonHint").evaluate("el=>el.classList.contains('visible')")
+        clip.hover()
+        wait(p,"$('buttonHint').classList.contains('visible') && $('buttonHint').textContent.includes('两端裁剪')")
         p.mouse.move(2,2)
         p.wait_for_timeout(180)
         assert not ImageChops.difference(snapshot(arrow),baseline).getbbox()
@@ -93,7 +103,10 @@ with sync_playwright() as pw:
         window.set_focus()
         bounds=previous.rectangle()
         mouse.move(coords=(bounds.mid_point().x,bounds.mid_point().y))
-        time.sleep(.35)
+        time.sleep(.65)
+        assert not any(w.handle!=handle and w.is_visible() and w.rectangle().bottom<=bounds.top
+                       for w in Desktop(backend="win32").windows(process=proc.pid))
+        time.sleep(.55)
         hints=[w for w in Desktop(backend="win32").windows(process=proc.pid)
                if w.handle!=handle and w.is_visible() and w.rectangle().bottom<=bounds.top]
         assert hints, "Player hint did not open above the toolbar"

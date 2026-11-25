@@ -71,14 +71,16 @@ public sealed partial class Desk : Window
             player.ReviewButton.IsEnabled=player.Timeline.IsEnabled=player.Shuttle.IsEnabled=player.Output.IsEnabled=false;
         }
         Drop+=async (_,e)=>{if(e.Data.GetData(DataFormats.FileDrop) is string[] files){e.Handled=true;await OpenFiles(files,true);}};
-        Loaded+=async (_,_)=>{
+        Loaded+=OpenAtStartup;
+        async void OpenAtStartup(object sender,RoutedEventArgs args){
+            Loaded-=OpenAtStartup;
             try{
                 openingPlayer=direct;
                 if(!direct && (initial==null || !ImageFormats.Contains(Path.GetExtension(initial).ToLowerInvariant())))await EnsureReviewWeb();
                 if(initial!=null && !lifetime.IsCancellationRequested)await OpenFiles(paths,fromShell:true);
             }catch(Exception e){if(!lifetime.IsCancellationRequested){Log.Error(e,"Startup failed");Simple(L.Text("启动失败"),L.Text("启动失败"),e.Message);}}
             finally{openingPlayer=false;initialOpen.TrySetResult();}
-        };
+        }
         Closing+=(_,e)=>{if(voiceCapture!=null || configuring){e.Cancel=true;StopVoice();return;}if(pending && !openingPlayer) {e.Cancel=true; preparing?.Cancel();exportDialog?.Cancel(); Send(new {type="status",text=L.Text("请等当前操作结束后再关闭。")});} };
         Closed+=(_,_)=>{StopTimeline();native?.Dispose();web.Dispose();recordings.Dispose();CleanSessionFiles();};
     }
@@ -134,8 +136,13 @@ public sealed partial class Desk : Window
         web.AllowExternalDrop=true;
         core.WebMessageReceived+=async (_,e)=>{
             if(!reviewPage.IsPage(e.Source))return;
-            if(e.AdditionalObjects is {Count:>0} objects)
-                await OpenFiles(objects.OfType<CoreWebView2File>().Select(f=>f.Path).ToArray(),true);
+            if(e.AdditionalObjects is {Count:>0} objects){
+                var paths=objects.OfType<CoreWebView2File>().Select(f=>f.Path).ToArray();
+                using var message=JsonDocument.Parse(e.WebMessageAsJson);
+                if(message.RootElement.GetProperty("type").GetString()=="importAudio")
+                    await ImportNoteAudio(message.RootElement,paths);
+                else await OpenFiles(paths,true);
+            }
             else await Message(e.WebMessageAsJson);
         };
     }
@@ -154,6 +161,13 @@ public sealed partial class Desk : Window
         finally {pending=false;currentWork=null;Send(new{type="busy",value=false});ShowPlaylist();done.SetResult();}
     }
     async Task Open(string path,string? recordingTitle=null,VideoOpenMode mode=VideoOpenMode.Auto) {
+        bool showLoad=Review.Formats.Contains(Path.GetExtension(path).ToLowerInvariant()) ||
+            path.EndsWith(".framenote",StringComparison.OrdinalIgnoreCase);
+        if(showLoad)ReportMediaLoad("正在打开视频…");
+        try{await OpenMedia(path,recordingTitle,mode);}
+        catch{if(showLoad)ReportMediaLoad(null);throw;}
+    }
+    async Task OpenMedia(string path,string? recordingTitle,VideoOpenMode mode) {
         path=Path.GetFullPath(path);var info=new FileInfo(path);
         Log.Information("Opening {Format} in {Mode} mode",info.Extension,mode);
         if(!info.Exists)throw new FileNotFoundException(L.Text("找不到文件。"),path);
@@ -185,7 +199,7 @@ public sealed partial class Desk : Window
         string? nextPreview=null;
 
         if(!compatibility && !playOriginal){
-            try{directFrames=await Probe.Frames(nextMedia,infoMedia,lifetime.Token);}
+            try{directFrames=await ReadReviewFrames(nextMedia,infoMedia,lifetime.Token);}
             catch(InvalidDataException){compatibility=true;}
         }
         if(compatibility && mode==VideoOpenMode.Review)
@@ -194,7 +208,7 @@ public sealed partial class Desk : Window
         lifetime.Token.ThrowIfCancellationRequested();
         activeRecording=recordingTitle!=null?path:null;
         Title=playOriginal?"FrameNote Player - "+doc.FileName:(activeRecording!=null?L.Text("临时录屏 · "):"")+doc.FileName+" · FrameNote";
-        SetPreviewFullscreen(false);StopTimeline();playbackId=Guid.NewGuid();playbackInfo=infoMedia;deskLoaded=false;preview=nextPreview;
+        SetPreviewFullscreen(false);StopTimeline();playbackId=Guid.NewGuid();playbackInfo=infoMedia;reviewFrameTimes=[];deskLoaded=false;preview=nextPreview;
         needsPreview=compatibility;reviewOnly=mode==VideoOpenMode.Review;
         if(webReady)await web.ExecuteScriptAsync("transport.pause();v.removeAttribute('src');v.load();ready=false;render()");
         if(earlyPlayback){if(doc.Timeline!=null)await ShowPlayer(0);else native!.BindReview(doc,infoMedia!);}
@@ -205,12 +219,19 @@ public sealed partial class Desk : Window
             web.Visibility=Visibility.Visible;
             await LoadReview(0,lifetime.Token,directFrames);
         }
+        if(native?.IsVisible==true && webReady)Send(new{type="mediaLoading",stage=(string?)null});
         if(previous!=null && !string.Equals(previous,media,StringComparison.OrdinalIgnoreCase))recordings.Discard(previous);
     }
     async Task Message(string raw){
         try{
             using var msg=JsonDocument.Parse(raw);var p=msg.RootElement; var op=p.GetProperty("type").GetString();
             if(op=="diagnostic"){RuntimeLog.WebMessage(p.GetProperty("message").GetString(),p.GetProperty("error").GetBoolean());return;}
+            if(op=="pickAudio"){
+                if(pending||configuring||viewingImage||doc==null||voiceCapture!=null)return;
+                var picker=new Microsoft.Win32.OpenFileDialog{Title=L.Text("添加音频文件"),Multiselect=true,
+                    Filter=L.Text("音频文件")+"|"+string.Join(';',ReviewVoice.Extensions.Split(' ').Select(ext=>"*"+ext))};
+                if(picker.ShowDialog(this)==true)await ImportNoteAudio(p,picker.FileNames);return;
+            }
             if(op=="voiceStop"){StopVoice();return;}
             if(op=="cancelPreview"){preparing?.Cancel();return;}
             if(op=="voiceStart"){await RecordVoice(p);return;}
@@ -276,8 +297,12 @@ public sealed partial class Desk : Window
                 await Work(()=>SendReaper(screen));return;
             }
             if(doc==null || media==null)return;
-            if(op=="exportVideo"){await ExportVideo();return;}
-            if(op=="exportGif"){await ExportVideo(p.GetProperty("copy").GetBoolean()?VideoOutput.GifClipboard:VideoOutput.GifFile);return;}
+            if(op is "exportVideo" or "exportGif"){
+                if(p.TryGetProperty("documentId",out var exportId)&&exportId.GetGuid()!=doc.Id)return;
+                var range=p.TryGetProperty("range",out var selection)?selection.Deserialize<ExportTimeRange>(Review.Json):null;
+                var target=op=="exportVideo"?VideoOutput.Mp4:p.GetProperty("copy").GetBoolean()?VideoOutput.GifClipboard:VideoOutput.GifFile;
+                await ExportVideo(target,range);return;
+            }
             if(op=="exportExcel"){await ExportExcel();return;}
             if(op=="imageExport"){if(viewingImage)await Work(()=>ExportImage(p.GetProperty("save").GetBoolean()));return;}
             if(op=="snapshot"){await Snapshot(p);return;}
@@ -294,6 +319,9 @@ public sealed partial class Desk : Window
                 var updated=doc.WithNotes(notes);
                 if(p.TryGetProperty("rulerScales",out var scales))updated=updated with{RulerScales=scales.Deserialize<Dictionary<long,RulerScale>>(Review.Json)};
                 if(p.TryGetProperty("timeline",out var timeline)){var edits=timeline.Deserialize<EditTimeline>(Review.Json);updated=updated with{Timeline=edits,Version=edits==null?(viewingImage?2:1):3,DurationUs=p.GetProperty("durationUs").GetInt64()};}
+                // Duplicated clips can own numbered annotations hidden by an edge trim.
+                int highestTrimmed=updated.Timeline?.Trimmed?.Max(part=>part.Note?.Number)??0;
+                updated=updated with{LastNoteNumber=Math.Max(updated.LastNoteNumber,highestTrimmed)};
                 updated.Check();
                 ApplyReviewEdits(updated);
                 return;

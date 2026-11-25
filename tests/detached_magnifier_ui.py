@@ -26,20 +26,25 @@ def picker(proc,path):
     time.sleep(.35)
     if dialog.exists(timeout=.2) and dialog.is_visible():dialog.child_window(control_id=1).click()
 
+def blend(foreground,background,opacity):
+    return [round(a*opacity+b*(1-opacity)) for a,b in zip(foreground,background)]
+
 def check_pixels(image,shape,blue,tolerance):
     im=image.convert("RGB")
     x,y=shape["x"],shape["y"];dx,dy=shape["toX"]-x,shape["toY"]-y
     tx,ty=shape["preview"]["x"],shape["preview"]["y"]
+    zoom=shape["zoom"]
     def sample(u,v):return im.getpixel((round(u*width),round(v*height)))
     def close(actual,expected):
         assert max(abs(a-b) for a,b in zip(actual,expected))<=tolerance,(actual,expected,shape)
     for u,v in [(.15,.17),(.75,.31),(.82,.82)]:
         expected=color(x+u*dx,y+v*dy,blue)
         close(sample(x+u*dx,y+v*dy),expected)
-        close(sample(tx+2*u*dx,ty+2*v*dy),expected)
-    cx=(x+dx/2+tx+dx)/2;cy=(y+dy/2+ty+dy)/2
+        px,py=tx+zoom*u*dx,ty+zoom*v*dy
+        close(sample(px,py),blend(expected,color(px,py,blue),.8))
+    cx=(x+dx/2+tx+zoom*dx/2)/2;cy=(y+dy/2+ty+zoom*dy/2)/2
     tint=(255,216,134)
-    close(sample(cx,cy),[round(c*.84+t*.16) for c,t in zip(color(cx,cy,blue),tint)])
+    close(sample(cx,cy),blend(tint,color(cx,cy,blue),.16*.8))
 
 def draw_and_move(p):
     p.locator("#magnifier").click()
@@ -47,13 +52,23 @@ def draw_and_move(p):
         r=p.locator("#overlay").bounding_box()
         def pos(x,y):return (r["x"]+x*r["width"],r["y"]+y*r["height"])
         p.mouse.move(*pos(x,y));p.mouse.down();p.mouse.move(*pos(ex,ey),steps=6);p.mouse.up()
-    drag(.08,.12,.26,.28)
+    drag(.08,.12,.20,.22)
     read=lambda:p.evaluate("doc.notes[0].shape")
+    assert read()["zoom"]==3
+    def scroll(x,y):
+        r=p.locator("#overlay").bounding_box()
+        p.mouse.move(r["x"]+x*r["width"],r["y"]+y*r["height"]);p.mouse.wheel(0,-120)
+    before=read()
+    scroll(.14,.17)
+    wait(p,"w=>doc.notes[0].shape.toX-doc.notes[0].shape.x>w",before["toX"]-before["x"])
+    target=read()["preview"]
+    scroll(target["x"]+.10,target["y"]+.10)
+    wait(p,"doc.notes[0].shape.zoom===3.5")
     first=read();pv=first["preview"];dx=abs(first["toX"]-first["x"]);dy=abs(first["toY"]-first["y"])
     assert pv["x"]>=first["toX"] or pv["y"]>=first["toY"]
-    drag(pv["x"]+dx,pv["y"]+dy,.54+dx,.54+dy)
+    drag(pv["x"]+dx,pv["y"]+dy,.49+dx,.49+dy)
     moved=read()
-    assert max(abs(moved["preview"][k]-.54) for k in ("x","y"))<.006
+    assert max(abs(moved["preview"][k]-.49) for k in ("x","y"))<.006
     assert all(moved[k]==first[k] for k in ("x","toX","y","toY"))
     p.keyboard.press("Control+z");assert read()==first
     p.keyboard.press("Control+Shift+z");assert read()==moved
@@ -63,6 +78,7 @@ def draw_and_move(p):
     preview=Image.open(io.BytesIO(p.locator("#ink canvas").screenshot(scale="css"))).convert("RGB")
     rgb=preview.getpixel((int(preview.width*.75),int(preview.height*.31)))
     expected=color(final["x"]+.75*dx,final["y"]+.31*dy,48)
+    expected=blend(expected,color(final["preview"]["x"]+.75*dx*final["zoom"],final["preview"]["y"]+.31*dy*final["zoom"],48),.8)
     assert max(abs(a-b) for a,b in zip(rgb,expected))<7,(rgb,expected)
     assert p.locator("#ink .lensConnector").evaluate("path=>getComputedStyle(path).pointerEvents==='none'")
     return final

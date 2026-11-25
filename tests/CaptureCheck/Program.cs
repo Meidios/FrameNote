@@ -12,6 +12,16 @@ class Check
 {
     [STAThread] static int Main(string[] args)
     {
+        if(args is ["--overlay-animation"])return OverlayAnimation.Run();
+        if(args is ["--playback-mutes"]){
+            using var devices=new MMDeviceEnumerator();
+            foreach(var role in new[]{Role.Multimedia,Role.Console,Role.Communications}){
+                if(!devices.HasDefaultAudioEndpoint(DataFlow.Render,role))continue;
+                using var device=devices.GetDefaultAudioEndpoint(DataFlow.Render,role);
+                Console.WriteLine($"{role} {device.AudioEndpointVolume.Mute}");
+            }
+            return 0;
+        }
         if(args is ["--mixer-tones",var first,var second]){
             using var devices=new MMDeviceEnumerator();
             using var a=devices.GetDevice(first);using var b=devices.GetDevice(second);

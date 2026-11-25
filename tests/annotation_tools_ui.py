@@ -92,7 +92,7 @@ with sync_playwright() as pw:
             original=notes(p)[-1]
             at(p,3)
             p.locator('.inkBadge[data-note="'+original["id"]+'"]').click(button="right")
-            p.locator('[data-action="duplicate"]').click()
+            p.locator('#canvasMenu [data-action="duplicate"]').click()
             copied=notes(p)[-1]
             assert copied["id"]!=original["id"] and copied["voice"]==original["voice"]
             p.locator('.inkBadge[data-note="'+copied["id"]+'"]').click(button="right")
@@ -103,7 +103,7 @@ with sync_playwright() as pw:
             assert p.locator('#voiceStatus').is_hidden()
             at(p,0);p.locator('#play').click()
             if os.environ.get('FRAMENOTE_TEST_EDITS'):
-                wait(p,"audioProbes.some(a=>a.src.endsWith(doc.notes.at(-1).voice.asset+'.m4a') && !a.paused && Math.abs(a.currentTime-transport.currentTime)<.2)")
+                wait(p,"audioProbes.some(a=>a.src.endsWith(doc.notes.at(-1).voice.asset+'.mp3') && !a.paused && Math.abs(a.currentTime-transport.currentTime)<.2)")
             else:wait(p,"(()=>{const a=voicePlayers.get(doc.notes.at(-1).id);return a && !a.paused && Math.abs(a.currentTime-v.currentTime)<.2})()")
             p.locator('#play').click()
         package=work/'annotation-tools.framenote';p.locator('#save').click();exported_file(proc,package)
@@ -113,7 +113,7 @@ with sync_playwright() as pw:
             data=json.loads(z.read('review.json'));assert data['notes']==expected
             if cable:
                 asset=next(n for n in z.namelist() if n.startswith('voice/'))
-                recording=work/'voice.m4a';recording.write_bytes(z.read(asset))
+                assert asset.endswith('.mp3');recording=work/'voice.mp3';recording.write_bytes(z.read(asset))
                 if tone:
                     raw=subprocess.check_output(['ffmpeg','-v','error','-i',str(recording),'-f','f32le','-ar','48000','-ac','1','-'])
                     samples=array.array('f');samples.frombytes(raw)

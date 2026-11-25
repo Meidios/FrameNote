@@ -75,7 +75,7 @@ public sealed partial class Desk
         var previous=activeRecording;activeRecording=null;
         if(native!=null){native.Stop();native.Visibility=Visibility.Collapsed;}
         web.Visibility=Visibility.Visible;
-        SetPreviewFullscreen(false);StopTimeline();displayImagePath=path;media=source;sessionKey=nextKey;preview=null;doc=review;deskLoaded=false;openedPackage=package;playbackInfo=null;playbackId=Guid.NewGuid();
+        SetPreviewFullscreen(false);StopTimeline();displayImagePath=path;media=source;sessionKey=nextKey;preview=null;doc=review;deskLoaded=false;openedPackage=package;playbackInfo=null;reviewFrameTimes=[];playbackId=Guid.NewGuid();
         fullTiffSource=scaled?source:null;viewingImage=true;imageFile=originalFile;Title=name+" · FrameNote";Send(new{type="image",src,name,doc,scaled,originalSize,images=new Uri(ImageDirectory+Path.DirectorySeparatorChar).AbsoluteUri,folder=imageFile!=null});
         if(previous!=null)recordings.Discard(previous);
     }

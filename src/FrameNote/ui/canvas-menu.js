@@ -2,6 +2,7 @@
 (()=>{
  const menu=$('canvasMenu');
  let context=null;
+ bindOpacity($('menuOpacity'),()=>doc?.notes.find(n=>n.id===context?.id));
  function close(){
   if(context){menu.hidePopover();context=null}
  }
@@ -15,6 +16,7 @@
   const button=$(kind==='ruler'?'toolRuler':kind);
   item(label,kind,button.querySelector('svg'));
  }
+ const addAudio=item(tr('音频批注'),'audio',$('addAudio').querySelector('svg'));
  item(tr('图片批注'),'picture',$('addPicture').querySelector('svg'));
  item(tr('文字批注'),'point',$('point').querySelector('svg'));
  const voice=item(tr('语音批注'),'voice',$('voiceRecord').querySelector('svg'));
@@ -27,7 +29,7 @@
   $('menuFieldName').textContent=ruler?tr('距离'):tr('角度');
   $('menuFieldIcon').setAttribute('href',ruler?'#icon-ruler':'#icon-drafting-compass');
   const action=ruler?tr('标定本帧'):tr('应用角度');
-  $('menuApply').setAttribute('aria-label',action);$('menuApply').title=ruler?tr('用此长度标定同一帧的所有标尺'):action;
+  $('menuApply').setAttribute('aria-label',action);$('menuApply').ariaDescription=ruler?tr('用此长度标定同一帧的所有标尺'):action;
   unitField.hidden=!ruler;$('menuDegrees').hidden=!angle;
   valueField.setCustomValidity('');valueField.max=angle?'180':'';
   if(ruler){
@@ -51,11 +53,6 @@
    if(calibrateRuler(note,length,unitField.value))close();
   }else if(note.shape?.kind==='angle'&&applyAngle(note,valueField.valueAsNumber))close();
  }
- for(const [name,color] of palette){
-  const b=document.createElement('button');
-  b.type='button';b.dataset.color=color;b.title=name;b.setAttribute('aria-label',name);
-  b.setAttribute('role','menuitemradio');b.style.setProperty('--note',color);$('menuCustomColor').before(b);
- }
  const hitNote=e=>e.target.closest('[data-note]')?.dataset.note??(e.target.closest('#notePreview')?hovered:null);
  let pressed=null;
  $('stage').addEventListener('pointerdown',e=>{
@@ -67,6 +64,7 @@
  $('stage').addEventListener('contextmenu',e=>{
   if(!canAnnotate())return;
   e.preventDefault();
+  if(pathTool()&&measurementPoints.length){if(measurementPoints.length>=2)finishClickedPath();else setTool(null);pressed=null;return}
   const id=pressed&&Math.abs(pressed.x-e.clientX)<2&&Math.abs(pressed.y-e.clientY)<2?pressed.id:hitNote(e);pressed=null;
   transport.pause();const at=annotationTime();
   close();finishEdit();resetPreview();
@@ -76,9 +74,10 @@
   showMeasurement(note);
   if(note){
    $('menuNoteName').textContent=tr('批注 #')+note.number;
+   $('menuOpacity').value=noteOpacity(note);
    updateColors(note,$('menuColors'),'aria-checked');
   }
-  voice.hidden=imageDoc();voice.title=voiceMixerHint();voice.disabled=!!voice.title;
+  addAudio.hidden=voice.hidden=imageDoc();voice.ariaDescription=voiceMixerHint();voice.disabled=!!voice.ariaDescription;
   menu.showPopover();menu.scrollTop=0;
   menu.style.left=Math.max(4,Math.min(e.clientX,innerWidth-menu.offsetWidth-4))+'px';
   menu.style.top=Math.max(4,Math.min(e.clientY,innerHeight-menu.offsetHeight-4))+'px';
@@ -93,6 +92,7 @@
   close();if(!canAnnotate())return;
   if(Object.hasOwn(shapeNames,action)){startDrawing(action,at);return}
   if(action==='point'){newNote(at,null);focusNoteText();return}
+  if(action==='audio'){pickAudio(at,id);return}
   if(action==='picture'){pickPicture(at);return}
   if(action==='voice'){recordAtPlayhead(at);return}
   const note=doc.notes.find(n=>n.id===id);if(!note)return;

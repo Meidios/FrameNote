@@ -4,6 +4,10 @@
 
 Versions are listed newest first. Earlier entries summarize the offline release history shipped with the app; they do not imply that each version had a public GitHub installer.
 
+## 0.9.5
+
+时间线支持框选和剪贴多个片段、预览裁剪边缘、循环或导出时间选区。批注增加多点曲线、画笔、透明度和可排序工具栏。语音批注录为 MP3，外部音频可拖入同一轨道并随 Excel 导出。录屏时可自动隐藏主窗口，通过悬浮按钮暂停或停止。[0.9.5 更新说明](docs/releases/v0.9.5.md)
+
 ## 0.9.4
 
 改进时间线剪辑、角度与标尺测量，增加录制副本、Excel 模板、MP4 批注进度条和英文界面。优化小窗口布局、键盘操作与批注编号对比度，修复主界面和 Player 退出全屏后标题栏图标偏移。[0.9.4 更新说明](docs/releases/v0.9.4.md)

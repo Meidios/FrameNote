@@ -4,7 +4,7 @@ using System.Text.Json;
 
 namespace FrameNote;
 
-public record EditClip(Guid Id,string Track,long StartUs,long SourceUs,long DurationUs,string? Asset=null,long? SourceDurationUs=null,Guid? NoteId=null);
+public record EditClip(Guid Id,string Track,long StartUs,long SourceUs,long DurationUs,string? Asset=null,long? SourceDurationUs=null,Guid? NoteId=null, [property:System.Text.Json.Serialization.JsonIgnore(Condition=System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)] string? Format=null);
 public record TrimmedPart(Guid ClipId,Note? Note=null,EditClip? Voice=null);
 public record EditTimeline(long SourceDurationUs,List<EditClip> Clips,bool Linked=true,List<TrimmedPart>? Trimmed=null)
 {
@@ -14,7 +14,7 @@ public record EditTimeline(long SourceDurationUs,List<EditClip> Clips,bool Linke
         foreach(var c in Clips){
             if(c==null || c.Id==Guid.Empty || !ids.Add(c.Id) || c.Track is not ("video" or "audio" or "voice") || c.StartUs<0 || c.SourceUs<0 || c.DurationUs<=0 || c.StartUs>duration-c.DurationUs || c.SourceUs>(c.Track=="voice"?c.SourceDurationUs??0:SourceDurationUs)-c.DurationUs)
                 throw new InvalidDataException(L.Text("片段超出媒体或时间线范围。"));
-            if(c.Track=="voice" && (c.SourceDurationUs is null or <=0 or >600000000 || c.Asset is not {Length:64} || !c.Asset.All(x=>char.IsAsciiDigit(x)||x is >= 'a' and <= 'f')))
+            if(c.Track=="voice" && (!ReviewVoice.ValidFormat(c.Format) || c.SourceDurationUs is null or <=0 or >604800000000 || c.Asset is not {Length:64} || !c.Asset.All(x=>char.IsAsciiDigit(x)||x is >= 'a' and <= 'f')))
                 throw new InvalidDataException(L.Text("语音片段附件无效。"));
         }
         foreach(string track in new[]{"video","audio"}){
@@ -25,7 +25,7 @@ public record EditTimeline(long SourceDurationUs,List<EditClip> Clips,bool Linke
             if(part==null||!ids.Contains(part.ClipId)||(part.Note==null)==(part.Voice==null))
                 throw new InvalidDataException(L.Text("裁剪记录没有对应片段。"));
             if(part.Voice is {} v && (v.Track!="voice"||v.Id==Guid.Empty||v.StartUs<0||v.DurationUs<=0||v.StartUs>SourceDurationUs-v.DurationUs||
-                v.SourceDurationUs is null or <=0 or >600000000||v.SourceUs<0||v.SourceUs>v.SourceDurationUs-v.DurationUs||
+                !ReviewVoice.ValidFormat(v.Format) || v.SourceDurationUs is null or <=0 or >604800000000||v.SourceUs<0||v.SourceUs>v.SourceDurationUs-v.DurationUs||
                 v.Asset is not {Length:64}||!v.Asset.All(x=>char.IsAsciiDigit(x)||x is >= 'a' and <= 'f')))
                 throw new InvalidDataException(L.Text("被裁剪的语音片段无效。"));
         }
@@ -46,7 +46,7 @@ internal static class MediaEdits
         var rate=stream.GetProperty("avg_frame_rate").GetString()!.Split('/');double fps=double.Parse(rate[0],CultureInfo.InvariantCulture)/double.Parse(rate[1],CultureInfo.InvariantCulture);if(!double.IsFinite(fps)||fps<=0)fps=30;fps=Math.Min(120,fps);
         var args=new List<string>{"-nostdin","-v","error","-i",input};
         var voices=timeline.Clips.Where(c=>c.Track=="voice").ToArray();
-        foreach(var c in voices)args.AddRange(["-i",ReviewVoice.PathFor(assets,c.Asset!)]);
+        foreach(var c in voices)args.AddRange(["-i",ReviewVoice.PathFor(assets,c.Asset!,c.Format)]);
         var filters=new List<string>();var parts=new List<string>();long cursor=0;int seq=0;
         void Black(long length){if(length<=0)return;string id="v"+seq++;filters.Add($"color=c=black:s={width}x{height}:r={N(fps)}:d={N(length/1e6)},setsar=1[{id}]");parts.Add($"[{id}]");}
         foreach(var c in timeline.Clips.Where(c=>c.Track=="video").OrderBy(c=>c.StartUs)){

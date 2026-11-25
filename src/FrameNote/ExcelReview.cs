@@ -11,6 +11,7 @@ internal static class ExcelReview
         (ExcelColumns.End,"结束时间",17),(ExcelColumns.Text,"批注内容",52),
         (ExcelColumns.Preview,"画面预览",27),(ExcelColumns.Media,"媒体文件",17)];
     internal static string MediaFile(Note note)=>note.EndUs.HasValue?$"media/Region-{note.Number}.gif":$"media/Mark-{note.Number}.png";
+    internal static string AudioFile(Note n)=>$"audio/{n.Number}"+(n.Voice!.Original is {} file?Path.GetExtension(file.Name).ToLowerInvariant():".mp3");
     // ClosedXML consumes one leading apostrophe as Excel's text-entry prefix.
     static string Literal(string value)=>value.StartsWith('\'')?"'"+value:value;
 
@@ -21,6 +22,7 @@ internal static class ExcelReview
         sheet.Style.Font.FontName="Microsoft YaHei";
         sheet.Style.Font.FontSize=10;
         var columns=Columns.Where(c=>template.Columns.HasFlag(c.Field)).ToArray();
+        if(notes.Any(n=>n.Voice!=null))columns=[..columns,(ExcelColumns.AudioAttachment,"音频附件",30)];
         int header=template.ShowSource?2:1;
         if(template.ShowSource){
             var title=sheet.Range(1,1,1,columns.Length);
@@ -66,6 +68,11 @@ internal static class ExcelReview
                     case ExcelColumns.Preview:
                         var picture=sheet.AddPicture(Path.Combine(previews,$"{note.Number}.png"),$"Note_{note.Number}");
                         picture.MoveTo(cell,6,5,cell,6+picture.OriginalWidth,5+picture.OriginalHeight);break;
+                    case ExcelColumns.AudioAttachment:
+                        if(note.Voice==null)break;
+                        cell.Value=Literal(note.Voice.Original?.Name??L.Text("播放语音 MP3"));
+                        cell.SetHyperlink(new XLHyperlink(new Uri(AudioFile(note),UriKind.Relative)));
+                        cell.Style.Font.FontColor=XLColor.FromHtml("#145A88");cell.Style.Font.Underline=XLFontUnderlineValues.Single;break;
                     case ExcelColumns.Media:
                         cell.Value=note.EndUs.HasValue?L.Text("播放 GIF"):L.Text("打开 PNG");
                         cell.SetHyperlink(new XLHyperlink(new Uri(MediaFile(note),UriKind.Relative)));

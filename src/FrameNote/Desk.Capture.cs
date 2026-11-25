@@ -3,13 +3,18 @@ using System.Windows;
 using System.Windows.Interop;
 using System.Windows.Threading;
 using ScreenRecorderLib;
+using System.Globalization;
+using System.Runtime.InteropServices;
+using Screen=System.Windows.Forms.Screen;
 namespace FrameNote;
 public sealed partial class Desk
 {
     CaptureSession? recorder;
     RegionOutline? regionOutline;
-    bool stopping,configuring;
-    readonly DispatcherTimer gifLimit=new(){Interval=TimeSpan.FromSeconds(29)};
+    RecordingControls? recordingControls;
+    bool stopping,configuring,hiddenForRecording;
+    readonly DispatcherTimer gifLimit=new();
+    [DllImport("dwmapi.dll")]static extern int DwmFlush();
     [System.Runtime.InteropServices.DllImport("user32.dll")]static extern bool RegisterHotKey(IntPtr hwnd,int id,uint mods,uint vk);
     [System.Runtime.InteropServices.DllImport("user32.dll")]static extern bool UnregisterHotKey(IntPtr hwnd,int id);
     readonly Dictionary<int,Shortcut> recordHotkeys=new();
@@ -42,19 +47,63 @@ public sealed partial class Desk
                     if(OwnedWindows.OfType<ShortcutDialog>().Any(dialog=>dialog.FindGlobalShortcut(pressed)))return IntPtr.Zero;
                     var latest=shortcutStore.Read();
                     if(!latest.Bindings["record"].Contains(pressed)){ApplyPreferences(latest);return IntPtr.Zero;}
-                    if(web.CoreWebView2!=null && IsEnabled && OwnedWindows.Count==0 && !pending && !configuring){
-                        if(recorder!=null)StopCapture();else Send(new{type="recordShortcut"});
-                    }
+                    if(recorder!=null&&!configuring)StopCapture();
+                    else if(web.CoreWebView2!=null && IsEnabled && OwnedWindows.Count==0 && !pending && !configuring)Send(new{type="recordShortcut"});
                 }
                 return IntPtr.Zero;
             });
             Closed+=(_,_)=>{foreach(int id in recordHotkeys.Keys)UnregisterHotKey(hwnd,id);};
         };
-        gifLimit.Tick+=(_,_)=>StopCapture();
+        gifLimit.Tick+=(_,_)=>{gifLimit.Stop();if(recorder!=null)UpdateRecordingControls(recorder,true);};
         Closing+=(_,e)=>{if(recorder!=null){e.Cancel=true;StopCapture();}};
     }
     void ClearOutline(){regionOutline?.Close();regionOutline=null;}
-    void StopCapture(){if(recorder==null||stopping)return;stopping=true;gifLimit.Stop();ClearOutline();recorder.Stop();Send(new{type="status",text=L.Text("正在结束录制…")});}
+    bool TargetsDesk(CaptureSettings s)=>s.Mode=="window" && s.Source==new WindowInteropHelper(this).Handle.ToInt64().ToString(CultureInfo.InvariantCulture);
+    void HideForRecording(CaptureSettings settings,CaptureSession session,bool gif){
+        var screen=settings.Mode=="window"
+            ?Screen.FromHandle(new IntPtr(long.Parse(settings.Source,CultureInfo.InvariantCulture)))
+            :Screen.AllScreens.FirstOrDefault(s=>s.DeviceName==settings.Source)??Screen.FromHandle(new WindowInteropHelper(this).Handle);
+        var panel=new RecordingControls(screen,StopCapture,()=>{if(!stopping&&recorder==session)session.TogglePause();});
+        recordingControls=panel;panel.SetState(false,false);
+        panel.PreviewKeyDown+=(_,e)=>{
+            if(gif||!stopping||!shortcuts["play"].Contains(Shortcut.From(e)))return;
+            e.Handled=true;
+            if(!e.IsRepeat)Send(new{type="recordingPlayShortcut"});
+        };
+        panel.Closed+=(_,_)=>{
+            if(recordingControls!=panel)return;
+            recordingControls=null;
+            if(!configuring)StopCapture();
+        };
+        panel.ShowForCapture(settings.Mode=="window");
+        hiddenForRecording=true;Hide();
+        DwmFlush(); // Let the compositor remove the desk before the first captured frame.
+    }
+    void RestoreAfterRecording(){
+        var panel=recordingControls;recordingControls=null;
+        if(hiddenForRecording){
+            hiddenForRecording=false;
+            if(WindowState==WindowState.Minimized)WindowState=lastMaximized?WindowState.Maximized:WindowState.Normal;
+            Show();Activate();web.Focus();Send(new{type="recordingRestored"});
+        }
+        panel?.Close();
+    }
+    void UpdateRecordingControls(CaptureSession session,bool gif){
+        if(recorder!=session||stopping)return;
+        recordingControls?.SetState(session.CanPause,session.Paused);
+        if(!gif)return;
+        gifLimit.Stop();
+        if(!session.CanPause||session.Paused)return;
+        var remaining=TimeSpan.FromSeconds(29)-session.RecordedTime;
+        if(remaining<=TimeSpan.Zero){StopCapture();return;}
+        gifLimit.Interval=remaining;gifLimit.Start();
+    }
+    void StopCapture(){
+        if(recorder==null||stopping)return;
+        stopping=true;gifLimit.Stop();ClearOutline();
+        recordingControls?.BeginStopping();
+        Send(new{type="captureStopping"});recorder.Stop();Send(new{type="status",text=L.Text("正在结束录制…")});
+    }
     void Record(CaptureSettings settings,bool gif){
         if(recorder!=null){StopCapture();return;}if(configuring||pending)return;configuring=true;
         try{
@@ -62,9 +111,12 @@ public sealed partial class Desk
             string title=L.Text("录屏 ")+DateTime.Now.ToString("yyyy-MM-dd HH-mm-ss")+".mp4";
             var output=CurrentOutput();
             var r=Session(settings,gif,output);recorder=r;stopping=false;
-            r.Start(clip);_=CompleteCapture(r,clip,title,gif,output);Send(new{type="recording",value=true,gif});
+            if(output.HideWhileRecording&&!TargetsDesk(settings))HideForRecording(settings,r,gif);
+            r.RecordingStateChanged+=()=>Dispatcher.InvokeAsync(()=>UpdateRecordingControls(r,gif));
+            r.Start(clip);Send(new{type="recording",value=true,gif});
             var keys=shortcuts["record"];
-            Send(new{type="status",text=L.Text("录制中　·　点击「停止录制」")+(keys.Length==0?"":L.Format($"或按 {keys.Label(InputKind.Keyboard)} 结束"))});if(gif)gifLimit.Start();
+            Send(new{type="status",text=L.Text("录制中　·　点击「停止录制」")+(keys.Length==0?"":L.Format($"或按 {keys.Label(InputKind.Keyboard)} 结束"))});
+            _=CompleteCapture(r,clip,title,gif,output);
         }catch(Exception e){Serilog.Log.Error(e,"Could not start recording");Release();Send(new{type="error",text=e.Message});}
         finally{if(recorder==null)ClearOutline();configuring=false;}
     }
@@ -82,6 +134,11 @@ public sealed partial class Desk
         }
     }
     async Task CompleteCapture(CaptureSession session,string clip,string title,bool gif,OutputSettings options){
+        // Return control to the desk once no more frames can be captured, even
+        // if finalizing the separate audio tracks still takes a while.
+        await session.VideoStopped.ConfigureAwait(ConfigureAwaitOptions.ContinueOnCapturedContext|ConfigureAwaitOptions.SuppressThrowing);
+        if(!stopping)Send(new{type="captureStopping"});
+        stopping=true;gifLimit.Stop();ClearOutline();RestoreAfterRecording();
         try{await session.Completion;}
         catch(Exception e){Serilog.Log.Error(e,"Recording failed");Release();Send(new{type="error",text=L.Text("录制失败：")+e.Message});return;}
         while(currentWork is {} work)await work.Task;
@@ -102,13 +159,14 @@ public sealed partial class Desk
                     return new FileInfo(path);
                 });}finally{recordings.Discard(clip);File.Delete(encoded);}
             }else{
+                if(options.SaveCopy)ReportMediaLoad("正在保存录制副本…");
                 copyError=await SaveRecordingCopy(options,clip,title,lifetime.Token);
                 await Open(clip,title);
             }
             if(copyError!=null)ReportError(copyError);
         });
     }
-    void Release(){ClearOutline();gifLimit.Stop();recorder?.Dispose();recorder=null;stopping=false;Send(new{type="recording",value=false});}
+    void Release(){ClearOutline();gifLimit.Stop();RestoreAfterRecording();recorder?.Dispose();recorder=null;stopping=false;Send(new{type="recording",value=false});}
     async Task ExportGif(Guid id){
         var note=doc?.Notes.FirstOrDefault(n=>n.Id==id);
         if(note?.EndUs is not long end || media==null)return;

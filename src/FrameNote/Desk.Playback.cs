@@ -28,9 +28,22 @@ public sealed partial class Desk
         }
     }
     Probe.Info? playbackInfo;
+    long[] reviewFrameTimes=[];
     string? preview;
     bool deskLoaded,needsPreview,reviewOnly;
 
+    void ReportMediaLoad(string? stage,int? percent=null){
+        if(native?.IsVisible==true){
+            if(preparing!=null && !needsPreview && percent is int value)native.SetPreviewProgress(value);
+            else native.ShowMediaLoad(stage==null?null:L.Text(stage),percent);
+        }
+        if(webReady)Send(new{type="mediaLoading",stage,percent});
+    }
+    Task<long[]> ReadReviewFrames(string source,Probe.Info info,CancellationToken token){
+        const string stage="正在读取视频帧…";
+        ReportMediaLoad(stage,0);
+        return Probe.Frames(source,info,token,new Progress<int>(percent=>ReportMediaLoad(stage,percent)));
+    }
     async Task PickVideo(){
         var fd=new OpenFileDialog{Multiselect=true,Filter=L.Text("图片、视频与审阅包|")+string.Join(";",Review.Formats.Concat(ImageFormats).Append(".framenote").Select(ext=>"*"+ext))};
         if(fd.ShowDialog(this)==true)await OpenFiles(fd.FileNames);
@@ -72,6 +85,7 @@ public sealed partial class Desk
         web.Visibility=Visibility.Hidden;
         player.Visibility=Visibility.Visible;
         player.Preparing(false,"");
+        player.ShowMediaLoad(L.Text("正在打开视频…"));
         player.SetVolume(volume);var playable=await EditedMedia(lifetime.Token);await player.Start(playable,doc.FileName,us/1000);player.BindReview(doc,doc.Timeline==null?playbackInfo:await Probe.Inspect(playable,lifetime.Token));
     }
     async Task EnterReview(long? initialUs=null){
@@ -80,7 +94,7 @@ public sealed partial class Desk
         native.Pause();
         using var cancel=CancellationTokenSource.CreateLinkedTokenSource(lifetime.Token);preparing=cancel;
         bool generate=needsPreview && preview==null;
-        native.Preparing(true,generate?L.Text("正在生成批注预览"):L.Text("正在打开逐帧审阅…"),generate);
+        native.Preparing(true,generate?L.Text("正在生成批注预览"):L.Text("正在打开逐帧审阅…"),true);
         try{
             if(!deskLoaded || needsPreview && preview==null)await LoadReview(position,cancel.Token,playOnLoad:initialUs!=null);
             else Send(new{type="resumeReview",us=position});
@@ -125,11 +139,13 @@ public sealed partial class Desk
     async Task LoadReview(long us,CancellationToken token,long[]? knownFrames=null,bool playOnLoad=false,bool recovering=false){
         if(media==null || doc==null || playbackInfo==null)return;
         await EnsureReviewWeb();
-        var frames=knownFrames??await Probe.Frames(media,playbackInfo,token);
+        var frames=knownFrames??await ReadReviewFrames(media,playbackInfo,token);
         if(needsPreview && preview==null)preview=await CreatePreview(media,playbackInfo.Duration,frames,token);
         token.ThrowIfCancellationRequested();
+        reviewFrameTimes=frames;
+        if(webReady)Send(new{type="mediaLoading",stage="正在加载首帧…"});
         Send(new{type="loaded",playbackId,doc,frames,src=new Uri(preview??media).AbsoluteUri,proxy=preview!=null,recovering,autoPlay=!recovering&&(knownFrames!=null || playOnLoad),volume,us,
-            images=new Uri(ImageDirectory+Path.DirectorySeparatorChar).AbsoluteUri,temporary=activeRecording!=null});
+            images=new Uri(ImageDirectory+Path.DirectorySeparatorChar).AbsoluteUri,temporary=activeRecording!=null,hasSourceAudio=playbackInfo.Audio!=""});
         deskLoaded=true;
         _=BuildTimeline(playbackId,media,playbackInfo);
     }

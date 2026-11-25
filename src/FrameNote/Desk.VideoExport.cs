@@ -8,6 +8,25 @@ public sealed partial class Desk
 {
     static string Num(double value)=>value.ToString("0.######",CultureInfo.InvariantCulture);
     enum VideoOutput { Mp4, GifFile, GifClipboard }
+    sealed record ExportTimeRange(long StartUs,long EndUs){
+        public long DurationUs=>EndUs-StartUs;
+
+        public Review Slice(Review source){
+            if(StartUs<0 || StartUs>=EndUs || EndUs>source.DurationUs)
+                throw new InvalidDataException(L.Text("导出范围超出当前时间线。"));
+            var notes=new List<Note>();
+            foreach(var note in source.Notes){
+                long start=Math.Max(StartUs,note.StartUs),end=Math.Min(EndUs,VideoAnnotations.End(note,source.DurationUs));
+                if(start>=end)continue;
+                // A Mark already on screen at the cut keeps only its remaining display time.
+                long? localEnd=note.EndUs==null && note.StartUs>=StartUs?null:end-StartUs;
+                notes.Add(note with{StartUs=start-StartUs,EndUs=localEnd});
+            }
+            // The renderer gets a local clock over one media input. Any track edits
+            // and gaps are already represented by that input, on their original frame grid.
+            return source with{Version=1,DurationUs=this.DurationUs,Notes=notes,Timeline=null};
+        }
+    }
     static Review ExportReview(Review review,bool hasSourceAudio){
         if(review.Timeline is not {} timeline)return review;
         timeline=timeline with{Trimmed=null};
@@ -21,7 +40,7 @@ public sealed partial class Desk
         if(end==0)throw new InvalidDataException(L.Text("时间线上没有可导出的片段或批注。"));
         return review with{DurationUs=end,Timeline=timeline};
     }
-    async Task ExportVideo(VideoOutput target=VideoOutput.Mp4){
+    async Task ExportVideo(VideoOutput target,ExportTimeRange? range){
         if(doc==null || media==null || playbackInfo==null || viewingImage || voiceCapture!=null)return;
         var source=doc;
         bool hasSourceAudio=playbackInfo.Audio!="";
@@ -29,13 +48,14 @@ public sealed partial class Desk
         string format=gif?"GIF":"MP4",extension=gif?".gif":".mp4";
         string stem=Path.GetFileNameWithoutExtension(doc.FileName)+L.Text("_批注");
         await Work(()=>WithExportProgress(format,async token=>{
-            var review=ExportReview(source,hasSourceAudio);
+            var review=range?.Slice(source)??ExportReview(source,hasSourceAudio);
+            var mediaReview=range==null?review:source;
             var options=CurrentOutput();
             async Task Render(string output){
-                int prepared=review.Timeline==null?0:40;
+                int prepared=mediaReview.Timeline==null?0:40;
                 if(prepared>0)ReportExport(L.Text("正在准备剪辑后的画面与声音"),0);
-                var input=await EditedMedia(token,p=>ReportExport(L.Text("正在准备剪辑后的画面与声音"),p*prepared/100),review);
-                await RenderVideo(review,input,output,prepared,gif,options.ExportBar,token);
+                var input=await EditedMedia(token,p=>ReportExport(L.Text("正在准备剪辑后的画面与声音"),p*prepared/100),mediaReview);
+                await RenderVideo(review,source,range,input,output,prepared,gif,options.ExportBar,token);
             }
             if(target!=VideoOutput.GifClipboard){
                 var path=await WriteOutput(options.ExportDirectory,stem+extension,Render,token);
@@ -51,7 +71,7 @@ public sealed partial class Desk
             }finally{File.Delete(output);}
         }));
     }
-    async Task RenderVideo(Review review,string input,string output,int prepared,bool gif,ExportBarOptions bar,CancellationToken token){
+    async Task RenderVideo(Review review,Review source,ExportTimeRange? range,string input,string output,int prepared,bool gif,ExportBarOptions bar,CancellationToken token){
         review.Check();ReportExport(L.Text("正在准备视频与批注"),prepared);
         int renderStart=prepared+5;
         void RenderProgress(int percent)=>ReportExport(gif?L.Text("正在渲染 GIF"):L.Text("正在渲染 MP4"),renderStart+(100-renderStart)*percent/100);
@@ -63,9 +83,29 @@ public sealed partial class Desk
         string frameRate=gif?gifFps.ToString(CultureInfo.InvariantCulture):format.FrameRate;
         int barHeight=!gif && bar.Enabled?VideoProgressBar.Height(height):0;
         var renderer=new VideoAnnotations(review,width,height,format.Width,format.Height,ImageDirectory,defaultRulerUnit,footerBottomInset:barHeight);
-        string videoFilter=$"scale={width}:{height},setsar=1,fps={frameRate}"+(gif?$":round=up,tpad=stop_mode=clone:stop=-1,trim=end_frame={gifFrames}":"");
+        string videoFilter=$"scale={width}:{height},setsar=1";
         bool liveLens=review.Notes.Any(n=>n.Shape?.Kind=="magnifier");
-        var encode=new List<string>{"-nostdin","-v","error","-i",input};
+        string[] mediaInput=["-i",input];
+        long audioLeadUs=0;
+        if(range!=null){
+            // A Region can start between frames. Decode the frame already on screen
+            // and shift subsequent presentation times onto the exact selection clock.
+            long frameStart;
+            if(source.Timeline!=null){
+                double frame=Math.Floor((range.StartUs+.5)*format.Fps/1e6);
+                frameStart=(long)Math.Round(frame*1e6/format.Fps);
+            }else{
+                int index=Array.BinarySearch(reviewFrameTimes,range.StartUs);
+                frameStart=reviewFrameTimes[index>=0?index:Math.Max(0,~index-1)];
+            }
+            long seekUs=Math.Max(0,Math.Min(frameStart,range.StartUs)-1);
+            audioLeadUs=range.StartUs-seekUs;
+            mediaInput=["-ss",Num(seekUs/1e6),"-t",Num((range.EndUs-seekUs)/1e6),"-i",input];
+            long frameCount=gif?gifFrames:(long)Math.Ceiling(review.DurationUs*fps/1e6);
+            videoFilter+=$",settb=AVTB,setpts='max(0,PTS-{audioLeadUs})',tpad=stop_mode=clone:stop=-1,fps={frameRate}:start_time=0:round=up,trim=end_frame={frameCount}";
+        }else videoFilter+=$",fps={frameRate}"+(gif?$":round=up,tpad=stop_mode=clone:stop=-1,trim=end_frame={gifFrames}":"");
+        var encode=new List<string>{"-nostdin","-v","error"};
+        encode.AddRange(mediaInput);
         var filters=new List<string>();
         string videoMap="[video]";
         string? overlayDirectory=null;
@@ -92,14 +132,14 @@ public sealed partial class Desk
                 videoMap="[gif]";
             }else{
                 var info=await Probe.Inspect(input,token);
-                var voices=review.Timeline==null?review.Notes.Where(n=>n.Voice!=null).ToArray():Array.Empty<Note>();
-                AddExportAudio(encode,filters,voices,review,info.Audio!="");
-                audio=info.Audio!=""||voices.Length>0;
+                int firstVoice=review.Notes.Count>0?2:1;
+                int voiceCount=AddExportAudio(encode,filters,source,range??new(0,review.DurationUs),info.Audio!="",firstVoice,audioLeadUs);
+                audio=info.Audio!=""||voiceCount>0;
                 if(barHeight>0){
                     overlayDirectory??=Directory.CreateTempSubdirectory("framenote-overlay-").FullName;
                     string strip=Path.Combine(overlayDirectory,"progress.png");
                     VideoProgressBar.Write(strip,review,width,barHeight,bar);
-                    int stripInput=1+(review.Notes.Count>0?1:0)+voices.Length;
+                    int stripInput=firstVoice+voiceCount;
                     encode.AddRange(["-framerate",frameRate,"-i",strip]);
                     VideoProgressBar.AddFilters(filters,liveLens?"[1:v:0]":videoMap,stripInput,width,barHeight,review.DurationUs,fps);
                     videoMap="[withProgress]";
@@ -117,26 +157,36 @@ public sealed partial class Desk
             RenderProgress(0);
             if(liveLens){
                 encode.Add(output);
-                await EncodeLiveLenses(input,videoFilter,renderer,width,height,fps,review.DurationUs,encode,RenderProgress,token);
+                await EncodeLiveLenses(mediaInput,videoFilter,renderer,width,height,fps,review.DurationUs,encode,RenderProgress,token);
             }else{
                 encode.AddRange(["-abort_on","empty_output_stream",output]);
                 await Probe.EncodeWithProgress(encode,review.DurationUs,RenderProgress,token);
             }
         }finally{if(overlayDirectory!=null)Directory.Delete(overlayDirectory,true);}
     }
-    void AddExportAudio(List<string> encode,List<string> filters,Note[] voices,Review review,bool hasSourceAudio){
+    int AddExportAudio(List<string> encode,List<string> filters,Review source,ExportTimeRange range,bool hasSourceAudio,int firstVoice,long audioLeadUs){
         var mix=new List<string>();
-        // A voice is attached to a note, so the second input is always its visual overlay or rendered video.
-        foreach(var n in voices)encode.AddRange(["-i",ReviewVoice.PathFor(ImageDirectory,n.Voice!.Asset)]);
-        if(hasSourceAudio){filters.Add("[0:a:0]asetpts=PTS-STARTPTS[original]");mix.Add("[original]");}
-        for(int i=0;i<voices.Length;i++){
-            var n=voices[i];double length=Math.Min(n.Voice!.DurationUs,Math.Min(review.DurationUs,n.EndUs??n.StartUs+n.Voice.DurationUs)-n.StartUs)/1e6;
-            filters.Add($"[{i+2}:a:0]atrim=duration={Num(length)},asetpts=PTS-STARTPTS,adelay={Num(n.StartUs/1000d)}:all=1[voice{i}]");mix.Add($"[voice{i}]");
+        if(hasSourceAudio){
+            string trim=audioLeadUs>0?$"atrim=start={Num(audioLeadUs/1e6)},":"";
+            filters.Add($"[0:a:0]{trim}asetpts=PTS-STARTPTS[original]");mix.Add("[original]");
+        }
+        int count=0;
+        // Edited timelines already contain their mixed voice clips in the composed input.
+        if(source.Timeline==null)foreach(var note in source.Notes){
+            if(note.Voice is not {} voice)continue;
+            long start=Math.Max(range.StartUs,note.StartUs);
+            long end=Math.Min(range.EndUs,Math.Min(note.EndUs??long.MaxValue,note.StartUs+voice.DurationUs));
+            if(start>=end)continue;
+            encode.AddRange(["-i",ReviewVoice.PathFor(ImageDirectory,voice.Asset,voice.Format)]);
+            string label=$"[voice{count}]";
+            filters.Add($"[{firstVoice+count}:a:0]atrim=start={Num((start-note.StartUs)/1e6)}:duration={Num((end-start)/1e6)},asetpts=PTS-STARTPTS,adelay={Num((start-range.StartUs)/1000d)}:all=1{label}");
+            mix.Add(label);count++;
         }
         if(mix.Count>0)filters.Add(string.Concat(mix)+$"amix=inputs={mix.Count}:duration=longest:normalize=0,alimiter=limit=0.95:level=0:latency=1[audio]");
+        return count;
     }
-    async Task EncodeLiveLenses(string input,string scale,VideoAnnotations renderer,int width,int height,double fps,long duration,List<string> encode,Action<int> report,CancellationToken token){
-        using var decoder=Probe.StartFfmpeg(["-nostdin","-v","error","-i",input,"-map","0:v:0","-an","-vf",scale,"-f","rawvideo","-pix_fmt","bgra","pipe:1"],false,true);
+    async Task EncodeLiveLenses(string[] mediaInput,string scale,VideoAnnotations renderer,int width,int height,double fps,long duration,List<string> encode,Action<int> report,CancellationToken token){
+        using var decoder=Probe.StartFfmpeg(["-nostdin","-v","error",..mediaInput,"-map","0:v:0","-an","-vf",scale,"-f","rawvideo","-pix_fmt","bgra","pipe:1"],false,true);
         using var encoder=Probe.StartFfmpeg(encode,true,false);
         using var stop=token.Register(()=>{Probe.Kill(decoder);Probe.Kill(encoder);});
         var decodeError=decoder.StandardError.ReadToEndAsync();var encodeError=encoder.StandardError.ReadToEndAsync();

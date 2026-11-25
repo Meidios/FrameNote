@@ -163,6 +163,31 @@
       </StackPanel></Border>
      </StackPanel></ScrollViewer>
     </TabItem>
+    <TabItem x:Name="AnnotationTab" Header="{i18n:Tr '批注工具'}" Tag="{StaticResource sc-cycleColor}">
+     <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled"><StackPanel>
+      <TextBlock Style="{StaticResource SectionTitle}" Text="{i18n:Tr '批注默认值'}"/>
+      <Border Style="{StaticResource SettingsCard}"><DockPanel>
+       <TextBox x:Name="DefaultOpacity" Width="100" DockPanel.Dock="Right" Style="{StaticResource DirectoryField}" PreviewMouseWheel="OpacityWheel" AutomationProperties.Name="{i18n:Tr '默认不透明度（%）'}"/>
+       <TextBlock VerticalAlignment="Center" Text="{i18n:Tr '默认不透明度（%）'}"/>
+      </DockPanel></Border>
+      <Border Style="{StaticResource SettingsCard}"><DockPanel>
+       <ComboBox x:Name="DefaultLensZoom" DockPanel.Dock="Right" MinWidth="120" SelectedValuePath="Tag" AutomationProperties.Name="{i18n:Tr '默认放大倍率'}"/>
+       <TextBlock VerticalAlignment="Center" Text="{i18n:Tr '默认放大倍率'}"/>
+      </DockPanel></Border>
+      <Border Style="{StaticResource SettingsCard}"><StackPanel>
+       <DockPanel><Button x:Name="AddPreset" DockPanel.Dock="Right" Content="{i18n:Tr '添加颜色'}" Click="AddPresetColor"/>
+        <TextBlock VerticalAlignment="Center" FontWeight="SemiBold" Text="{i18n:Tr '预设颜色'}"/></DockPanel>
+       <TextBlock Margin="0,5,0,6" Foreground="{DynamicResource muted}" FontSize="12" TextWrapping="Wrap" Text="{i18n:Tr '点击色块修改颜色，拖动行或使用箭头调整顺序。最多 10 色。'}"/>
+       <StackPanel x:Name="PresetRows"/>
+      </StackPanel></Border>
+      <TextBlock Style="{StaticResource SectionTitle}" Text="{i18n:Tr '工具栏布局'}"/>
+      <Border Style="{StaticResource SettingsCard}"><StackPanel>
+       <DockPanel Margin="0,0,0,8"><Button DockPanel.Dock="Right" Content="{i18n:Tr '添加分隔线'}" Click="AddSeparator"/>
+        <TextBlock VerticalAlignment="Center" Text="{i18n:Tr '勾选要显示的工具'}"/></DockPanel>
+       <StackPanel x:Name="ToolbarRows"/>
+      </StackPanel></Border>
+     </StackPanel></ScrollViewer>
+    </TabItem>
     <TabItem x:Name="RecordingTab" Header="{i18n:Tr '录制设置'}" Tag="{StaticResource sc-record}">
      <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled"><StackPanel>
       <Border Style="{StaticResource SettingsCard}"><DockPanel>
@@ -175,6 +200,10 @@
         <ComboBoxItem Content="{i18n:Tr '均衡'}" Tag="balanced"/><ComboBoxItem Content="{i18n:Tr '高画质'}" Tag="high"/>
        </ComboBox><TextBlock VerticalAlignment="Center" Text="{i18n:Tr '压缩品质'}"/>
       </DockPanel></Border>
+      <Border Style="{StaticResource SettingsCard}"><StackPanel>
+       <CheckBox x:Name="HideWhileRecording" Content="{i18n:Tr '录制时自动隐藏主窗口'}"/>
+       <TextBlock Margin="0,6,0,0" Foreground="{DynamicResource muted}" TextWrapping="Wrap" Text="{i18n:Tr '右下角显示停止按钮，悬停可暂停或继续。录制 FrameNote 自身窗口时保持可见。'}"/>
+      </StackPanel></Border>
       <Border Style="{StaticResource SettingsCard}"><CheckBox x:Name="SaveCopy" Content="{i18n:Tr '保存副本'}"/></Border>
       <Border Style="{StaticResource SettingsCard}" IsEnabled="{Binding IsChecked,ElementName=SaveCopy}"><StackPanel>
        <TextBlock Margin="0,0,0,8" Text="{i18n:Tr '副本保存路径'}"><TextBlock.Style><Style TargetType="TextBlock"><Style.Triggers>

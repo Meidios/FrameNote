@@ -28,9 +28,26 @@ const transport=(()=>{
  let paused=true,time=0,rate=1,last=0,sourceFrames=[],sourceUrl='',videoClip=null;
  let clockMedia=null,clockClip=null;
  const sounds=new Map(),active=()=>!!doc?.timeline;
+ let contentEndUs=0,hasSourceAudio=true;
+ function refreshDuration(){
+  contentEndUs=doc?.durationUs??0;
+  if(active()){
+   contentEndUs=0;
+   for(const clip of doc.timeline.clips){
+    if(clip.track!=='audio'||hasSourceAudio)contentEndUs=Math.max(contentEndUs,EditModel.end(clip));
+   }
+   for(const note of doc.notes)contentEndUs=Math.max(contentEndUs,note.endUs??note.startUs);
+  }
+  $('duration').textContent=fmt(contentEndUs);
+ }
+ function playbackEndUs(){
+  if(loopEnabled)return timeSelection.endUs;
+  // A live voice take can add new material in the empty part of the ruler.
+  return window.voiceActive?.()?doc.durationUs:contentEndUs;
+ }
  function icon(){const stop=api.paused;setIconAction('play',stop?'play':'pause',stop?tr('播放'):tr('暂停'),shortcutHint(stop?tr('播放'):tr('暂停'),'play'))}
  function audio(c,us,live,reposition){
-  let a=sounds.get(c.id);const url=c.track==='voice'?imageBase+c.asset+'.m4a':sourceUrl;
+  let a=sounds.get(c.id);const url=c.track==='voice'?imageBase+c.asset+'.'+(c.format??'m4a'):sourceUrl;
   if(a&&a.getAttribute('src')!==url){releaseAudio(a);sounds.delete(c.id);a=null}
   if(!a){if(!live)return;a=new Audio(url);sounds.set(c.id,a)}
   syncClipMedia(a,(c.sourceUs+us-c.startUs)/1e6,rate,v.volume,live,reposition);
@@ -38,17 +55,25 @@ const transport=(()=>{
  function sync(reposition=false){
   if(!active())return;
   const us=Math.round(time*1e6),clips=doc.timeline.clips;
-  const c=clips.find(c=>c.track==='video'&&us>=c.startUs&&us<EditModel.end(c));
+  const holdLastFrame=paused&&us>0&&us===contentEndUs;
+  const sampleUs=holdLastFrame?us-1:us;
+  const c=clips.find(c=>c.track==='video'&&sampleUs>=c.startUs&&sampleUs<EditModel.end(c));
   // Keep an independent audio decoder for a clip spanning a video cut or gap.
-  const original=clips.find(a=>a.track==='audio'&&a.startUs<=us&&us<EditModel.end(a));
+  const original=hasSourceAudio&&clips.find(a=>a.track==='audio'&&a.startUs<=us&&us<EditModel.end(a));
   const embedded=!!(c&&original&&original.startUs>=c.startUs&&EditModel.end(original)<=EditModel.end(c)&&
    original.sourceUs-original.startUs===c.sourceUs-c.startUs);
   const muteVideo=!embedded;
   if(v.muted!==muteVideo)v.muted=muteVideo;
   if(c){
-   const offset=(c.sourceUs+us-c.startUs)/1e6;
+   let frameUs=sampleUs;
+   if(holdLastFrame){
+    // Seek inside the last frame while the playhead stays on its exact end boundary.
+    const i=index(us),lastStart=frames[i]<us?frames[i]:frames[i-1];
+    frameUs=Math.floor((Math.max(c.startUs,lastStart??c.startUs)+us)/2);
+   }
+   const offset=(c.sourceUs+frameUs-c.startUs)/1e6;
    const cut=!videoClip||c.sourceUs-c.startUs!==videoClip.sourceUs-videoClip.startUs;
-   syncClipMedia(v,offset,rate,v.volume,!paused,reposition||cut);
+   syncClipMedia(v,offset,rate,v.volume,!paused,reposition||cut||holdLastFrame);
   }else if(!v.paused)v.pause();
   if(!!videoClip!==!!c)v.style.visibility=c?'visible':'hidden';
   videoClip=c;
@@ -73,20 +98,32 @@ const transport=(()=>{
     if(clockMedia&&!clockMedia.ended&&!clockMedia.error){
      if(!clockMedia.paused&&!clockMedia.seeking)time=Math.max(time,Math.min(EditModel.end(clockClip)/1e6,clockMedia.currentTime+(clockClip.startUs-clockClip.sourceUs)/1e6));
     }else time+=Math.max(0,(now-last)/1000)*rate;
-    const n=loopId&&doc.notes.find(n=>n.id===loopId),loop=n&&time*1e6>=n.endUs;
-    if(loop)time=n.startUs/1e6;
-    if(time>=doc.durationUs/1e6){time=doc.durationUs/1e6;paused=true}
+    const loop=outsideLoop(time),endUs=playbackEndUs();
+    if(loop)time=timeSelection.startUs/1e6;
+    else if(Math.round(time*1e6)>=endUs){time=endUs/1e6;paused=true}
     sync(!!loop);window.syncNoteVoices?.();
    }
+  }else if(ready&&!v.paused&&!v.seeking&&outsideLoop(v.currentTime)){
+   // Use the media clock even when a VFR frame spans the selection boundary.
+   v.currentTime=timeSelection.startUs/1e6;
   }
   last=now;requestAnimationFrame(step);
  }
  requestAnimationFrame(step);
  const api={
   get currentTime(){return active()?time:v.currentTime},set currentTime(x){if(active()){time=Math.max(0,Math.min(doc.durationUs/1e6,x));sync(true)}else v.currentTime=x},
-  get paused(){return active()?paused:v.paused},get ended(){return active()?time>=doc.durationUs/1e6:v.ended},
+  get paused(){return active()?paused:v.paused},get ended(){return active()?Math.round(time*1e6)>=playbackEndUs():v.ended},
   get playbackRate(){return active()?rate:v.playbackRate},set playbackRate(x){rate=x;v.playbackRate=x},
-  play(){if(!active())return v.play();const restart=api.ended;if(restart)time=0;paused=false;last=performance.now();sync(restart);return Promise.resolve()},
+  play(){
+   const restart=api.ended,wrap=outsideLoop(api.currentTime);
+   if(!active()){
+    if(wrap)v.currentTime=timeSelection.startUs/1e6;
+    return v.play();
+   }
+   if(playbackEndUs()===0){paused=true;time=0;sync(true);return Promise.resolve()}
+   if(wrap)time=timeSelection.startUs/1e6;else if(restart)time=0;
+   paused=false;last=performance.now();sync(restart||wrap);return Promise.resolve();
+  },
   pause(){
    paused=true;v.pause();
    if(active()){for(const a of sounds.values())a.pause();icon()}
@@ -94,14 +131,20 @@ const transport=(()=>{
    window.syncNoteVoices?.();
   },
   configure(m){scrubber.reset();paused=true;time=(m?.us??shown??0)/1e6;videoClip=null;for(const a of sounds.values())releaseAudio(a);sounds.clear();if(m){sourceFrames=m.frames;sourceUrl=m.src;}v.style.visibility=active()?'hidden':'visible';if(v.muted)v.muted=false;
+   if(m)hasSourceAudio=m.hasSourceAudio!==false;
+   refreshDuration();
    if(active()){
     const projected=new Set([0]);for(const c of doc.timeline.clips.filter(c=>c.track==='video')){projected.add(c.startUs);projected.add(EditModel.end(c));for(const t of sourceFrames)if(t>=c.sourceUs&&t<c.sourceUs+c.durationUs)projected.add(c.startUs+t-c.sourceUs)}
     // Frame stepping also works across silent/black gaps.
     for(let t=0;t<doc.durationUs;t+=33333)if(!doc.timeline.clips.some(c=>c.track==='video'&&t>=c.startUs&&t<EditModel.end(c)))projected.add(t);
     frames=[...projected].filter(t=>t<doc.durationUs).sort((a,b)=>a-b);time=Math.min(time,(doc.durationUs-1)/1e6);sync();
    }else if(sourceFrames.length){frames=sourceFrames;if(v.readyState)v.currentTime=time;}
-   $('duration').textContent=fmt(doc?.durationUs??0);$('seek').max=doc?.durationUs??0;window.refreshTimeline?.();
-  },active,
+   $('seek').max=doc?.durationUs??0;window.refreshTimeline?.();
+  },active,refreshDuration,
+  trimFrameCenter(us){
+   const i=index(us,sourceFrames,0),end=sourceFrames[i+1]??doc.timeline?.sourceDurationUs??doc.durationUs;
+   return (sourceFrames[i]+end)/2;
+  },
   sourceFrameAt(us){
    if(imageDoc())return 0;
    if(active()){
@@ -109,9 +152,7 @@ const transport=(()=>{
     if(!clip)return -1-(frames[index(us)]??us);
     us=clip.sourceUs+us-clip.startUs;
    }
-   let lo=0,hi=sourceFrames.length;
-   while(lo<hi){const mid=(lo+hi)>>>1;if(sourceFrames[mid]<=us+2)lo=mid+1;else hi=mid}
-   return sourceFrames[Math.max(0,lo-1)]??0;
+   return sourceFrames[index(us,sourceFrames)]??0;
   }
  };return api;
 })();

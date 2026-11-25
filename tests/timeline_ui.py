@@ -1,5 +1,5 @@
 """Click overlapping point/range labels in the release desk at normal and enlarged zoom."""
-import sys, uuid, json, zipfile
+import sys, uuid, json, zipfile, re
 from playwright.sync_api import sync_playwright
 from review_ui import fixtures,work,launch,stop,wait
 
@@ -44,12 +44,26 @@ with sync_playwright() as pw:
                     page.locator("#play").click()
                 else:
                     assert page.evaluate("v.paused && Math.abs(shown/1e6-v.currentTime)<.12")
+        def choose(number):
+            label=page.locator('#markLanes [data-id="'+notes[number-1]["id"]+'"]')
+            if label.is_visible():
+                label.click()
+            else:
+                for count in page.locator(".markCount").all():
+                    count.click()
+                    item=page.locator("#noteGroupMenu button").filter(has_text=re.compile(r"^#"+str(number)+r"\s"))
+                    if item.count():
+                        item.click()
+                        break
+                    page.keyboard.press("Escape")
+                else:raise AssertionError(number)
+            return label
         for number in (1,18):  # a Mark and a Region, both away from end-of-file
             for playing in (False,True):
                 if playing:
                     page.locator("#play").click()
                 wait(page,"playing=>v.paused!==playing",playing)
-                page.locator("#marks button").nth(number-1).click()
+                choose(number)
                 wait(page,"i=>v.paused && !v.seeking && selected===doc.notes[i].id && Math.abs(shown-frames[index(doc.notes[i].startUs)])<=2",number-1)
                 position=page.evaluate("v.currentTime")
                 page.keyboard.press("Space")
@@ -94,21 +108,21 @@ with sync_playwright() as pw:
                 el.getBoundingClientRect().bottom""")
             assert 0<=gap<=4,(zoom,"isolated region bottom gap",gap)
             for number in (1,18,19,20,22):
-                label=page.locator("#marks button").nth(number-1)
+                label=choose(number)
                 assert label.inner_text()==f"#{number}"
-                label.click()
                 wait(page,"i=>selected===doc.notes[i-1].id && Math.abs(shown-frames[index(doc.notes[i-1].startUs)])<=2",number)
                 assert label.get_attribute("aria-pressed")=="true"
                 assert page.locator(".note.selected .noteNumber").inner_text()==f"#{number}"
                 assert page.locator(".note.selected").evaluate("""el=>{const a=el.getBoundingClientRect(),b=el.parentElement.getBoundingClientRect();return a.top>=b.top-1 && a.bottom<=b.bottom+1}""")
-            assert page.locator("#marks button").evaluate_all("""els=>els.slice(18).every((e,i,arr)=>arr.slice(i+1).every(other=>e.offsetTop!==other.offsetTop))""")
+            assert page.locator("#marks [data-track=note]:visible").evaluate_all("els=>new Set(els.map(e=>e.style.bottom)).size===1")
             for number in (1,18,19,20):
-                error=page.locator("#markLanes button").nth(number-1).evaluate("""el=>{
+                error=choose(number).evaluate("""el=>{
                   const rail=document.getElementById('seek').getBoundingClientRect(),b=el.getBoundingClientRect();
                   const x=t=>rail.left+8+(rail.width-16)*t,s=x(+el.dataset.start),e=x(+el.dataset.end);
                   return el.classList.contains('point')?Math.abs((b.left+b.right)/2-s):Math.max(Math.abs(b.left-s),Math.abs(b.right-e))
                 }""")
                 assert error<1,(zoom,number,error)
+        choose(22)
         assert page.locator(".inkBadge text").all_text_contents()==["#19","#20","#21","#22"]
         tags=[el.bounding_box() for el in page.locator(".inkBadge").all()]
         for i,a in enumerate(tags):

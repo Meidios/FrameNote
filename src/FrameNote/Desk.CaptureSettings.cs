@@ -89,6 +89,7 @@ public sealed partial class Desk
             catch(Exception e) when(e is ArgumentException or InvalidOperationException or System.ComponentModel.Win32Exception){return null;}
         }
         var handle=new System.Windows.Interop.WindowInteropHelper(this).Handle;
+        var self=new{id=Handle(handle),name=Title+L.Text("（本窗口）"),pid=(int?)Environment.ProcessId,app=WindowApp(Environment.ProcessId),self=true};
         catalogPending=true;
         try{
             var catalog=await Task.Run(()=>new{type="catalog",preferences=initial?ReadCapturePrefs(forStartup:true):null,
@@ -96,7 +97,8 @@ public sealed partial class Desk
                     var bounds=CropWindow.DisplayBounds(d.DeviceName);
                     return new{id=d.DeviceName,name=d.FriendlyName+"  "+d.DeviceName,model=d.FriendlyName,monitorId=MonitorId(d.DeviceName),width=bounds.Width,height=bounds.Height};
                 }).ToArray(),
-                windows=Recorder.GetWindows().Where(w=>w.Handle!=handle && w.Title!=L.Text("FrameNote 选区边框")).Select(w=>new{id=Handle(w.Handle),name=w.Title,pid=w.Pid,app=WindowApp(w.Pid)}).ToArray(),
+                windows=Recorder.GetWindows().Where(w=>w.Handle!=handle && w.Title!=L.Text("FrameNote 选区边框") && w.Title!=L.Text("FrameNote 录制控制"))
+                    .Select(w=>new{id=Handle(w.Handle),name=w.Title,pid=(int?)w.Pid,app=WindowApp(w.Pid),self=false}).Append(self).ToArray(),
                 outputs=MixerOutputs().Select(d=>new{id=d.Id,name=d.Name,preferred=d.Preferred}).ToArray(),
                 inputs=Recorder.GetSystemAudioCaptureDevices().Select(d=>new{id=d.DeviceName,name=d.FriendlyName,preferred=d.IsDefaultDevice}).ToArray()},lifetime.Token);
             Send(catalog);
@@ -136,12 +138,17 @@ public sealed partial class Desk
     CaptureSession Session(CaptureSettings s,bool gif,OutputSettings output){
         RecordingSourceBase source;
         if(s.Mode=="window"){
-            var win=Recorder.GetWindows().FirstOrDefault(w=>w.Handle.ToInt64().ToString(CultureInfo.InvariantCulture)==s.Source)
-                ??throw new InvalidOperationException(L.Text("所选窗口已关闭，请刷新采集来源。"));
-            source=new WindowRecordingSource(win.Handle){IsCursorCaptureEnabled=s.Cursor};
+            var hwnd=new System.Windows.Interop.WindowInteropHelper(this).Handle;
+            if(!TargetsDesk(s))hwnd=(Recorder.GetWindows().FirstOrDefault(w=>w.Handle.ToInt64().ToString(CultureInfo.InvariantCulture)==s.Source)
+                ??throw new InvalidOperationException(L.Text("所选窗口已关闭，请刷新采集来源。"))).Handle;
+            source=new WindowRecordingSource(hwnd){IsCursorCaptureEnabled=s.Cursor};
         }else{
             var d=Recorder.GetDisplays().FirstOrDefault(d=>d.DeviceName==s.Source)??throw new InvalidOperationException(L.Text("显示器已断开，请刷新采集来源。"));
             var display=new DisplayRecordingSource(d.DeviceName){IsCursorCaptureEnabled=s.Cursor};
+            if(output.HideWhileRecording && OperatingSystem.IsWindowsVersionAtLeast(10,0,19041)){
+                display.RecorderApi=RecorderApi.WindowsGraphicsCapture;
+                display.IsBorderRequired=false;
+            }
             if(s.Mode=="region"){
                 var bounds=CropWindow.DisplayBounds(s.Source);
                 if(s.Region is not {} r || r.Device!=s.Source || (r.MonitorId!=null && r.MonitorId!=MonitorId(s.Source)) ||

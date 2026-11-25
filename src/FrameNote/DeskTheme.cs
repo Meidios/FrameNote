@@ -13,6 +13,12 @@ namespace FrameNote;
 // Both renderers consume this palette. Native chrome remains owned by Windows.
 internal static class DeskTheme
 {
+    internal const int ButtonHintDelay=1000;
+    static DeskTheme(){
+        var buttons=typeof(System.Windows.Controls.Primitives.ButtonBase);
+        ToolTipService.InitialShowDelayProperty.OverrideMetadata(buttons,new FrameworkPropertyMetadata(ButtonHintDelay));
+        ToolTipService.BetweenShowDelayProperty.OverrideMetadata(buttons,new FrameworkPropertyMetadata(0));
+    }
     internal static FontFamily UiFont { get; }=new(
         new Uri(Path.Combine(AppContext.BaseDirectory,"ui","fonts")+Path.DirectorySeparatorChar),
         "./#Inter, ./NotoSansSC.ttf#Noto Sans SC");

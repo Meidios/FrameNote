@@ -19,7 +19,11 @@ os.environ["FRAMENOTE_DATA_DIR"] = str(profile)
 def save(dlg):
     popup = Desktop(backend="win32").window(process=dlg.process_id(), title="设置")
     dlg.child_window(title="保存", control_type="Button").invoke()
-    popup.wait_not("exists")
+    try:
+        popup.wait_not("exists")
+    except Exception:
+        print("Settings save:",dlg.child_window(auto_id="SaveError",visible_only=False).window_text(),flush=True)
+        raise
 
 
 def settings(proc):
@@ -77,7 +81,7 @@ with sync_playwright() as pw:
         page.keyboard.press("Escape")
         wait(page,"!isFullPreview()")
         assert page.locator("#renumberNotes").inner_text()=="按时间编号"
-        assert "仅更改批注编号" in page.locator("#renumberNotes").get_attribute("title")
+        assert "仅更改批注编号" in page.locator("#renumberNotes").get_attribute("aria-description")
         assert page.evaluate("['#ff00ff','#000033','#ffffff'].map(badgeInk)") == ["#000","#fff","#000"]
         window = Desktop(backend="win32").window(handle=desk(proc).handle)
         for width, height in [(840,560), (1024,650), (1440,900)]:
@@ -112,7 +116,7 @@ with sync_playwright() as pw:
           const gap = (a,b) => $(b).getBoundingClientRect().left-$(a).getBoundingClientRect().right;
           return [gap('box','line'),gap('text','voiceRecord'),gap('addPicture','clear')];
         }""")
-        assert min(space[1:])>space[0],space
+        assert space[0]>=0 and max(space)-min(space)<1,space
         print("PASS: settings isolation, focused commands, note semantics and compact workspace.",work,flush=True)
     finally:
         stop(proc)

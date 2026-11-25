@@ -4,10 +4,10 @@
  const viewport=$('scroll'),timeline=$('timeline');
  let scale=1;
  function navigate(e){
-  const pan=bound('panTimeline',e,256);
-  if(!duration||!ready||busy||editing||(!pan&&!bound('zoomTimeline',e,256)))return;
+  const pan=wheelDirection('panTimeline',e),direction=pan||wheelDirection('zoomTimeline',e);
+  if(!duration||!ready||busy||editing||drag||!direction)return;
   const unit=e.deltaMode===1?16:e.deltaMode===2?viewport.clientWidth:1;
-  const delta=(e.deltaY||e.deltaX)*unit;
+  const delta=(e.deltaY||e.deltaX)*unit*direction;
   if(!delta)return;
   e.preventDefault();
   if(pan){viewport.scrollLeft+=delta;return;}
@@ -87,12 +87,4 @@
   else if(m.track==='waveError')$('waveState').textContent=tr('波形不可用');
   else if((m.track==='filmDone'||m.track==='filmError')&&!frameset.some(Boolean))$('filmState').textContent=tr('缩略图不可用');
  });
- function scrub(e){
-  const r=axis.getBoundingClientRect();if(!ready||editing||!r.width)return;
-  seekTimeline(Math.max(0,Math.min(1,(e.clientX-r.left)/r.width))*duration);
- }
- for(const track of document.querySelectorAll('.mediaTrack')){
-  track.onpointerdown=e=>{if(e.target.closest("[data-track]")||e.button||!ready||editing)return;scrubber.begin(e);track.setPointerCapture(e.pointerId);scrub(e)};
-  track.onpointermove=e=>{if(track.hasPointerCapture(e.pointerId))scrub(e)};
- }
 })();

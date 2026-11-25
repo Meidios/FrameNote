@@ -18,10 +18,12 @@ public partial class NativePlayer : UserControl, IDisposable
     readonly string scratch;
     readonly DispatcherTimer timer=new(){Interval=TimeSpan.FromMilliseconds(100)};
     readonly DispatcherTimer volumeHoverDelay=new(){Interval=TimeSpan.FromMilliseconds(15)};
+    readonly DispatcherTimer hintDelay=new(){Interval=TimeSpan.FromMilliseconds(DeskTheme.ButtonHintDelay)};
     readonly DispatcherTimer volumePercentDelay=new(){Interval=TimeSpan.FromMilliseconds(900)};
     bool volumeExpanded;
     int volumeWheelRemainder;
     bool syncing, disposed, fullscreen, pauseOnStart, stepping, capturing;
+    bool awaitingVideoOutput;
     long startMs;
     int volume=100, audibleVolume=100;
     static readonly float[] speeds=[.25f,.5f,.75f,1f,1.25f,1.5f,2f];
@@ -57,9 +59,9 @@ public partial class NativePlayer : UserControl, IDisposable
         BindToolbarHints(Previous,Toggle,Next,CopyFrame,SaveFrame,Full,PlaylistButton);
         BindVolumePopup();
         Window? host=null;
-        void HideHint(object? sender,EventArgs e){ButtonHint.IsOpen=false;CloseVolumePopup();heldSpeedKeys.Clear();}
+        void HideHint(object? sender,EventArgs e){hintDelay.Stop();ButtonHint.IsOpen=false;CloseVolumePopup();heldSpeedKeys.Clear();}
         Loaded+=(_,_)=>{host=Window.GetWindow(this);if(host!=null)host.Deactivated+=HideHint;};
-        Unloaded+=(_,_)=>{if(host!=null)host.Deactivated-=HideHint;ButtonHint.IsOpen=false;CloseVolumePopup();};
+        Unloaded+=(_,_)=>{if(host!=null)host.Deactivated-=HideHint;HideHint(null,EventArgs.Empty);};
         engine=warming?.GetAwaiter().GetResult()??CreateEngine();
         player=new MediaPlayer(engine){EnableMouseInput=false,EnableKeyInput=false};
         player.EncounteredError+=(_,_)=>Serilog.Log.Error("VLC playback failed");
@@ -134,11 +136,12 @@ public partial class NativePlayer : UserControl, IDisposable
         return true;
     }
     void ZoomVideo(object sender,MouseWheelEventArgs e){
-        if(VolumePopupHost.IsMouseOver || session==null || !VideoArea.IsVisible || !bindings["zoomVideo"].Contains(new Shortcut((int)Keyboard.Modifiers,Shortcut.Wheel)))return;
+        var binding=bindings["zoomVideo"].FirstOrDefault(b=>b.Mods==(int)Keyboard.Modifiers);
+        if(VolumePopupHost.IsMouseOver || session==null || !VideoArea.IsVisible || binding==default)return;
         var p=e.GetPosition(VideoArea);
         if(!new Rect(VideoArea.RenderSize).Contains(p) || VideoArea.ActualWidth<=0 || VideoArea.ActualHeight<=0)return;
         e.Handled=true;
-        double next=Math.Clamp(videoViewport.Width*Math.Pow(2,e.Delta/480d),.25,4);
+        double next=Math.Clamp(videoViewport.Width*Math.Pow(2,e.Delta*(binding.Vk==Shortcut.ReverseWheel?-1:1)/480d),.25,4);
         if(next==videoViewport.Width)return;
         double ratio=next/videoViewport.Width;
         double Anchor(double cursor,double offset)=>Math.Clamp(cursor+(offset-cursor)*ratio,Math.Min(0,1-next),Math.Max(0,1-next));
@@ -216,18 +219,24 @@ public partial class NativePlayer : UserControl, IDisposable
         VolumeCard.BeginAnimation(OpacityProperty,null);VolumeOffset.BeginAnimation(TranslateTransform.YProperty,null);
     }
     void BindToolbarHints(params ButtonBase[] buttons){
-        void Show(ButtonBase button){
+        hintDelay.Tick+=(_,_)=>{
+            hintDelay.Stop();
+            if(ButtonHint.PlacementTarget is ButtonBase { IsMouseOver:true,IsEnabled:true,IsVisible:true })ButtonHint.IsOpen=true;
+        };
+        void Show(ButtonBase button,bool keyboard=false){
             if(!button.IsEnabled||!button.IsVisible)return;
+            hintDelay.Stop();ButtonHint.IsOpen=false;
             ButtonHint.PlacementTarget=button;
-            ButtonHint.IsOpen=true;
+            if(keyboard)ButtonHint.IsOpen=true;else hintDelay.Start();
         }
         void Hide(ButtonBase button){
-            if(ButtonHint.PlacementTarget==button)ButtonHint.IsOpen=false;
+            if(ButtonHint.PlacementTarget!=button)return;
+            hintDelay.Stop();ButtonHint.IsOpen=false;
         }
         foreach(var button in buttons){
             button.MouseEnter+=(_,_)=>Show(button);
             button.MouseLeave+=(_,_)=>Hide(button);
-            button.GotKeyboardFocus+=(_,_)=>{if(InputManager.Current.MostRecentInputDevice is KeyboardDevice)Show(button);};
+            button.GotKeyboardFocus+=(_,_)=>{if(InputManager.Current.MostRecentInputDevice is KeyboardDevice)Show(button,true);};
             button.LostKeyboardFocus+=(_,_)=>Hide(button);
             button.PreviewMouseDown+=(_,_)=>Hide(button);
             button.IsVisibleChanged+=(_,_)=>{if(!button.IsVisible)Hide(button);};
@@ -262,6 +271,9 @@ public partial class NativePlayer : UserControl, IDisposable
         return t.TotalHours>=1?t.ToString(@"hh\:mm\:ss\.fff"):t.ToString(@"mm\:ss\.fff");
     }
     void RefreshControls(){
+        if(awaitingVideoOutput && (player.VoutCount>0 || player.State is VLCState.Error or VLCState.Ended)){
+            awaitingVideoOutput=false;ShowMediaLoad(null);
+        }
         syncing=true;
         Timeline.Maximum=Math.Max(1,player.Length);
         if(!Timeline.IsMouseCaptureWithin)Timeline.Value=TimeMs;
@@ -350,6 +362,7 @@ public partial class NativePlayer : UserControl, IDisposable
     public async Task Start(string path,string name,long ms){
         Stop();session=new();source=path;review=null;startMs=ms;Previous.IsEnabled=Next.IsEnabled=ReviewButton.IsEnabled=false;
         Caption.Text=name;Hint.Text="";
+        awaitingVideoOutput=true;ShowMediaLoad(L.Text("正在加载首帧…"));
         var token=session.Token;
         // Wait for WPF to create the embedded child before handing video to VLC.
         // Starting VLC with a zero HWND lets it create its own Direct3D output window.
@@ -370,7 +383,15 @@ public partial class NativePlayer : UserControl, IDisposable
         timer.Start();Focus();
     }
     public void Pause()=>player.SetPause(true);
+    internal void ShowMediaLoad(string? text,int? percent=null){
+        MediaLoad.Visibility=text==null?Visibility.Collapsed:Visibility.Visible;
+        Hint.Visibility=text==null?Visibility.Visible:Visibility.Collapsed;
+        MediaLoadText.Text=text??"";
+        MediaLoadBar.IsIndeterminate=percent==null;
+        MediaLoadBar.Value=percent??0;
+    }
     public void Preparing(bool preparing,string message,bool showProgress=false){
+        if(!preparing && message.Length>0){awaitingVideoOutput=false;ShowMediaLoad(null);}
         OpenButton.IsEnabled=ReviewButton.IsEnabled=Shuttle.IsEnabled=Output.IsEnabled=Timeline.IsEnabled=!preparing;
         // The VLC child HWND would otherwise cover the WPF loading panel.
         VideoArea.Visibility=preparing?Visibility.Hidden:Visibility.Visible;
@@ -387,6 +408,7 @@ public partial class NativePlayer : UserControl, IDisposable
         PreviewBar.Value=percent;PreviewPercent.Text=$"{percent}%";
     }
     public void Stop(){
+        awaitingVideoOutput=false;ShowMediaLoad(null);
         heldSpeedKeys.Clear();timer.Stop();session?.Cancel();session?.Dispose();session=null;
         ClearStill();SetVideoViewport(new Rect(0,0,1,1));frames=null;stepping=capturing=pauseOnStart=false;player.Stop();
     }
