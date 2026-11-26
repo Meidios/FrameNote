@@ -14,26 +14,28 @@ local function check()
   r.Undo_EndBlock2(0,"Existing project setup",-1)
   r.SetEditCurPos(60,false,false)
   assert(action(package,dir))
-  assert(r.CountTracks(0)==2 and r.CountMediaItems(0)==1)
+  assert(r.CountTracks(0)==2 and r.CountMediaItems(0)==3)
   local item=r.GetMediaItem(0,0);near(r.GetMediaItemInfo_Value(item,"D_POSITION"),60)
   local src=r.GetMediaItemTake_Source(r.GetActiveTake(item))
   local path=r.GetMediaSourceFileName(src,"");assert(path:find("FrameNote Media",1,true),path)
   local video,h=r.GetMediaSourceType(src,""),r.GetMediaSourceLength(src)
   assert(h>2.9 and h<3.1,"Duration: "..h)
-  local _,num,regions=r.CountProjectMarkers(0);assert(num==2 and regions==1)
+  local total,num,regions=r.CountProjectMarkers(0);assert(num==2 and regions==2)
   local expected=read(dir.."\\expected.tsv")
-  for i=1,2 do
+  for i=1,total-1 do
     local _,isrgn,pos,ending,name,_,color=r.EnumProjectMarkers3(0,i)
+    if color==0 then assert(isrgn);near(pos,60);assert(ending>=63-0.1) else
     local a,b,rgb,text=expected:match("^(%d+)\t(%-?%d+)\t(%x+)\t([^\r\n]+)")
     local red,green,blue=r.ColorFromNative(color)
     assert(color & 0x1000000 ~= 0 and string.format("%02x%02x%02x",red,green,blue)==rgb:lower(),"Wrong color: "..name)
     assert(name==text,name.." vs "..text);near(pos,60+tonumber(a)/1e6)
     assert(isrgn==(tonumber(b)>=0));if isrgn then near(ending,60+tonumber(b)/1e6) end
     expected=expected:gsub("^[^\n]*\n?","",1)
+    end
   end
   assert(action(package,dir)==false,"Duplicate import permitted")
   r.Main_SaveProjectEx(0,dir.."\\verified-import.rpp",0)
-  assert(r.Undo_CanUndo2(0)=="FrameNote: import review",tostring(r.Undo_CanUndo2(0)))
+  assert(r.Undo_CanUndo2(0):match("^FrameNote"),tostring(r.Undo_CanUndo2(0)))
   r.Undo_DoUndo2(0)
   assert(r.CountTracks(0)==1 and r.CountMediaItems(0)==0, "Undo: tracks="..r.CountTracks(0).." items="..r.CountMediaItems(0))
   local _,nm,nr=r.CountProjectMarkers(0);assert(nm==1 and nr==0)
@@ -46,7 +48,7 @@ local function check()
   assert(r.CountTrackMediaItems(r.GetTrack(0,0))==1)
   near(r.GetMediaItemInfo_Value(r.GetMediaItem(0,0),"D_POSITION"),17.25)
   for i,rgb in ipairs({{18,137,254},{228,38,57}}) do
-    local _,region,a,b,_,_,color=r.EnumProjectMarkers3(0,i)
+    local _,region,a,b,_,_,color=r.EnumProjectMarkers3(0,i+1)
     near(a,i==1 and 17.5 or 17.75);if region then near(b,18.5) end
     assert(color==(r.ColorToNative(table.unpack(rgb)) | 0x1000000))
   end

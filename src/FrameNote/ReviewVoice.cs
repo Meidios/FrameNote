@@ -41,7 +41,8 @@ internal static class ReviewVoice
             var entry=zip.GetEntry("voice/"+file);
             if(entry==null || entry.Length is <1 or >MaxBytes)throw new InvalidDataException(L.Text("语音附件缺失或过大。"));
             if(dir==null)continue;
-            Packages.Atomic(Path.Combine(dir,file),output=>{
+            string path=Path.Combine(dir,file),expected=Path.GetFileNameWithoutExtension(file);
+            void Extract(Stream output){
                 using var input=entry.Open();using var digest=IncrementalHash.CreateHash(HashAlgorithmName.SHA256);
                 var buffer=new byte[81920];int count;
                 int header=input.ReadAtLeast(buffer,12,throwOnEndOfStream:false);
@@ -49,14 +50,23 @@ internal static class ReviewVoice
                 bool invalid=file.EndsWith(".m4a") && (header<12||!bytes.Slice(4,4).SequenceEqual("ftyp"u8))
                     || file.EndsWith(".mp3") && !(bytes.StartsWith("ID3"u8)||header>=2&&bytes[0]==0xff&&(bytes[1]&0xe0)==0xe0);
                 if(invalid)throw new InvalidDataException(L.Text("语音附件格式或大小无效。"));
+                long length=header;
                 digest.AppendData(bytes);output.Write(bytes);
                 while((count=input.Read(buffer))>0){
-                    if(output.Position+count>entry.Length)throw new InvalidDataException(L.Text("语音附件缺失或过大。"));
+                    length+=count;
+                    if(length>entry.Length)throw new InvalidDataException(L.Text("语音附件缺失或过大。"));
                     digest.AppendData(buffer,0,count);output.Write(buffer,0,count);
                 }
                 string hash=Convert.ToHexString(digest.GetHashAndReset()).ToLowerInvariant();
-                if(output.Position!=entry.Length||Path.GetFileNameWithoutExtension(file)!=hash)throw new InvalidDataException(L.Text("语音附件校验失败。"));
-            });
+                if(length!=entry.Length||expected!=hash)throw new InvalidDataException(L.Text("语音附件校验失败。"));
+            }
+            if(File.Exists(path)){
+                // A previously imported file can still be open in a REAPER take.
+                Extract(Stream.Null);
+                using var stored=File.OpenRead(path);
+                if(stored.Length!=entry.Length || !Convert.ToHexString(SHA256.HashData(stored)).Equals(expected,StringComparison.OrdinalIgnoreCase))
+                    throw new InvalidDataException(L.Text("语音附件校验失败。"));
+            }else Packages.Atomic(path,Extract);
         }
     }
 }

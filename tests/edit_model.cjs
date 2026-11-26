@@ -7,7 +7,7 @@ function checkClipGroups(){
  const note={id:crypto.randomUUID(),number:1,startUs:12,endUs:34,text:'feedback'};
  const base={version:3,durationUs:65,lastNoteNumber:1,notes:[note],
   timeline:{sourceDurationUs:40,linked:true,clips:[...video,audio]}};
- const chosen=video.slice(1,3),group=M.clipGroup(base,chosen,'move');
+ const chosen=video.slice(1,3),group=M.clipGroup(base,chosen);
  const order=d=>d.timeline.clips.filter(c=>c.track==='video').sort((a,b)=>a.startUs-b.startUs).map(c=>c.sourceUs);
  const inserted=M.editGroup(group,'insert',40);
  assert.deepEqual(order(inserted),[0,30,10,20]);
@@ -18,33 +18,54 @@ function checkClipGroups(){
  const moved=M.editGroup(group,'move',60);
  assert.deepEqual(moved.timeline.clips.filter(c=>chosen.some(v=>c.id===v.id)).map(c=>c.startUs),[45,55]);
  assert.deepEqual(moved.notes.map(n=>[n.startUs,n.endUs]),[[47,65],[30,34]]);
- const removed=M.editGroup(M.clipGroup(base,chosen,'delete'),'delete');
+ const removed=M.editGroup(M.clipGroup(base,chosen),'delete');
  assert.deepEqual(order(removed),[0,30]);
  assert.deepEqual(removed.notes,[{...note,startUs:30}]);
  assert.equal(base.timeline.clips.length,5);assert.equal(base.notes[0].startUs,12);
 
  const detached={...base,timeline:{...base.timeline,linked:false}};
- assert.deepEqual(M.editGroup(M.clipGroup(detached,chosen,'move'),'insert',0).timeline.clips.at(-1),audio);
+ assert.deepEqual(M.editGroup(M.clipGroup(detached,chosen),'insert',0).timeline.clips.at(-1),audio);
  const separate=[video[0],video[2]];
- const apart=M.editGroup(M.clipGroup(detached,separate,'move'),'move',10);
+ const apart=M.editGroup(M.clipGroup(detached,separate),'move',10);
  assert.equal(apart,detached);
  const gaps={...detached,timeline:{...detached.timeline,clips:[...separate,audio]}};
- const shifted=M.editGroup(M.clipGroup(gaps,separate,'move'),'move',7);
+ const shifted=M.editGroup(M.clipGroup(gaps,separate),'move',7);
  assert.deepEqual(shifted.timeline.clips.map(c=>c.startUs),[7,27,0]);assert.deepEqual(shifted.notes,[note]);
  const both=[...video.slice(0,2),{...audio,durationUs:20}];
  const aligned={...base,timeline:{...base.timeline,clips:both}};
- assert.deepEqual(M.editGroup(M.clipGroup(aligned,both,'move'),'move',5).timeline.clips.map(c=>c.startUs),[5,15,5]);
- assert.deepEqual(M.editGroup(M.clipGroup(aligned,both,'delete'),'delete').timeline.clips,[]);
+ assert.deepEqual(M.editGroup(M.clipGroup(aligned,both),'move',5).timeline.clips.map(c=>c.startUs),[5,15,5]);
+ assert.deepEqual(M.editGroup(M.clipGroup(aligned,both),'delete').timeline.clips,[]);
 
  const voice=(at)=>({...piece('voice',at,3),sourceUs:0,sourceDurationUs:3,noteId:note.id});
  const voices=[voice(12),voice(18),voice(31)];
  const withVoice={...base,timeline:{...base.timeline,clips:[...base.timeline.clips,...voices]}};
- const voiceMove=M.editGroup(M.clipGroup(withVoice,voices.slice(0,2),'move'),'move',20);
+ const voiceMove=M.editGroup(M.clipGroup(withVoice,voices.slice(0,2)),'move',20);
  assert.deepEqual(voiceMove.timeline.clips.filter(c=>c.track==='voice').map(c=>c.startUs),[20,26,31]);
  assert.deepEqual(voiceMove.notes.map(n=>[n.startUs,n.endUs]),[[20,34]]);
  assert.deepEqual(voiceMove.timeline.clips.filter(c=>c.track!=='voice'),base.timeline.clips);
+ const one=M.execute(withVoice,voices[0],'delete');
+ assert.deepEqual(one.timeline.clips,[...base.timeline.clips,...voices.slice(1)]);
+ assert.deepEqual(one.notes.map(n=>[n.startUs,n.endUs]),[[18,34]]);
+ const several=M.editGroup(M.clipGroup(withVoice,voices.slice(0,2)),'delete');
+ assert.deepEqual(several.timeline.clips,[...base.timeline.clips,voices[2]]);
+ assert.deepEqual(several.notes.map(n=>[n.startUs,n.endUs]),[[31,34]]);
+ const spoken={...note,text:'',voice:{asset:'a'.repeat(64),durationUs:22}};
+ const marked={...withVoice,notes:[spoken]};
+ const erased=M.editGroup(M.clipGroup(marked,voices),'delete');
+ assert.deepEqual(erased.notes,[]);assert.deepEqual(erased.timeline.clips,base.timeline.clips);
+ const annotation=M.execute(marked,{track:'note',id:spoken.id},'delete');
+ assert.deepEqual(annotation.timeline.clips,base.timeline.clips);
+ const attached={...marked,notes:[{...spoken,text:'Keep this drawing',shape:{kind:'box'}}]};
+ const kept=M.editGroup(M.clipGroup(attached,voices),'delete');
+ assert.deepEqual(kept.notes,[{...attached.notes[0],voice:null}]);
+ const mixed=M.editGroup(M.clipGroup(marked,[video[0],voices[1]]),'delete');
+ assert.deepEqual(mixed.timeline.clips.filter(c=>c.track==='video'),video.slice(1));
+ assert.deepEqual(mixed.timeline.clips.filter(c=>c.track==='audio').map(c=>[c.startUs,c.durationUs]),[[10,30]]);
+ assert.deepEqual(mixed.timeline.clips.filter(c=>c.track==='voice'),[voices[0],voices[2]]);
+ const combined=M.editGroup(M.clipGroup(attached,[video[1],...voices]),'delete');
+ assert.deepEqual(combined.notes,[{...attached.notes[0],voice:null,startUs:20}]);
  const detachedVoice={...withVoice,timeline:{...withVoice.timeline,linked:false}};
- const voiceDelete=M.editGroup(M.clipGroup(detachedVoice,voices.slice(0,2),'delete'),'delete');
+ const voiceDelete=M.editGroup(M.clipGroup(detachedVoice,voices.slice(0,2)),'delete');
  assert.deepEqual(voiceDelete.notes,detachedVoice.notes);
  assert.deepEqual(voiceDelete.timeline.clips,[...base.timeline.clips,voices[2]]);
 }
@@ -233,7 +254,7 @@ assert.equal(regionSplit.timeline.clips.find(c=>c.noteId===restoredRight.id).dur
 // Linked clipboard operations split at the insertion point and allocate fresh note identities.
 {
  const base=structuredClone(full),clip=base.timeline.clips.find(c=>c.track==='video');
- const copy=M.copyClips(M.clipGroup(base,[clip],'delete'));
+ const copy=M.copyClips(M.clipGroup(base,[clip]));
  const paste=M.pasteClips(base,copy,2*U);
  assert.equal(paste.doc.timeline.clips.filter(c=>c.track==='video').length,3);
  assert.ok(copy.notes.length>0 && paste.inserted.some(c=>c.track==='voice'));
@@ -242,7 +263,7 @@ assert.equal(regionSplit.timeline.clips.find(c=>c.noteId===restoredRight.id).dur
  const again=M.pasteClips(paste.doc,copy,paste.doc.durationUs);
  assert.equal(new Set(again.doc.timeline.clips.map(c=>c.id)).size,again.doc.timeline.clips.length);
  const unlocked=structuredClone(base);unlocked.timeline.linked=false;
- const single=M.copyClips(M.clipGroup(unlocked,[clip],'delete'));
+ const single=M.copyClips(M.clipGroup(unlocked,[clip]));
  const result=M.pasteClips(unlocked,single,unlocked.durationUs+U);
  assert.deepEqual(result.doc.notes,unlocked.notes);
  assert.deepEqual(result.inserted.map(c=>c.track),['video']);

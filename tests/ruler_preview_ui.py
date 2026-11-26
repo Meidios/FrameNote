@@ -17,7 +17,7 @@ units_per_pixel={"mm":25.4/96,"cm":2.54/96,"m":.0254/96,"px":1}
 
 
 def choose_unit(proc,page,label,expected,save=True):
-    dialog=settings(proc)
+    dialog=settings(proc,"批注工具")
     dialog.child_window(auto_id="DefaultRulerUnit",control_type="ComboBox").select(label)
     dialog.child_window(title="保存" if save else "取消",control_type="Button",depth=5).invoke()
     Desktop(backend="win32").window(process=proc.pid,title="设置").wait_not("exists")

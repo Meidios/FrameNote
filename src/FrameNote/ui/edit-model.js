@@ -227,16 +227,17 @@ const EditModel=(()=>{
   }
  }
  // Partition linked material once per gesture, before computing shared move limits.
- function clipGroup(original,selection,action){
+ function clipGroup(original,selection){
   const base=structuredClone(original),t=base.timeline,ids=new Set(selection.map(c=>c.id));
   const chosen=t.clips.filter(c=>ids.has(c.id));
+  if(!chosen.length)throw Error('请先选择要编辑的片段。');
   const media=chosen.filter(c=>c.track!=='voice');
   const directNotes=new Set(chosen.filter(c=>c.track==='voice'&&c.noteId).map(c=>c.noteId));
   const spans=items=>mergeRanges(items.map(c=>[c.startUs,end(c)]));
-  const ranges=t.linked?spans(action==='delete'?chosen:media):[];
+  const ranges=t.linked?spans(media):[];
   const inside=at=>ranges.some(([a,b])=>a<=at&&at<b);
-  const independentVoice=c=>action==='move'&&c.track==='voice'&&ids.has(c.id);
-  const independentNote=n=>action==='move'&&directNotes.has(n.id);
+  const independentVoice=c=>c.track==='voice'&&ids.has(c.id);
+  const independentNote=n=>directNotes.has(n.id);
   const origins=new Map();
   for(const [a,b] of ranges)for(const cut of [a,b]){
    if(cut>0&&cut<base.durationUs)splitTimelineAt(base,cut,c=>!independentVoice(c),n=>!independentNote(n),origins);
@@ -254,12 +255,19 @@ const EditModel=(()=>{
   const canInsert=spans(media).length===1&&media.length>0&&
    (t.linked?ranges[0][0]===startUs&&ranges[0][1]===stop:
     !tracks.has('voice')&&!fixed.some(c=>tracks.has(c.track)&&c.startUs<stop&&end(c)>startUs));
-  return {original,base,moving,notes,directNotes,origins,fixed,tracks,canInsert,startUs,durationUs,
+  return {original,base,chosen,moving,notes,directNotes,origins,fixed,tracks,canInsert,startUs,durationUs,
    bounds:{min:0,max:base.durationUs-durationUs},obstacles:mergeRanges(blocked,false)};
  }
  function editGroup(group,action,value){
   const {original,base,moving,notes,directNotes,startUs,durationUs}=group;
   const t=base.timeline,stop=startUs+durationUs;
+  if(action==='delete'&&t.linked&&group.tracks.has('voice')&&group.tracks.size>1){
+   // Remove the explicit voice pieces first, then apply normal linked media cuts
+   // to the remaining notes, including drawings that just lost their audio.
+   const voice=group.chosen.filter(c=>c.track==='voice'),media=group.chosen.filter(c=>c.track!=='voice');
+   const afterVoice=editGroup(clipGroup(original,voice),'delete');
+   return editGroup(clipGroup(afterVoice,media),'delete');
+  }
   if(action==='insert'){
    if(!group.canInsert||!(value<startUs||value>stop))return original;
    const affects=c=>t.linked||group.tracks.has(c.track);
@@ -278,19 +286,25 @@ const EditModel=(()=>{
   const clips=t.clips.filter(c=>!remove||!moving.has(c.id)).map(c=>
    !remove&&moving.has(c.id)?{...c,startUs:c.startUs+delta}:c);
   const voiceRanges=new Map();
-  if(!remove&&directNotes.size)for(const c of clips){
+  if((!remove||t.linked)&&directNotes.size)for(const c of clips){
    if(c.track!=='voice'||!directNotes.has(c.noteId))continue;
    const range=voiceRanges.get(c.noteId);
    if(!range)voiceRanges.set(c.noteId,{startUs:c.startUs,endUs:end(c)});
    else{range.startUs=Math.min(range.startUs,c.startUs);range.endUs=Math.max(range.endUs,end(c))}
   }
-  const remaining=base.notes.filter(n=>!remove||!notes.has(n.id)).map(n=>{
+  // The audio annotation track follows its own clip IDs. Only selected video or
+  // source audio can propagate a deletion through an interval on other tracks.
+  const lostVoice=id=>remove&&t.linked&&directNotes.has(id)&&!voiceRanges.has(id);
+  const hasContent=n=>n.text?.trim()||n.shape||n.pictures?.length;
+  const remaining=base.notes.filter(n=>(!remove||!notes.has(n.id))&&(!lostVoice(n.id)||hasContent(n))).map(n=>{
+   if(lostVoice(n.id))return {...n,voice:null};
    if(voiceRanges.has(n.id))return {...n,...voiceRanges.get(n.id)};
    if(remove||!notes.has(n.id))return n;
    return {...n,startUs:n.startUs+delta,endUs:n.endUs==null?null:n.endUs+delta};
   });
   const timeline={...t,clips};
-  if(remove&&t.trimmed)timeline.trimmed=t.trimmed.filter(p=>!moving.has(p.clipId));
+  if(remove&&t.trimmed)timeline.trimmed=t.trimmed.filter(p=>!moving.has(p.clipId)&&!lostVoice(p.voice?.noteId)&&
+   !(p.note&&lostVoice(p.note.id)&&!hasContent(p.note))).map(p=>p.note&&lostVoice(p.note.id)?{...p,note:{...p.note,voice:null}}:p);
   const d={...base,version:3,timeline,notes:remaining};
   // Preserve the original annotation number when a cut removes its first portion.
   if(remove&&group.origins.size){
@@ -312,6 +326,14 @@ const EditModel=(()=>{
   validate(d);return d;
  }
  function execute(original,target,action,value){
+  if(action==='delete'&&target?.track==='voice')return editGroup(clipGroup(original,[target]),action);
+  if(action==='delete'&&target?.track==='note'&&original.notes.some(n=>n.id===target.id&&n.voice)){
+   const t=original.timeline,notes=original.notes.filter(n=>n.id!==target.id);
+   if(!t)return {...original,notes};
+   return {...original,notes,timeline:{...t,
+    clips:t.clips.filter(c=>c.noteId!==target.id),
+    ...(t.trimmed?{trimmed:t.trimmed.filter(p=>(p.note?.id??p.voice?.noteId)!==target.id)}:{})}};
+  }
   if(target?.track==='note'&&action==='move'){
    const note=original.notes.find(n=>n.id===target.id);
    if(note?.endUs!=null){

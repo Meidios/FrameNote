@@ -4,6 +4,10 @@
 
 Versions are listed newest first. Earlier entries summarize the offline release history shipped with the app; they do not imply that each version had a public GitHub installer.
 
+## 0.9.6
+
+发送到 REAPER 时，剪辑后的视频、透明批注图和音频会放到同一轨道，总 Region 覆盖整次导入。Excel 根据区间内的批注音频选择 GIF 或 MP4。新增音频波形和拖入预览，加快大视频打开与媒体导出，并修复联动状态下删除音频批注误删视频的问题。[0.9.6 更新说明](docs/releases/v0.9.6.md)
+
 ## 0.9.5
 
 时间线支持框选和剪贴多个片段、预览裁剪边缘、循环或导出时间选区。批注增加多点曲线、画笔、透明度和可排序工具栏。语音批注录为 MP3，外部音频可拖入同一轨道并随 Excel 导出。录屏时可自动隐藏主窗口，通过悬浮按钮暂停或停止。[0.9.5 更新说明](docs/releases/v0.9.5.md)

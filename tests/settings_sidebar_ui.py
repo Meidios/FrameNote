@@ -13,7 +13,7 @@ profile.mkdir()
 (profile / "updates.json").write_text('{"automatic":false}')
 (profile / "shortcuts.json").write_text('{"record":[]}')
 os.environ["FRAMENOTE_DATA_DIR"] = str(profile)
-sections = ["通用", "批注工具", "录制设置", "表格设置", "快捷键", "使用说明", "更新", "问题反馈", "关于"]
+sections = ["通用", "批注工具", "录制设置", "表格设置", "REAPER集成", "快捷键", "使用说明", "更新", "问题反馈", "关于"]
 
 
 def section(dlg, name):
@@ -48,12 +48,14 @@ with sync_playwright() as pw:
         title = dlg.child_window(title=dlg.window_text(), control_type="Text").rectangle()
         assert title.bottom <= positions[0].top
         unit = dlg.child_window(auto_id="DefaultRulerUnit", control_type="ComboBox")
-        assert positions[0].right < unit.rectangle().left
+        assert not unit.exists(timeout=0)
         dlg.capture_as_image().save(work / "settings-general.png")
+        section(dlg, "批注工具").select()
+        assert positions[1].right < unit.rectangle().left
         unit.select("厘米（cm）")
 
         for source,target,field in [("通用","批注工具","DefaultOpacity"),("批注工具","录制设置","SaveCopy"),
-                                    ("录制设置","表格设置","ExcelZip"),("表格设置","快捷键","point")]:
+                                    ("录制设置","表格设置","ExcelZip"),("表格设置","REAPER集成","ReaperFolder"),("REAPER集成","快捷键","point")]:
             section(dlg,source).set_focus()
             keyboard.send_keys("{DOWN}")
             assert section(dlg,target).is_selected(),[t.window_text() for t in tabs if t.is_selected()]
@@ -131,12 +133,12 @@ with sync_playwright() as pw:
         print("Update result:", [t.window_text() for t in Desktop(backend="uia").window(handle=result.handle).descendants(control_type="Text")], flush=True)
         result.close()
         native.wait("ready")
-        section(dlg, "通用").select()
+        section(dlg, "批注工具").select()
         assert unit.selected_text() == "厘米（cm）"
         dismiss(dlg, "取消")
         assert not json.loads((profile / "updates.json").read_text())["automatic"]
 
-        dlg = settings(proc)
+        dlg = settings(proc,"批注工具")
         unit = dlg.child_window(auto_id="DefaultRulerUnit", control_type="ComboBox")
         assert unit.selected_text() == "米（m）"
         unit.select("厘米（cm）")
@@ -146,7 +148,7 @@ with sync_playwright() as pw:
         auto.toggle()
         dismiss(dlg, "保存")
         wait(page, "defaultRulerUnit==='cm'")
-        dlg = settings(proc)
+        dlg = settings(proc,"批注工具")
         assert dlg.child_window(auto_id="DefaultRulerUnit").selected_text() == "厘米（cm）"
         section(dlg, "更新").select()
         assert dlg.child_window(auto_id="AutomaticUpdates").get_toggle_state() == 1
@@ -155,12 +157,13 @@ with sync_playwright() as pw:
         main = desk(proc)
         main.child_window(title="帮助", control_type="MenuItem", depth=3).expand()
         main.child_window(title="更新记录", control_type="MenuItem", found_index=0).invoke()
-        history = Desktop(backend="win32").window(process=proc.pid, title="更新记录")
+        history = Desktop(backend="win32").window(process=proc.pid, title="设置")
         history.wait("ready")
         popup = Desktop(backend="uia").window(handle=history.handle)
-        assert popup.child_window(control_type="ComboBox").selected_text() == current
+        assert section(popup,"更新").is_selected()
+        assert popup.child_window(auto_id="ReleaseVersions").selected_text() == current
         assert displayed_entries(popup) == release_text(current)
         history.close()
-        print("PASS: nine sections, feedback links, compact scrolling, release history, update dialogs, save and cancel.", flush=True)
+        print("PASS: settings sections, feedback links, compact scrolling, release history, update dialogs, save and cancel.", flush=True)
     finally:
         stop(proc)

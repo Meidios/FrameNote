@@ -10,12 +10,12 @@ internal static class ExcelReview
         (ExcelColumns.Number,"编号",9),(ExcelColumns.Type,"类型",12),(ExcelColumns.Start,"开始时间",17),
         (ExcelColumns.End,"结束时间",17),(ExcelColumns.Text,"批注内容",52),
         (ExcelColumns.Preview,"画面预览",27),(ExcelColumns.Media,"媒体文件",17)];
-    internal static string MediaFile(Note note)=>note.EndUs.HasValue?$"media/Region-{note.Number}.gif":$"media/Mark-{note.Number}.png";
+    internal static string MediaFile(Note note,bool withAudio)=>withAudio?$"media/{(note.EndUs.HasValue?"Region":"Mark")}-{note.Number}.mp4":note.EndUs.HasValue?$"media/Region-{note.Number}.gif":$"media/Mark-{note.Number}.png";
     internal static string AudioFile(Note n)=>$"audio/{n.Number}"+(n.Voice!.Original is {} file?Path.GetExtension(file.Name).ToLowerInvariant():".mp3");
     // ClosedXML consumes one leading apostrophe as Excel's text-entry prefix.
     static string Literal(string value)=>value.StartsWith('\'')?"'"+value:value;
 
-    internal static void Write(string directory,string previews,string source,IReadOnlyList<Note> notes,ExcelTemplate template,CancellationToken token){
+    internal static void Write(string directory,string previews,string source,IReadOnlyList<Note> notes,ExcelTemplate template,IReadOnlySet<Guid> withAudio,CancellationToken token){
         using var book=new XLWorkbook();
         var sheet=book.AddWorksheet(L.Text("批注清单"));
         sheet.ShowGridLines=false;
@@ -74,8 +74,8 @@ internal static class ExcelReview
                         cell.SetHyperlink(new XLHyperlink(new Uri(AudioFile(note),UriKind.Relative)));
                         cell.Style.Font.FontColor=XLColor.FromHtml("#145A88");cell.Style.Font.Underline=XLFontUnderlineValues.Single;break;
                     case ExcelColumns.Media:
-                        cell.Value=note.EndUs.HasValue?L.Text("播放 GIF"):L.Text("打开 PNG");
-                        cell.SetHyperlink(new XLHyperlink(new Uri(MediaFile(note),UriKind.Relative)));
+                        cell.Value=withAudio.Contains(note.Id)?L.Text("播放 MP4"):note.EndUs.HasValue?L.Text("播放 GIF"):L.Text("打开 PNG");
+                        cell.SetHyperlink(new XLHyperlink(new Uri(MediaFile(note,withAudio.Contains(note.Id)),UriKind.Relative)));
                         cell.Style.Font.FontColor=XLColor.FromHtml("#145A88");cell.Style.Font.Underline=XLFontUnderlineValues.Single;break;
                 }
             }

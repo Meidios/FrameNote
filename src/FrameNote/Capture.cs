@@ -32,7 +32,7 @@ public static class Capture
         var temp=Path.Combine(Path.GetDirectoryName(output)!,Guid.NewGuid().ToString("N")+".gif");
         try{
             await Probe.EncodeWithProgress(["-hide_banner","-loglevel","error","-nostdin","-ss",FormattableString.Invariant($"{start:F6}"),"-t",FormattableString.Invariant($"{seconds:F6}"),"-i",source,
-                "-an","-filter_complex","fps=12,scale='min(800,iw)':-2:flags=lanczos,split[a][b];[a]palettegen[p];[b][p]paletteuse=dither=sierra2_4a","-loop","0",temp],(long)(seconds*1e6),report??(_=>{}),token);
+                "-an","-filter_complex","fps=12,scale='min(800,iw)':-2:flags=lanczos,split[a][b];[a]palettegen[p];[b][p]paletteuse="+ExportEncoding.GifDither,"-loop","0",temp],(long)(seconds*1e6),report??(_=>{}),token);
             token.ThrowIfCancellationRequested();
             File.Move(temp,output,true);
         }finally{File.Delete(temp);}

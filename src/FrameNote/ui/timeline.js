@@ -1,4 +1,13 @@
 'use strict';
+function waveformPath({peaks,stepUs},duration,width){
+ const top=[],bottom=[];
+ for(let i=0;i<peaks.length;i++){
+  const x=Math.min(width,width*(i+.5)*stepUs/duration).toFixed(2),h=15*Math.sqrt(peaks[i]/255);
+  top.push(x+','+(16-h).toFixed(2));bottom.push(x+','+(16+h).toFixed(2));
+ }
+ const end=(width*Math.min(1,peaks.length*stepUs/duration)).toFixed(2);
+ return top.length?'M0,16 L'+top.join(' ')+' L'+end+',16 '+bottom.reverse().join(' ')+' Z':'';
+}
 (()=>{
  const axis=$('ticks'),film=$('sourceFrames'),wave=$('sourceWave');
  const viewport=$('scroll'),timeline=$('timeline');
@@ -76,13 +85,8 @@
    frameset.length=m.data.count;frameset[m.data.i]=m.data.src;
    $('filmState').textContent='';scheduleFilm();
   }else if(m.track==='wave'){
-   const {peaks,stepUs}=m.data,top=[],bottom=[];
-   for(let i=0;i<peaks.length;i++){
-    const x=Math.min(1000,1000*(i+.5)*stepUs/sourceDuration).toFixed(2),h=15*Math.sqrt(peaks[i]/255);
-    top.push(x+','+(16-h).toFixed(2));bottom.push(x+','+(16+h).toFixed(2));
-   }
-   wave.setAttribute('d',top.length?'M0,16 L'+top.join(' ')+' L'+bottom.reverse().join(' ')+' Z':'');
-   $('waveState').textContent=peaks.some(p=>p>0)?'':tr('静音');
+   wave.setAttribute('d',waveformPath(m.data,sourceDuration,1000));
+   $('waveState').textContent=m.data.peaks.some(p=>p>0)?'':tr('静音');
   }else if(m.track==='silent')$('waveState').textContent=tr('无音轨');
   else if(m.track==='waveError')$('waveState').textContent=tr('波形不可用');
   else if((m.track==='filmDone'||m.track==='filmError')&&!frameset.some(Boolean))$('filmState').textContent=tr('缩略图不可用');

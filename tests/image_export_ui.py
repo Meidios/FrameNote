@@ -49,14 +49,18 @@ with sync_playwright() as pw:
         # Each badge contains colored fill and dark glyph pixels, above its own shape.
         for x,y,bg in [(.1,.25,(0,255,0)),(.76,.4,(0,255,255))]:
             crop=result.crop((int(W*x)+5,int(H*y)-25,int(W*x)+35,int(H*y)-7))
-            assert bg+(255,) in crop.get_flattened_data() and (21,32,42,255) in crop.get_flattened_data()
+            assert bg+(255,) in crop.get_flattened_data() and (0,0,0,255) in crop.get_flattened_data()
         box=p.locator("#stage").bounding_box();x=box["x"]+box["width"]*.8;y=box["y"]+box["height"]*.5
         p.mouse.move(x,y);p.mouse.wheel(0,-960);wait(p,"$('stage').classList.contains('pannable')")
         p.mouse.down();p.mouse.move(x+45,y-70);p.mouse.up()
         before=p.locator("#openedImage").get_attribute("style")
+        p.get_by_role("button",name="画面编号",exact=True).click()
+        wait(p,"$('toggleCanvasNumbers').ariaPressed==='false'")
+        assert p.locator("#overlay .inkBadge:visible").count()==0
         dest=work/"share.png";p.locator("#saveImage").click(no_wait_after=True)
         d=Desktop(backend="win32").window(process=proc.pid,class_name="#32770");d.wait("ready");edit=d.child_window(class_name="Edit",found_index=0)
-        time.sleep(.3);edit.set_edit_text(str(dest));d.child_window(control_id=1).click()
+        edit.wait("ready");edit.set_focus();edit.set_edit_text(str(dest));edit.type_keys("{ENTER}")
+        d.wait_not("visible",timeout=10)
         wait(p,"!busy && $('status').textContent.startsWith('批注图已保存')",timeout=16000)
         assert Image.open(dest).convert("RGBA").tobytes()==result.crop((0,0,W,H)).tobytes()
         assert before==p.locator("#openedImage").get_attribute("style")

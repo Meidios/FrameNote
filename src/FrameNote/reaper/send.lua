@@ -15,7 +15,10 @@ local ok,err=pcall(function()
   local folder=rpp and rpp:match("^(.*)[/\\]") or nil
   if not folder then folder=os.getenv("LOCALAPPDATA").."/FrameNote/REAPER" end
   local receiver=assert(loadfile(unhex(lines[1])))("receive",language)
-  local result,why=receiver(lines,folder,dir:match("([^/\\]+)$"))
+  local result,why=receiver(lines,folder,dir:match("([^/\\]+)$"),function(fraction)
+    local status=io.open(dir.."/progress","w")
+    if status then status:write(math.floor(85+fraction*14));status:close() end
+  end)
   assert(result,why)
 end)
 write("result.tmp",ok and "OK" or tostring(err))

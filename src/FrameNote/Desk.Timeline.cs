@@ -6,11 +6,29 @@ namespace FrameNote;
 public sealed partial class Desk
 {
     CancellationTokenSource? timelineJob;
+    CancellationTokenSource? voiceWaveJob;
 
-    void StopTimeline(){timelineJob?.Cancel();timelineJob=null;}
+    void StopTimeline(){timelineJob?.Cancel();timelineJob=null;voiceWaveJob?.Cancel();}
+
+    async Task SendVoiceWave(System.Text.Json.JsonElement request){
+        var id=request.GetProperty("playbackId").GetGuid();
+        if(id!=playbackId||viewingImage)return;
+        string asset=request.GetProperty("asset").GetString()!;
+        string? format=request.GetProperty("format").GetString();
+        long duration=request.GetProperty("durationUs").GetInt64();
+        if(asset.Length!=64||!asset.All(char.IsAsciiHexDigit)||!ReviewVoice.ValidFormat(format)||duration is <=0 or >604800000000)return;
+        using var job=CancellationTokenSource.CreateLinkedTokenSource(lifetime.Token);
+        voiceWaveJob?.Cancel();voiceWaveJob=job;
+        Probe.Waveform? data=null;
+        try{data=await Probe.ReadWaveform(ReviewVoice.PathFor(ImageDirectory,asset,format),duration,job.Token,48000);}
+        catch(OperationCanceledException) when(job.IsCancellationRequested){}
+        catch(Exception e){Serilog.Log.Warning(e,"Could not read annotation waveform");}
+        finally{if(voiceWaveJob==job)voiceWaveJob=null;}
+        if(!job.IsCancellationRequested&&id==playbackId)Send(new{type="voiceWave",playbackId=id,asset,format,data});
+    }
 
     async Task BuildTimeline(Guid id,string path,Probe.Info info){
-        StopTimeline();
+        timelineJob?.Cancel();
         using var job=new CancellationTokenSource();
         timelineJob=job;
         var token=job.Token;
@@ -20,14 +38,7 @@ public sealed partial class Desk
         }
         async Task Wave(){
             if(info.Audio==""){Emit("silent",null);return;}
-            // Each peak covers one fixed time bucket across all channels. Preserve leading silence.
-            var block=Math.Max(1,(int)Math.Ceiling(info.Duration/1e6*16000/2048));
-            string filter=$"aresample=16000:async=1:first_pts=0,asetnsamples=n={block}:p=1,astats=metadata=1:reset=1:measure_perchannel=none:measure_overall=Peak_level,ametadata=mode=print:key=lavfi.astats.Overall.Peak_level:file=-";
-            var log=await Probe.Run(token,"ffmpeg","-nostdin","-v","error","-copyts","-start_at_zero","-i",path,"-map","0:a:0","-af",filter,"-vn","-f","null","-");
-            var peaks=log.Split('\n').Where(s=>s.StartsWith("lavfi.astats.Overall.Peak_level=",StringComparison.Ordinal))
-                .Select(s=>double.TryParse(s.Split('=')[1],NumberStyles.Float,CultureInfo.InvariantCulture,out var db)&&double.IsFinite(db)
-                    ?Math.Clamp((int)Math.Round(255*Math.Pow(10,Math.Min(db,0)/20)),0,255):0).Take(2048).ToArray();
-            Emit("wave",new{peaks,stepUs=block*1e6/16000});
+            Emit("wave",await Probe.ReadWaveform(path,info.Duration,token));
         }
         async Task Film(){
             var file=Path.Combine(Path.GetTempPath(),"framenote-film-"+Guid.NewGuid().ToString("N")+".jpg");

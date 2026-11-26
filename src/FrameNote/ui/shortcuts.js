@@ -82,6 +82,11 @@ function refreshShortcutHints(){
 }
 document.addEventListener('DOMContentLoaded',refreshShortcutHints);
 chrome.webview.addEventListener('message',({data:m})=>{
+ if(m.type==='canvasNumbers'||m.type==='shortcuts'){
+  const show=m.showCanvasNumbers!==false;
+  $('toggleCanvasNumbers').setAttribute('aria-pressed',String(show));
+  $('overlay').classList.toggle('hideCanvasNumbers',!show);
+ }
  if(m.type==='shortcuts'){
   speedKeys.clear();window.shortcutBindings=m.bindings;refreshShortcutHints();setDefaultRulerUnit(m.defaultRulerUnit);
   defaultLensZoom=m.defaultLensZoom;defaultOpacity=m.defaultOpacity;applyAnnotationToolbar(m.annotationToolbar);

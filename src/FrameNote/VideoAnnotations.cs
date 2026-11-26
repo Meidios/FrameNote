@@ -200,9 +200,16 @@ internal sealed class VideoAnnotations
         await File.WriteAllTextAsync(path,playlist.ToString(),new UTF8Encoding(false),token);
         return path;
     }
-    internal void WriteLayerPng(string path,Note[] notes){
+    internal void WriteLayerPng(string path,Note[] notes,bool captionsInsidePicture=false){
         var visual=new DrawingVisual();
-        using(var context=visual.RenderOpen())context.DrawDrawing(Layer(notes));
+        using(var context=visual.RenderOpen()){
+            context.DrawDrawing(Layer(notes));
+            if(captionsInsidePicture){
+                context.PushTransform(new TranslateTransform(0,-Math.Min(height,Footer(null,notes))));
+                Footer(context,notes);
+                context.Pop();
+            }
+        }
         target.Clear();target.Render(visual);
         var png=new PngBitmapEncoder();png.Frames.Add(BitmapFrame.Create(target));
         using var file=File.Create(path);png.Save(file);

@@ -47,10 +47,37 @@ public static class Probe
         if(encoder.ExitCode!=0)throw new IOException(L.Text("视频编码失败：")+await error);
     }
     static long Us(string s)=>(long)Math.Round(double.Parse(s,CultureInfo.InvariantCulture)*1e6);
+    internal static async Task<long> AudioDuration(string path,CancellationToken token){
+        string value=await Run(token,"ffprobe","-v","error","-show_entries","format=duration","-of","default=nw=1:nk=1",path);
+        if(double.TryParse(value.Trim(),CultureInfo.InvariantCulture,out var seconds)&&double.IsFinite(seconds)&&seconds is >0 and <=604800)
+            return (long)Math.Round(seconds*1e6);
+        // Some stream containers have no duration header. Count decoded samples on the same clock as the clip.
+        if(string.IsNullOrWhiteSpace(value)||value.Trim()=="N/A"){
+            string progress=await Run(token,"ffmpeg","-nostdin","-v","error","-i",path,"-map","0:a:0","-af","asetpts=N/SR/TB","-progress","pipe:1","-f","null","-");
+            var last=progress.Split('\n').LastOrDefault(line=>line.StartsWith("out_time_us=",StringComparison.Ordinal));
+            if(last!=null&&long.TryParse(last.AsSpan(12),out long us)&&us is >0 and <=604800000000)return us;
+        }
+        throw new InvalidDataException(L.Text("音频时长无效。"));
+    }
+    internal sealed record Waveform(int[] Peaks,double StepUs);
+    internal static async Task<Waveform> ReadWaveform(string path,long duration,CancellationToken token,int sampleRate=16000){
+        // Each peak covers one fixed time bucket across all channels. Preserve leading silence.
+        var block=Math.Max(1,(int)Math.Ceiling(duration/1e6*sampleRate/2048));
+        string filter=$"aresample={sampleRate}:async=1:first_pts=0,asetnsamples=n={block}:p=1,astats=metadata=1:reset=1:measure_perchannel=none:measure_overall=Peak_level,ametadata=mode=print:key=lavfi.astats.Overall.Peak_level:file=-";
+        var log=await Run(token,"ffmpeg","-nostdin","-v","error","-copyts","-start_at_zero","-i",path,"-map","0:a:0","-af",filter,"-vn","-f","null","-");
+        var peaks=log.Split('\n').Where(s=>s.StartsWith("lavfi.astats.Overall.Peak_level=",StringComparison.Ordinal))
+            .Select(s=>double.TryParse(s.Split('=')[1],NumberStyles.Float,CultureInfo.InvariantCulture,out var db)&&double.IsFinite(db)
+                ?Math.Clamp((int)Math.Round(255*Math.Pow(10,Math.Min(db,0)/20)),0,255):0).Take(2048).ToArray();
+        return new(peaks,block*1e6/sampleRate);
+    }
     public sealed record Info(long Duration,long Origin,string Video,string Audio,string PixelFormat){
-        public bool Direct(string path)=>Path.GetExtension(path).ToLowerInvariant() is (".mp4" or ".mov" or ".m4v" or ".webm")
-            && Video is ("h264" or "vp8" or "vp9" or "av1") && (Video!="h264" || PixelFormat is "yuv420p" or "yuvj420p")
-            && Audio is ("" or "aac" or "opus" or "vorbis" or "mp3");
+        public bool Direct(string path){
+            var extension=Path.GetExtension(path).ToLowerInvariant();
+            bool mp4=extension is ".mp4" or ".mov" or ".m4v";
+            return (mp4 || extension==".webm")
+                && Video is ("h264" or "vp8" or "vp9" or "av1") && (Video!="h264" || PixelFormat is "yuv420p" or "yuvj420p")
+                && (Audio is ("" or "aac" or "opus" or "vorbis" or "mp3") || (mp4 && Audio=="flac"));
+        }
     }
     public static async Task<Info> Inspect(string path,CancellationToken token=default){
         var meta=await Run(token,"ffprobe","-v","error","-show_entries","format=start_time,duration:stream=codec_type,codec_name,pix_fmt","-of","json","-i",path);

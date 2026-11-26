@@ -34,6 +34,36 @@ public record EditTimeline(long SourceDurationUs,List<EditClip> Clips,bool Linke
 
 internal static class MediaEdits
 {
+    internal static Review ForFlattenedExport(Review review,bool hasSourceAudio){
+        if(review.Timeline is not {} timeline)return review;
+        timeline=timeline with{Trimmed=null};
+        // A silent source can still have an editable original-audio lane.
+        if(!hasSourceAudio)timeline=timeline with{Clips=timeline.Clips.Where(c=>c.Track!="audio").ToList()};
+        long end=timeline.Clips.Select(c=>c.StartUs+c.DurationUs).DefaultIfEmpty().Max();
+        end=Math.Max(end,review.Notes.Max(n=>n.EndUs)??0);
+        // A Mark inside the cut stops at its end. A standalone Mark after the cut needs display time.
+        var lastMark=review.Notes.Where(n=>n.EndUs==null).MaxBy(n=>n.StartUs);
+        if(lastMark!=null && lastMark.StartUs>=end)end=VideoAnnotations.End(lastMark,review.DurationUs);
+        if(end==0)throw new InvalidDataException(L.Text("时间线上没有可导出的片段或批注。"));
+        return review with{DurationUs=end,Timeline=timeline};
+    }
+    internal static bool OriginalTracks(Review review,bool hasAudio){
+        if(review.Timeline is not {} timeline)return true;
+        if(timeline.SourceDurationUs!=review.DurationUs)return false;
+        bool Whole(string track){
+            var clips=timeline.Clips.Where(c=>c.Track==track).ToArray();
+            return clips.Length==1 && clips[0].StartUs==0 && clips[0].SourceUs==0 && clips[0].DurationUs==review.DurationUs;
+        }
+        return Whole("video") && (!hasAudio || Whole("audio"));
+    }
+    internal static IEnumerable<EditClip> AudioNotes(Review review){
+        if(review.Timeline is {} timeline)return timeline.Clips.Where(c=>c.Track=="voice");
+        return review.Notes.Where(n=>n.Voice!=null).Select(n=>{
+            var v=n.Voice!;
+            long length=Math.Min(v.DurationUs,(n.EndUs??review.DurationUs)-n.StartUs);
+            return new EditClip(n.Id,"voice",n.StartUs,0,length,v.Asset,v.DurationUs,n.Id,v.Format);
+        });
+    }
     static string N(double n)=>n.ToString("0.######",CultureInfo.InvariantCulture);
     internal static async Task Compose(string input,Review review,string assets,string output,CancellationToken token,Action<int>? report=null){
         review.Check();var timeline=review.Timeline!;
@@ -63,9 +93,8 @@ internal static class MediaEdits
         string script=output+".filters";
         try{
             await File.WriteAllTextAsync(script,string.Join(';',filters),token);
-            args.AddRange(["-filter_complex_script",script,"-map","[video]","-map","[audio]","-t",N(review.DurationUs/1e6),"-c:v","libx264","-preset","veryfast","-crf","16","-pix_fmt","yuv420p","-c:a","aac","-b:a","256k","-movflags","+faststart",output]);
-            if(report==null)await Probe.Run(token,"ffmpeg",args.ToArray());
-            else await Probe.EncodeWithProgress(args,review.DurationUs,report,token);
+            args.AddRange(["-filter_complex_script",script,"-map","[video]","-map","[audio]","-t",N(review.DurationUs/1e6),"-pix_fmt","yuv420p","-c:a","aac","-b:a","256k","-movflags","+faststart"]);
+            await ExportEncoding.H264(width,height,16,output,token,codec=>Probe.EncodeWithProgress([..args,..codec,output],review.DurationUs,report??(_=>{}),token));
         }
         catch{File.Delete(output);throw;}
         finally{File.Delete(script);}

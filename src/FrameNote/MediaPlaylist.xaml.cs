@@ -9,7 +9,8 @@ using System.Windows.Media.Imaging;
 
 namespace FrameNote;
 
-internal sealed record PlaylistFile(string Path){
+internal sealed class PlaylistFile(string path){
+    public string Path {get;}=path;
     public string Name=>System.IO.Path.GetFileName(Path);
     internal BitmapSource? Thumbnail;
 }
@@ -19,10 +20,15 @@ public partial class MediaPlaylist : UserControl {
     readonly SemaphoreSlim slots=new(2);
     internal CancellationToken Token;
     public MediaPlaylist(){InitializeComponent();Items.ItemsSource=Files;}
+    // A realized template can already be visible and have its DataContext before the change handlers are attached.
+    void LoadedThumb(object sender,RoutedEventArgs e)=>Load((Image)sender);
     void VisibleThumb(object sender,DependencyPropertyChangedEventArgs e){if((bool)e.NewValue)Load((Image)sender);}
     void ChangeThumb(object sender,DependencyPropertyChangedEventArgs e){var image=(Image)sender;image.Source=null;if(image.IsVisible)Load(image);}
     async void Load(Image image){
-        if(image.DataContext is not PlaylistFile file || file.Thumbnail!=null){image.Source=(image.DataContext as PlaylistFile)?.Thumbnail;return;}
+        if(!image.IsVisible || image.DataContext is not PlaylistFile file)return;
+        if(file.Thumbnail is {} cached){image.Source=cached;return;}
+        if(ReferenceEquals(image.Tag,file))return;
+        image.Tag=file;
         try{
             await slots.WaitAsync(Token);
             try{
@@ -31,6 +37,7 @@ public partial class MediaPlaylist : UserControl {
                 if(ReferenceEquals(image.DataContext,file))image.Source=file.Thumbnail;
             }finally{slots.Release();}
         }catch(Exception ex) when(ex is OperationCanceledException or IOException or COMException or NotSupportedException or ArgumentException or InvalidDataException or System.ComponentModel.Win32Exception){}
+        finally{if(ReferenceEquals(image.Tag,file))image.ClearValue(TagProperty);}
     }
     async Task<BitmapSource> DecodeThumb(string path){
         string temp=System.IO.Path.Combine(System.IO.Path.GetTempPath(),"FrameNote-thumb-"+Guid.NewGuid().ToString("N")+".png");

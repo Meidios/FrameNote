@@ -9,13 +9,10 @@ public sealed partial class Desk
     CaptureAudioMix? voiceCapture;
     TaskCompletionSource<long>? voiceStopTime;
     void StopVoice()=>voiceStopTime?.TrySetResult(TimestampedAudio.Now100ns());
-    async Task ImportNoteAudio(JsonElement message,string[] files){
-        if(doc==null||viewingImage||pending||voiceCapture!=null||files.Length==0||
-            message.GetProperty("documentId").GetGuid()!=doc.Id)return;
-        var documentId=doc.Id;
-        long at=message.GetProperty("at").GetInt64();
-        if(at<0||at>doc.DurationUs)return;
-        string? targetId=message.TryGetProperty("targetId",out var target)?target.GetString():null;
+    Task ImportNoteAudio(JsonElement message,string[] files)=>ImportNoteAudio(message.GetProperty("documentId").GetGuid(),
+        message.GetProperty("at").GetInt64(),message.TryGetProperty("targetId",out var target)?target.GetString():null,files);
+    async Task ImportNoteAudio(Guid documentId,long at,string? targetId,string[] files){
+        if(doc?.Id!=documentId||viewingImage||pending||voiceCapture!=null||files.Length==0||at<0||at>doc.DurationUs)return;
         await Work(async()=>{
             if(files.Any(p=>!ReviewVoice.Supports(p)))throw new InvalidDataException(L.Text("请选择支持的音频文件。"));
             var voices=new List<Voice>();
@@ -25,13 +22,9 @@ public sealed partial class Desk
                     string original=await Task.Run(()=>ReviewVoice.StoreFile(ImageDirectory,path,"original"));
                     string input=Path.Combine(ImageDirectory,original+".original");
                     await Probe.Run(lifetime.Token,"ffmpeg","-v","error","-nostdin","-y","-i",input,"-map","0:a:0","-vn","-ac","2","-ar","48000","-c:a","libmp3lame","-q:a","2",proxy);
-                    Task<string> DurationOf(string file)=>Probe.Run(lifetime.Token,"ffprobe","-v","error","-show_entries","format=duration","-of","default=nw=1:nk=1",file);
-                    string duration=await DurationOf(input);
-                    if(string.IsNullOrWhiteSpace(duration)||duration.Trim()=="N/A")duration=await DurationOf(proxy);
-                    if(!double.TryParse(duration.Trim(),System.Globalization.CultureInfo.InvariantCulture,out double seconds)||!double.IsFinite(seconds)||seconds<=0||seconds>604800)
-                        throw new InvalidDataException(L.Text("音频时长无效。"));
+                    long duration=await Probe.AudioDuration(input,lifetime.Token);
                     string asset=await Task.Run(()=>ReviewVoice.StoreFile(ImageDirectory,proxy,"mp3"));
-                    voices.Add(new(asset,(long)Math.Round(seconds*1e6),"mp3",new(original,Path.GetFileName(path))));
+                    voices.Add(new(asset,duration,"mp3",new(original,Path.GetFileName(path))));
                 }
                 if(doc?.Id==documentId)Send(new{type="audioImported",documentId,at,targetId,voices});
             }finally{File.Delete(proxy);}
@@ -65,6 +58,31 @@ public sealed partial class Desk
             changed.Clear();
         }
     }
+    // One peak per 20 ms of the same WASAPI clock used to encode the MP3.
+    sealed class VoiceEnvelope(float gain){
+        internal const int BinUs=20_000;
+        readonly List<float> peaks=[];
+        long origin;
+        int sent;
+        internal void Start(long time)=>Volatile.Write(ref origin,time);
+        internal void Sample(long timestamp,float amplitude){
+            long start=Volatile.Read(ref origin);
+            if(start==0||timestamp<start)return;
+            int bin=(int)((timestamp-start)/(10L*BinUs));
+            if(bin>=600_000_000/BinUs)return;
+            lock(peaks){
+                while(peaks.Count<=bin)peaks.Add(0);
+                peaks[bin]=Math.Max(peaks[bin],Math.Min(1,amplitude*gain));
+            }
+        }
+        internal (int Offset,float[] Peaks) Read(){
+            lock(peaks){
+                int offset=Math.Max(0,sent-1);
+                sent=peaks.Count;
+                return(offset,peaks.GetRange(offset,sent-offset).ToArray());
+            }
+        }
+    }
     async Task RecordVoice(JsonElement p){
         Guid id=p.GetProperty("id").GetGuid();
         if(voiceCapture!=null || recorder!=null || pending || configuring || doc==null || viewingImage){Send(new{type="voiceStored",id,error=L.Text("当前有录制或文件操作，请结束后再录语音。")});return;}
@@ -79,14 +97,23 @@ public sealed partial class Desk
             var sources=ResolveAudio(new MixerSettings([],mixer.Mic));
             if(!sources.Any(s=>!s.Muted))throw new InvalidOperationException(L.Text("请启用麦克风后再录语音批注。"));
             Directory.CreateDirectory(directory);
-            using var mix=new CaptureAudioMix(sources,directory);
+            var envelope=new VoiceEnvelope(MathF.Pow(10,sources.Single().GainDb/20f));
+            using var mix=new CaptureAudioMix(sources,directory,observePeak:envelope.Sample);
             var stopped=voiceStopTime=new(TaskCreationOptions.RunContinuationsAsynchronously);
             voiceCapture=mix;
             long start=TimestampedAudio.Now100ns(),maxUs=Math.Min(600_000_000,doc.DurationUs-startUs);
+            envelope.Start(start);
+            var preview=new System.Windows.Threading.DispatcherTimer{Interval=TimeSpan.FromMilliseconds(50)};
+            preview.Tick+=(_,_)=>{
+                var (offset,peaks)=envelope.Read();
+                long elapsedUs=Math.Clamp((TimestampedAudio.Now100ns()-start)/10,0,maxUs);
+                Send(new{type="voiceProgress",id,elapsedUs,offset,peaks});
+            };
             long duration;
             try{
                 using var silence=new VoiceOutputMute();
-                Send(new{type="voiceStarted",id});
+                Send(new{type="voiceStarted",id,binUs=VoiceEnvelope.BinUs});
+                preview.Start();
                 using var limit=new CancellationTokenSource(TimeSpan.FromTicks(maxUs*10));
                 using var stop=limit.Token.Register(()=>stopped.TrySetResult(start+maxUs*10));
                 // A disconnected endpoint or failed writer must also end the recording.
@@ -96,7 +123,7 @@ public sealed partial class Desk
                     throw new IOException(L.Text("音频设备意外停止采集。"));
                 }
                 duration=Math.Min(maxUs,((await stopped.Task)-start)/10);
-            }finally{voiceStopTime=null;voiceCapture=null;mix.Dispose();}
+            }finally{preview.Stop();voiceStopTime=null;voiceCapture=null;mix.Dispose();}
             Send(new{type="voiceFinishing",id});
             if(duration<100_000)throw new InvalidOperationException(L.Text("录音太短，请至少录制 0.1 秒。"));
             var args=new List<string>{"-nostdin","-v","error","-copyts"};

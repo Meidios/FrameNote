@@ -9,7 +9,7 @@
     <Style.Triggers><Trigger Property="IsMouseOver" Value="True"><Setter Property="Background" Value="{DynamicResource hover}"/></Trigger><Trigger Property="IsSelected" Value="True"><Setter Property="Background" Value="{DynamicResource selection}"/></Trigger></Style.Triggers>
    </Style></ListBox.ItemContainerStyle>
    <ListBox.ItemTemplate><DataTemplate><DockPanel ToolTip="{Binding Path}">
-    <Border DockPanel.Dock="Left" Width="62" Height="42" Background="{DynamicResource canvas}" Margin="0,0,8,0"><Image IsVisibleChanged="VisibleThumb" DataContextChanged="ChangeThumb" Stretch="Uniform"/></Border>
+    <Border DockPanel.Dock="Left" Width="62" Height="42" Background="{DynamicResource canvas}" Margin="0,0,8,0"><Image Loaded="LoadedThumb" IsVisibleChanged="VisibleThumb" DataContextChanged="ChangeThumb" Stretch="Uniform"/></Border>
     <TextBlock Text="{Binding Name}" VerticalAlignment="Center" TextTrimming="CharacterEllipsis"/>
    </DockPanel></DataTemplate></ListBox.ItemTemplate>
   </ListBox>

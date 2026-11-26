@@ -24,11 +24,11 @@ public sealed partial class Desk
         }finally{File.Delete(stage);}
     }
 
-    async Task WithExportProgress(string format,Func<CancellationToken,Task<FileSystemInfo?>> write){
+    async Task WithExportProgress(string format,Func<CancellationToken,Task<FileSystemInfo?>> write,bool closeOnSuccess=false){
         // Leave the WebView message callback before entering WPF's modal message loop.
         await System.Windows.Threading.Dispatcher.Yield();
         if(lifetime.IsCancellationRequested)return;
-        var dialog=new ExportDialog(this,format,write,lifetime.Token,shortcuts["cancel"]);
+        var dialog=new ExportDialog(this,format,write,lifetime.Token,shortcuts["cancel"],closeOnSuccess);
         exportDialog=dialog;
         try{
             if(dialog.ShowDialog()==true && dialog.Output is {} output){

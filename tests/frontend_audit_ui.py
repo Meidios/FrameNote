@@ -44,13 +44,19 @@ with sync_playwright() as pw:
         assert not page.locator("#list").inner_text().strip()
         wait(page, "bindingLabel('splitClip')==='F6'")
         dlg = settings(proc)
+        dlg.child_window(title="批注工具", control_type="TabItem").select()
         unit = dlg.child_window(auto_id="DefaultRulerUnit")
         unit.select("厘米（cm）")
+        dlg.child_window(title="通用", control_type="TabItem").select()
+        dlg.child_window(auto_id="ResetButton").invoke()
+        dlg.child_window(title="批注工具", control_type="TabItem").select()
+        assert unit.selected_text() == "厘米（cm）"
         dlg.child_window(auto_id="ResetButton").invoke()
         assert unit.selected_text() == "米（m）"
         save(dlg)
         assert page.evaluate("bindingLabel('splitClip')")== "F6"
         dlg = settings(proc)
+        dlg.child_window(title="批注工具", control_type="TabItem").select()
         dlg.child_window(auto_id="DefaultRulerUnit").select("厘米（cm）")
         dlg.child_window(title="快捷键", control_type="TabItem").select()
         dlg.child_window(auto_id="ResetButton").invoke()
@@ -80,7 +86,7 @@ with sync_playwright() as pw:
         wait(page,"isFullPreview()")
         page.keyboard.press("Escape")
         wait(page,"!isFullPreview()")
-        assert page.locator("#renumberNotes").inner_text()=="按时间编号"
+        assert page.locator("#renumberNotes").inner_text()=="重新编号"
         assert "仅更改批注编号" in page.locator("#renumberNotes").get_attribute("aria-description")
         assert page.evaluate("['#ff00ff','#000033','#ffffff'].map(badgeInk)") == ["#000","#fff","#000"]
         window = Desktop(backend="win32").window(handle=desk(proc).handle)

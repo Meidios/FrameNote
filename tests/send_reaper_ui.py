@@ -20,18 +20,19 @@ r.SetOnlyTrackSelected(t);r.SetEditCurPos(17.25,false,false)
 local dir=os.getenv("FRAMENOTE_SEND_TEST")
 local f=assert(io.open(dir.."/ready","wb"));f:close()
 local function monitor()
- if r.CountMediaItems(0)==3 then
+ if r.CountMediaItems(0)==5 then
   local ok,err=pcall(function()
-   assert(r.CountTracks(0)==2 and r.CountTrackMediaItems(t)==3)
-   local _,m,g=r.CountProjectMarkers(0);assert(m==1 and g==1)
+   assert(r.CountTracks(0)==2 and r.CountTrackMediaItems(t)==5)
+   local total,m,g=r.CountProjectMarkers(0);assert(m==1 and g==4)
    for i=0,2 do local item=r.GetMediaItem(0,i); assert(r.GetMediaItemInfo_Value(item,"D_POSITION")==17.25)
     local src=r.GetMediaItemTake_Source(r.GetActiveTake(item))
     local f=assert(io.open(dir.."/media"..i,"wb"));f:write(r.GetMediaSourceFileName(src,""));f:close()
    end
    local f=assert(io.open(dir.."/markers","wb"))
-   for i=0,1 do local _,rg,a,b,n=r.EnumProjectMarkers3(0,i);f:write(string.format("%.6f|%.6f|%s\\n",a,rg and b or -1,n)) end
+   for i=0,total-1 do local _,rg,a,b,n,_,color=r.EnumProjectMarkers3(0,i)
+    if color~=0 then f:write(string.format("%.6f|%.6f|%s\\n",a,rg and b or -1,n)) end end
    f:close()
-   r.Undo_DoUndo2(0);local _,mm,gg=r.CountProjectMarkers(0);assert(mm==0 and gg==0 and r.CountTrackMediaItems(t)==2)
+   r.Undo_DoUndo2(0);local _,mm,gg=r.CountProjectMarkers(0);assert(mm==0 and gg==2 and r.CountTrackMediaItems(t)==2)
   end)
   local out=assert(io.open(dir.."/done","wb"));out:write(ok and "OK" or tostring(err));out:close()
  else r.defer(monitor) end

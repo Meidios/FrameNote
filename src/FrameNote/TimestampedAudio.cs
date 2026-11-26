@@ -25,7 +25,7 @@ sealed class TimestampedAudio : IDisposable
 
     public static long Now100ns() => (long)(Stopwatch.GetTimestamp()*(10_000_000.0/Stopwatch.Frequency));
 
-    public TimestampedAudio(string id,bool loopback,string path,long epoch,CapturePauses? pauses=null)
+    public TimestampedAudio(string id,bool loopback,string path,long epoch,CapturePauses? pauses=null,Action<long,float>? observePeak=null)
     {
         Path=path;
         DeviceId=id;
@@ -58,7 +58,9 @@ sealed class TimestampedAudio : IDisposable
                     int max=0;
                     foreach(short sample in MemoryMarshal.Cast<byte,short>(bytes.AsSpan(4,length)))
                         max=Math.Max(max,Math.Abs((int)sample));
-                    Volatile.Write(ref peak,max/32768f);
+                    float amplitude=max/32768f;
+                    observePeak?.Invoke(timestamp,amplitude);
+                    Volatile.Write(ref peak,amplitude);
                     Volatile.Write(ref peakAt,Stopwatch.GetTimestamp());
                 }
                 client.Start();ready.SetResult();

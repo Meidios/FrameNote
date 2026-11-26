@@ -20,7 +20,7 @@ function editAction(action,value){
  finishEdit();transport.pause();
  try{
   const base=currentEditDoc(),next=clipSelection.length>1&&action==='delete'
-   ?EditModel.editGroup(EditModel.clipGroup(base,clipSelection,'delete'),'delete')
+   ?EditModel.editGroup(EditModel.clipGroup(base,clipSelection),'delete')
    :EditModel.execute(base,singleClip(),action,value);
   if(next===base)return;
   commitTimeline(next);
@@ -36,7 +36,7 @@ function runClipCommand(action){
  if(pasted?clipClipboard?.docId!==doc.id:!selection.length)return false;
  try{
   finishEdit();transport.pause();const base=currentEditDoc();
-  const group=pasted?null:EditModel.clipGroup(base,selection,'delete');
+  const group=pasted?null:EditModel.clipGroup(base,selection);
   const copy=pasted?clipClipboard.copy:EditModel.copyClips(group);
   if(action==='cut'||action==='copy'){
    if(action==='cut')commitTimeline(EditModel.editGroup(group,'delete'),null);
@@ -76,8 +76,37 @@ function positionClip(el,c,duration){
  el.style.left=100*c.startUs/duration+'%';
  el.style.width=100*c.durationUs/duration+'%';
  el.style.setProperty('--source-offset',100*c.sourceUs/duration+'cqw');
+ // Source milliseconds keep the wave aligned even during a live edge drag.
+ if(c.track==='voice')el.querySelector('.voiceClipWave')?.setAttribute('viewBox',[c.sourceUs/1000,0,c.durationUs/1000,32].join(' '));
 }
+const voiceWaveQueue=[];
+let wavePlayback=null,readingWave=null;
+function readNextVoiceWave(){
+ if(readingWave||!voiceWaveQueue.length)return;
+ readingWave=voiceWaveQueue.shift();
+ const {asset,format,durationUs}=readingWave;
+ send('voiceWave',{playbackId,asset,format,durationUs});
+}
+function appendVoiceWave(el,c){
+ const format=c.format??null,key='wave-'+c.asset+'-'+(format??'m4a');
+ if(!$(key)){
+  $('voiceWaveforms').append(svg('path',{id:key}));
+  voiceWaveQueue.push({asset:c.asset,format,durationUs:c.sourceDurationUs,key});
+  readNextVoiceWave();
+ }
+ const layer=svg('svg',{class:'voiceClipWave',preserveAspectRatio:'none','aria-hidden':'true'});
+ layer.append(svg('use',{href:'#'+key}));el.append(layer);
+}
+chrome.webview.addEventListener('message',({data:m})=>{
+ if(m.type!=='voiceWave'||m.playbackId!==playbackId||!readingWave||m.asset!==readingWave.asset||m.format!==readingWave.format)return;
+ const {key,durationUs}=readingWave;
+ if(m.data)$(key)?.setAttribute('d',waveformPath(m.data,durationUs,durationUs/1000));
+ readingWave=null;readNextVoiceWave();
+});
 function renderClips(previewTimeline=null){
+ if(wavePlayback!==playbackId){
+  wavePlayback=playbackId;voiceWaveQueue.length=0;readingWave=null;$('voiceWaveforms').replaceChildren();
+ }
  const usable=ready&&!imageDoc(),timeline=previewTimeline??(doc&&!imageDoc()?(doc.timeline??EditModel.initial(doc)):null);
  // Keep identities stable before the first edit.
  if(!previewTimeline&&timeline&&!doc.timeline){
@@ -98,7 +127,7 @@ function renderClips(previewTimeline=null){
   if(timeline)host.style.setProperty('--source-width',100*timeline.sourceDurationUs/doc.durationUs+'cqw');
   for(const c of timeline?.clips.filter(c=>c.track===track)??[]){
    const label=track==='video'?tr('视频'):track==='audio'?tr('原声'):audioNames.get(c.noteId)??tr('语音批注');
-   const el=document.createElement('button');el.className='editClip';el.dataset.id=c.id;el.dataset.track=track;positionClip(el,c,doc.durationUs);el.setAttribute('aria-pressed',String(ids.has(c.id)));el.ariaDescription=tr("{0} {1} – {2} · 拖动移动，两端裁剪",label,fmt(c.startUs),fmt(EditModel.end(c)));
+   const el=document.createElement('button');el.className='editClip';el.dataset.id=c.id;el.dataset.track=track;el.setAttribute('aria-pressed',String(ids.has(c.id)));el.ariaDescription=tr("{0} {1} – {2} · 拖动移动，两端裁剪",label,fmt(c.startUs),fmt(EditModel.end(c)));
    if(track!=='voice')el.ariaDescription+=tr(' · 拖过另一片段的中点可换序');
    el.setAttribute('aria-label',label);
    if(c.track==='voice'&&c.noteId)el.dataset.noteId=c.noteId;
@@ -106,7 +135,8 @@ function renderClips(previewTimeline=null){
     const layer=svg('svg',{class:'clipMedia','aria-hidden':'true'});
     if(track==='audio'){layer.setAttribute('viewBox','0 0 1000 32');layer.setAttribute('preserveAspectRatio','none')}
     layer.append(svg('use',{href:track==='video'?'#sourceFrames':'#sourceWave'}));el.append(layer);
-   }
+   }else appendVoiceWave(el,c);
+   positionClip(el,c,doc.durationUs);
    addTrimHandles(el);
    host.append(el);
   }
@@ -230,7 +260,7 @@ function updateMarquee(d,e){
 }
 function previewGroup(d,e,delta){
  if(!d.group){
-  d.group=EditModel.clipGroup(d.base,clipSelection,'move');
+  d.group=EditModel.clipGroup(d.base,clipSelection);
   d.neighbors=d.group.fixed.filter(c=>c.track===d.c.track).sort((a,b)=>a.startUs-b.startUs);
   d.edges=[0,d.base.durationUs,...d.neighbors.flatMap(c=>[c.startUs,EditModel.end(c)])];
  }

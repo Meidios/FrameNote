@@ -136,12 +136,6 @@
       </DockPanel><TextBlock Margin="0,9,0,0" Foreground="{DynamicResource muted}" FontSize="12" TextWrapping="Wrap" Text="{i18n:Tr '保存后，下次启动 FrameNote 或 Player 时生效。'}"/></StackPanel></Border>
       <TextBlock Style="{StaticResource SectionTitle}" Text="{i18n:Tr '文件关联'}"/>
       <Border Style="{StaticResource SettingsCard}"><DockPanel><Button DockPanel.Dock="Right" Content="{i18n:Tr '打开默认应用设置'}" Click="OpenDefaultApps"/><TextBlock VerticalAlignment="Center" Text="{i18n:Tr '默认应用'}"/></DockPanel></Border>
-      <TextBlock Style="{StaticResource SectionTitle}" Text="{i18n:Tr '距离标尺'}"/>
-      <Border Style="{StaticResource SettingsCard}"><StackPanel><DockPanel>
-       <ComboBox x:Name="DefaultRulerUnit" DockPanel.Dock="Right" MinWidth="120" SelectedValuePath="Tag" AutomationProperties.Name="{i18n:Tr '标尺默认单位'}">
-        <ComboBoxItem Tag="mm" Content="{i18n:Tr '毫米（mm）'}"/><ComboBoxItem Tag="cm" Content="{i18n:Tr '厘米（cm）'}"/><ComboBoxItem Tag="m" Content="{i18n:Tr '米（m）'}"/><ComboBoxItem Tag="px" Content="{i18n:Tr '像素（px）'}"/>
-       </ComboBox><TextBlock VerticalAlignment="Center" Text="{i18n:Tr '标尺默认单位'}"/>
-      </DockPanel><TextBlock Margin="0,9,0,0" Foreground="{DynamicResource muted}" FontSize="12" TextWrapping="Wrap" Text="{i18n:Tr '未标定的标尺按 96 px 等于 25.4 mm 换算。'}"/></StackPanel></Border>
       <TextBlock Style="{StaticResource SectionTitle}" Text="{i18n:Tr '导出路径'}"/>
       <Border Style="{StaticResource SettingsCard}"><DockPanel>
        <Button DockPanel.Dock="Right" Margin="8,0,0,0" Content="{i18n:Tr '浏览…'}" Tag="{Binding ElementName=ExportDirectory}" Click="ChooseDirectory"/>
@@ -165,6 +159,12 @@
     </TabItem>
     <TabItem x:Name="AnnotationTab" Header="{i18n:Tr '批注工具'}" Tag="{StaticResource sc-cycleColor}">
      <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled"><StackPanel>
+      <TextBlock Style="{StaticResource SectionTitle}" Text="{i18n:Tr '距离标尺'}"/>
+      <Border Style="{StaticResource SettingsCard}"><StackPanel><DockPanel>
+       <ComboBox x:Name="DefaultRulerUnit" DockPanel.Dock="Right" MinWidth="120" SelectedValuePath="Tag" AutomationProperties.Name="{i18n:Tr '标尺默认单位'}">
+        <ComboBoxItem Tag="mm" Content="{i18n:Tr '毫米（mm）'}"/><ComboBoxItem Tag="cm" Content="{i18n:Tr '厘米（cm）'}"/><ComboBoxItem Tag="m" Content="{i18n:Tr '米（m）'}"/><ComboBoxItem Tag="px" Content="{i18n:Tr '像素（px）'}"/>
+       </ComboBox><TextBlock VerticalAlignment="Center" Text="{i18n:Tr '标尺默认单位'}"/>
+      </DockPanel><TextBlock Margin="0,9,0,0" Foreground="{DynamicResource muted}" FontSize="12" TextWrapping="Wrap" Text="{i18n:Tr '未标定的标尺按 96 px 等于 25.4 mm 换算。'}"/></StackPanel></Border>
       <TextBlock Style="{StaticResource SectionTitle}" Text="{i18n:Tr '批注默认值'}"/>
       <Border Style="{StaticResource SettingsCard}"><DockPanel>
        <TextBox x:Name="DefaultOpacity" Width="100" DockPanel.Dock="Right" Style="{StaticResource DirectoryField}" PreviewMouseWheel="OpacityWheel" AutomationProperties.Name="{i18n:Tr '默认不透明度（%）'}"/>
@@ -224,7 +224,7 @@
        <TextBlock Text="{i18n:Tr '导出列'}" FontWeight="SemiBold" Margin="0,0,0,4"/>
        <UniformGrid x:Name="ExcelColumnChoices" Columns="2"/>
        <TextBlock Margin="0,8,0,0" Foreground="{DynamicResource muted}" FontSize="12" TextWrapping="Wrap"
-        Text="{i18n:Tr '画面预览嵌入工作簿。媒体文件列链接到点批注的 PNG 或区间批注的 GIF。'}"/>
+        Text="{i18n:Tr '画面预览嵌入工作簿。含语音批注或导入音频批注的片段链接到 MP4，其余区间链接到 GIF，普通点批注链接到 PNG。'}"/>
       </StackPanel></Border>
       <TextBlock Style="{StaticResource SectionTitle}" Text="{i18n:Tr '交付方式'}"/>
       <Border Style="{StaticResource SettingsCard}"><StackPanel>
@@ -232,6 +232,29 @@
        <TextBlock Margin="0,8,0,0" Foreground="{DynamicResource muted}" FontSize="12" TextWrapping="Wrap"
         Text="{i18n:Tr '将工作簿和所选媒体一起打包。接收方解压后即可打开表格中的媒体链接。'}"/>
       </StackPanel></Border>
+     </StackPanel></ScrollViewer>
+    </TabItem>
+    <TabItem x:Name="ReaperTab" Header="{i18n:Tr 'REAPER集成'}" Tag="{StaticResource sc-linkTracks}">
+     <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled"><StackPanel>
+      <TextBlock Style="{StaticResource SectionTitle}" Text="{i18n:Tr '接收脚本'}"/>
+      <Border Style="{StaticResource SettingsCard}"><StackPanel>
+       <TextBlock x:Name="ReaperStatus" FontWeight="SemiBold"/>
+       <TextBlock x:Name="ReaperInstalledPath" TextWrapping="Wrap" Foreground="{DynamicResource muted}" Margin="0,4,0,0"/>
+       <WrapPanel Margin="0,10,0,0">
+        <Button x:Name="ReaperInstall" Click="InstallReaperScript" Margin="0,0,6,0"/>
+        <Button x:Name="ReaperUninstall" Content="{i18n:Tr '卸载脚本'}" Click="UninstallReaperScript"/>
+       </WrapPanel>
+      </StackPanel></Border>
+      <TextBlock Style="{StaticResource SectionTitle}" Text="{i18n:Tr '安装目录'}"/>
+      <Border Style="{StaticResource SettingsCard}"><StackPanel>
+       <TextBlock x:Name="ReaperFolderMode" FontWeight="SemiBold"/>
+       <TextBlock x:Name="ReaperFolder" TextWrapping="Wrap" Margin="0,4,0,10"/>
+       <WrapPanel>
+        <Button Content="{i18n:Tr '选择目录…'}" Click="ChooseReaperFolder" Margin="0,0,6,0"/>
+        <Button x:Name="ReaperAuto" Content="{i18n:Tr '自动识别'}" Click="AutoReaperFolder"/>
+       </WrapPanel>
+      </StackPanel></Border>
+      <TextBlock x:Name="ReaperError" Foreground="{DynamicResource danger}" TextWrapping="Wrap"/>
      </StackPanel></ScrollViewer>
     </TabItem>
     <TabItem x:Name="ShortcutsTab" Header="{i18n:Tr '快捷键'}" Tag="{StaticResource sc-keyboard}">

@@ -178,15 +178,19 @@
 <div id="ruler" class="trackRow"><div id="ticks" class="axis"></div><input aria-label="视频位置" id="seek" type="range" min="0" value="0" step="1"></div>
 <div class="trackRow mediaTrack"><div class="axis clipLane" id="videoClips"></div><div id="filmstrip" class="axis" aria-label="视频缩略图"><svg><defs><g id="sourceFrames"></g></defs></svg></div><span id="filmState" class="trackState"></span></div>
 <div class="trackRow mediaTrack"><div class="axis clipLane" id="audioClips"></div><div class="axis"><svg id="waveform" role="img" aria-label="音频波形"><defs><path id="sourceWave"></path></defs></svg></div><span id="waveState" class="trackState"></span></div>
-<div class="trackRow mediaTrack"><div class="axis clipLane" id="voiceClips"></div></div>
+<div class="trackRow mediaTrack"><div class="axis clipLane" id="voiceClips"></div>
+<div class="axis voiceFeedback" aria-hidden="true"><div id="voiceTake" hidden><canvas></canvas></div><div id="audioDropPreview" hidden></div>
+<svg width="0" height="0"><defs id="voiceWaveforms"></defs></svg></div></div>
 <div id="marks" role="group" aria-label="时间线批注"><div id="markLanes"></div></div>
 <div class="axis headAxis" aria-hidden="true"><div id="playhead"></div></div>
+<div class="axis audioDropGuides" aria-hidden="true" hidden><div></div></div>
 <div class="axis timeRangeAxis" aria-hidden="true"><div id="timeRange" hidden><span data-time-edge="start"></span><span data-time-edge="end"></span></div></div>
 <div id="clipMarquee" aria-hidden="true" hidden></div></div></div></div>
 </section><aside id="reviewPanel" aria-label="审阅批注">
 <div id="imageToolbar" role="group" aria-label="图片批注工具"></div>
 <div class="sideTitle"><h2>批注列表 <span id="count">0</span></h2><div class="bar" id="noteActions">
-<button type="button" id="renumberNotes" class="hoverButton" aria-description="按起始时间排列编号，仅更改批注编号" disabled>按时间编号</button></div></div>
+<button type="button" id="toggleCanvasNumbers" class="hoverButton" aria-pressed="true" aria-controls="ink" aria-description="显示或隐藏画面中的常驻批注编号">画面编号</button>
+<button type="button" id="renumberNotes" class="hoverButton" aria-description="按起始时间排列编号，仅更改批注编号" disabled>重新编号</button></div></div>
 <div id="list" aria-label="批注列表"></div>
 <form id="editor" aria-labelledby="editorHeading"><h2 id="editorHeading">批注详情</h2>
 <p class="empty" id="emptyDetails">选中一条批注即可查看和编辑。</p>

@@ -80,12 +80,12 @@ public sealed partial class Desk
                 new(L.Text("语音批注"),L.Text("在左侧启用麦克风后，点工具栏的麦克风开始录音。录音期间系统默认输出静音，再点一次保存为 MP3，按 Esc 放弃。也可添加音频文件或拖入批注音轨，导出 Excel 时会附带原文件。")),
             ]),
             ("ruler",L.Text("测量与放大细节"),[
-                new(L.Text("距离标尺"),L.Text("点击起点和终点，或从起点拖到终点。要按真实尺寸测量，先画一段已知长度，右键标尺填写距离和单位并保存。同一帧新增的标尺会沿用该比例，默认单位可在「通用」设置中选择。")),
+                new(L.Text("距离标尺"),L.Text("点击起点和终点，或从起点拖到终点。要按真实尺寸测量，先画一段已知长度，右键标尺填写距离和单位并保存。同一帧新增的标尺会沿用该比例，默认单位可在「设置 → 批注工具 → 距离标尺」中选择。")),
                 new(L.Text("角度与放大镜"),L.Text("依次点击端点、顶点和另一端点，第三次点击固定角度。拖动控制点或在详情和右键菜单里输入角度可调整数值。用放大镜框住细节，再把放大预览拖到空白处，取样框和预览框可以分别移动。")),
             ]),
             ("point",L.Text("定位和整理批注"),[
                 new(L.Text("点与区间"),L.Text("点批注（Mark）记录一个时刻。拖时间线标签边缘可延长为区间（Region），拖中间可整体移动。要精确对时，在详情中输入起点和时长（秒）。时长设为 0 可恢复为点。语音批注的长度由录音决定。")),
-                new(L.Text("编号与文字"),L.Text("悬停在图形或编号上可预览批注。点击画面编号、时间线标签或右侧列表可选中对应批注。「按时间编号」按起点先后重编号码。卡片的复制按钮可复制纯文字，右键菜单的「复制一份」可复制整条批注。")),
+                new(L.Text("编号与文字"),L.Text("「画面编号」控制画面中常驻编号的显示。悬停在图形或编号上可预览批注。点击画面编号、时间线标签或右侧列表可选中对应批注。「重新编号」按起点先后重编号码。卡片的复制按钮可复制纯文字，右键菜单的「复制一份」可复制整条批注。")),
             ]),
             ("splitClip",L.Text("剪辑时间线"),[
                 new(L.Text("分割、裁剪与联动"),L.Format($"把播放头放到切点，用{ActionName("splitClip","分割片段")}切开片段。拖片段边缘裁剪，拖中间移动，选中后可删除。开启「轨道联动」可让视频和对应原声一起调整。联动裁剪暂时隐藏的批注，在恢复该段画面后会重新出现。")),
@@ -96,12 +96,12 @@ public sealed partial class Desk
             ]),
             ("save",L.Text("保存审阅包与发送到 REAPER"),[
                 new(L.Text("留到下次继续编辑"),L.Format($"关闭窗口会清理本次编辑。要保留成果，请先{ActionName("save","导出审阅包")}。下次打开 .framenote 就能恢复素材、剪辑、批注和附件。继续修改后，再导出一份最新的审阅包。")),
-                new(L.Text("在 REAPER 中对时"),L.Text("如需把批注带入 REAPER，先打开已导出的审阅包。首次点击 REAPER 图标并选择脚本目录完成安装。在 REAPER 选轨并放好编辑光标，再点图标发送，也可直接将图标拖到编排区的目标位置。点批注对应 Marker，区间批注对应 Region。")),
+                new(L.Text("在 REAPER 中对时"),L.Text("在设置的「REAPER集成」中管理接收脚本。点击 REAPER 图标可检查脚本并发送到编辑光标，也可拖到编排区。剪辑后的视频、透明批注图和音频作为同轨的独立 Item 导入。点批注图使用完整图片源长度，区间批注图循环至区间末尾。以视频文件命名的总 Region 包住本次导入的全部内容。")),
             ]),
             ("copyFrame",L.Text("导出画面、视频与清单"),[
                 new(L.Text("单帧与图片"),L.Text("在视频播放栏复制当前帧或另存为 PNG，可把当前可见的批注一起发出。审阅图片时，「复制批注图」会附上批注文字清单，「另存为 PNG」保留原图尺寸。")),
                 new(L.Text("MP4 与 GIF"),L.Text("导出 MP4 可分享剪辑后的画面、批注和声音。底部进度条用批注颜色标出时间位置，可在「设置 → 通用」开关或改色。要发动图，悬停在 GIF 导出图标上选择复制或另存。")),
-                new(L.Text("Excel 与导出目录"),L.Text("Excel 清单每条批注占一行。在「设置 → 表格设置」选择导出列，可嵌入画面预览或附上 PNG、GIF。分享时发送整个文件夹，或开启 ZIP 导出后发送压缩包。审阅包、MP4、GIF 和 Excel 的保存位置在「设置 → 通用 → 导出路径」。")),
+                new(L.Text("Excel 与导出目录"),L.Text("Excel 清单每条批注占一行。在「设置 → 表格设置」选择导出列，可嵌入画面预览并链接媒体。含语音批注或导入音频批注的片段导出 MP4，其余区间导出 GIF，普通点批注导出 PNG。分享时发送整个文件夹，或开启 ZIP 导出后发送压缩包。审阅包、MP4、GIF 和 Excel 的保存位置在「设置 → 通用 → 导出路径」。")),
             ]),
             ("settings",L.Text("设置与问题反馈"),[
                 new(L.Text("自定义快捷键"),L.Format($"在「快捷键」页按操作名称搜索，或切换到按键查找并按下组合键。点操作可修改键盘快捷键或鼠标手势，点「确定」再「保存」。编辑时可用{ActionName("undo","撤销")}和{ActionName("redo","重做")}回退或重做修改。")),
@@ -140,14 +140,12 @@ public sealed partial class Desk
         var menu=new MenuItem{Header=L.Text("帮助")};bar.Items.Add(menu);
         AccessKeyManager.Register("H",menu);
         MenuItem Item(string label,Action action){var item=new MenuItem{Header=label};item.Click+=(_,_)=>action();menu.Items.Add(item);return item;}
-        Item(L.Text("使用帮助"),()=>Simple(L.Text("使用帮助"),GuideTitle,GuideSummary+"\n\n"+
-            string.Join("\n\n",Guide(shortcuts).Select(section=>section.Title+"\n"+
-                string.Join("\n",section.Topics.Select(topic=>topic.Label+"  "+topic.Text))))));
+        Item(L.Text("使用说明"),()=>OpenSettings(SettingsPage.Guide));
         Item(L.Text("检查更新…"),async()=>await CheckUpdates(true));
         autoItem=Item(L.Text("启动时检查更新"),()=>prefs.Change(p=>p with{Automatic=autoItem.IsChecked}));
         autoItem.IsCheckable=true;menu.SubmenuOpened+=(_,_)=>autoItem.IsChecked=prefs.Change(p=>p).Automatic;
-        Item(L.Text("更新记录"),()=>History());
-        Item(L.Text("关于 FrameNote"),()=>OpenSettings(showAbout:true));
+        Item(L.Text("更新记录"),()=>OpenSettings(SettingsPage.Updates));
+        Item(L.Text("关于 FrameNote"),()=>OpenSettings(SettingsPage.About));
         DockPanel.SetDock(titleBar,Dock.Top);host.Children.Add(titleBar);InitPlaylist(host);host.Children.Add(surfaces);Content=host;
         Closed+=(_,_)=>{lifetime.Cancel();session?.Dispose();installGuard?.Dispose();};
         async Task StartupUpdates(){

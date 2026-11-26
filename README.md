@@ -37,11 +37,11 @@
 | 录制语音批注 | 在左侧启用麦克风，点批注工具栏的麦克风开始录音。系统默认输出会暂时静音，再点一次保存为 MP3，按 Esc 放弃。 |
 | 添加音频批注 | 选中批注后点击音频文件工具附加声音，或从资源管理器直接拖入批注音轨。Excel 随附链接到录音 MP3 或导入的原始音频。 |
 | 剪贴视频片段 | 在轨道上选中一个或多个片段，Ctrl+X 剪切、Ctrl+C 复制、Ctrl+V 粘贴到播放头，Ctrl+D 在选中范围之后重复。Link 开启时随关联内容一起编辑。 |
-| Excel 批注清单 | 在「设置 → 表格设置」选择导出列。画面预览嵌在表格中，媒体文件列链接到点批注的 PNG 和区间批注的 GIF。在视频审阅页点 **导出 Excel** 后，默认生成文件夹，也可开启 ZIP 打包，一次发送工作簿及所选附件。 |
+| Excel 批注清单 | 在「设置 → 表格设置」选择导出列。画面预览嵌在表格中，含语音批注或导入音频批注的片段链接到 MP4，其余区间链接到 GIF，普通点批注链接到 PNG。在视频审阅页点 **导出 Excel** 后，默认生成文件夹，也可开启 ZIP 打包，一次发送工作簿及所选附件。 |
 | 录屏与 GIF | 选择显示器、窗口或框选区域。在横向混音器中添加多个系统输出和一个可选麦克风；录制前按路调节增益、静音，成片为立体声混音；停止录制视频后直接进入审阅。临时录屏要在换片或退出前导出审阅包。GIF 最长 30 秒，无音频。 |
 | 图片批注 | 空界面按 Ctrl+V 打开剪贴板图片；已有视频时，同一快捷键会添加图片批注。可缩放、平移，按原图分辨率复制或导出带批注 PNG；动图导出静态首帧。 |
 | 播放与兼容 | 欢迎页点“打开文件”并选择视频后直接进入批注。需要生成批注预览时，FrameNote 和 Player 都会在窗口中央显示百分比进度，点下方的“取消加载”可中止。可手动切换到内置 VLC 播放原片；导出审阅包保留原始媒体。 |
-| 发送到 REAPER | 首次单击安装脚本；之后单击会检查更新，并发送到所选轨道的编辑光标处。也可将按钮直接拖到 REAPER 编排区，按落点插入。审阅包的 Marker 和 Region 保留批注颜色。 |
+| 发送到 REAPER | 单击图标发送到编辑光标，或拖到编排区按落点插入。剪辑后的视频、透明批注图和音频是同轨的独立 Item。点批注图使用完整图片源长度，区间批注图循环至区间末尾。批注保留颜色，另有一个以视频文件命名的总 Region。「设置 → REAPER集成」可查看安装状态、选择目录及安装或卸载脚本。 |
 
 在原片播放器中，使用底部走带逐帧定位、复制当前帧或另存 PNG。图片查看器的画布直接位于菜单下方；按 **Ctrl+O** 打开文件，按 **Ctrl+S** 导出审阅包。审阅包、GIF、Excel 和 MP4 直接保存到「设置 → 通用 → 导出路径」，完成后可打开文件所在目录。
 
@@ -77,11 +77,11 @@ Recording settings and the mixer are on the left, and the annotation list and ed
 | Adjust existing annotations | Drag a drawing or picture to move it. Drag an endpoint to change a line, a vertex to change an angle, or a corner to resize a box or picture. Double-click a text box to edit its text. |
 | Move a Region or adjust its duration | Drag the middle of a Region label to move the whole interval and its attached voice clips. For a note without a voice recording, drag either edge to adjust the interval. Drag a Mark into a Region, or bring the edges together to restore a Mark. |
 | Record a voice annotation | Enable a microphone and click the microphone tool to record. Default playback devices are muted until recording finishes. Click again to save an MP3 or press Esc to discard. Drag external audio onto the same track to attach the original file. Excel exports link to both recordings and imported files. |
-| Excel review sheet | Choose the columns in **Settings → Spreadsheet**, then click **Export Excel** in video review. Previews are embedded in the workbook. Media links open a PNG for each Mark or a silent GIF for each Region. Share the generated folder or enable ZIP export to send one archive. |
+| Excel review sheet | Choose the columns in **Settings → Spreadsheet**, then click **Export Excel** in video review. Previews are embedded in the workbook. Segments with recorded or imported annotation audio link to MP4. Other regions link to GIF and ordinary marks link to PNG. Share the generated folder or enable ZIP export to send one archive. |
 | Screen capture and GIF | Record a display, window or selected region. Add multiple Windows outputs and an optional microphone in the horizontal mixer. Set gain and mute per source before recording one stereo mix. Stopping a video opens it for review; export the temporary recording before switching files or quitting. GIFs are silent and limited to 30 seconds. |
 | Image annotation | Paste into an empty desk to open a clipboard image; paste while reviewing a video to attach a picture note. Zoom or pan without changing the dimensions of an exported PNG. Animated images export as a still of the first frame. |
 | Playback compatibility | Opening a video from the welcome screen starts frame review. FrameNote prepares a temporary preview in the same window when needed. You can switch to VLC to play the original. Packages keep the original media. |
-| REAPER handoff | The first click installs the action. Later clicks check for updates and send to the selected track at the edit cursor. Drag the button onto the arrange view to choose a track and time instead. Review packages preserve marker and region colors. |
+| REAPER handoff | Click to send to the edit cursor or drag to the arrange view. The edited video, transparent annotation overlays and audio remain independent items on one track. Point images use the full still length. Range images loop for the duration of their region. A region named after the video spans the import. Manage the script and its installation folder in Settings → REAPER integration. |
 
 In the original-media player, use the bottom transport to step by frame, copy the current frame, or save it as PNG. In the image viewer, the canvas starts directly below the menus. Use **Ctrl+O** to open a file and **Ctrl+S** to export a review package.
 

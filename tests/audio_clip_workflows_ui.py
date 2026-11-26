@@ -9,17 +9,20 @@ import zipfile
 from pathlib import Path
 from xml.etree import ElementTree as ET
 
+import win32gui
+from ole_files import hold_files
 from PIL import ImageGrab, ImageChops
 from playwright.sync_api import sync_playwright
-from pywinauto import Desktop, mouse
-from review_ui import at, exported_file, fixtures, launch, notes, settings, stop, wait, work
+from pywinauto import Desktop, keyboard, mouse
+from review_ui import desk, at, exported_file, fixtures, launch, notes, settings, stop, wait, work
 
 profile=work/"profile"
 profile.mkdir()
 (profile/"updates.json").write_text('{"automatic":false,"language":"zh-CN"}')
 os.environ["FRAMENOTE_DATA_DIR"]=str(profile)
 sound=work/"冲击声 #1.wav"
-subprocess.run(["ffmpeg","-v","error","-f","lavfi","-i","sine=frequency=523:duration=0.35",str(sound)],check=True)
+subprocess.run(["ffmpeg","-v","error","-f","lavfi","-i","sine=frequency=523:duration=0.35",
+                "-af","volume='if(lt(t,0.14),4,0)':eval=frame",str(sound)],check=True)
 errors=[]
 def path_xy(page,x,y):
     b=page.locator("#overlay").bounding_box()
@@ -37,8 +40,18 @@ with sync_playwright() as pw:
     proc,p=launch(pw,fixtures/"2997.mp4")
     p.on("pageerror",lambda e:errors.append(str(e)))
     try:
+        assert p.title()=="FrameNote" and p.locator("#timeline").is_visible()
+        for label,section in [("使用说明","使用说明"),("更新记录","更新")]:
+            win=desk(proc)
+            win.child_window(title="帮助",control_type="MenuItem",depth=3).expand()
+            win.child_window(title=label,control_type="MenuItem",found_index=0).invoke()
+            window=Desktop(backend="win32").window(process=proc.pid,title="设置")
+            window.wait("ready")
+            dialog=Desktop(backend="uia").window(handle=window.handle)
+            assert dialog.child_window(title=section,control_type="TabItem").is_selected()
+            window.close();window.wait_not("visible")
         dlg=settings(proc,"批注工具")
-        def reorder(first,second):
+        def reorder(first,second,cancel=False):
             a=first.rectangle();b=second.rectangle()
             origin=(a.left+5,(a.top+a.bottom)//2)
             dest=(origin[0],b.bottom-2)
@@ -47,8 +60,15 @@ with sync_playwright() as pw:
                 for i in range(1,13):
                     mouse.move(coords=(origin[0],round(origin[1]+(dest[1]-origin[1])*i/12)))
                     time.sleep(.025)
+                time.sleep(.18)
+                assert first.rectangle().top>a.top+5 and second.rectangle().top<b.top-5
+                if cancel:keyboard.send_keys("{ESC}")
+                else:dlg.capture_as_image().save(work/"settings-drag.png")
             finally:mouse.release(coords=dest)
         color=lambda value:dlg.child_window(title="修改颜色 "+value,control_type="Button")
+        reorder(color("#ffd886"),color("#8ddcff"),cancel=True)
+        time.sleep(.18)
+        assert color("#ffd886").rectangle().top<color("#8ddcff").rectangle().top
         reorder(color("#ffd886"),color("#8ddcff"))
         # Bring the tool rows into the scroll viewport before using actual pointer events.
         tool=lambda name:dlg.child_window(title=name,control_type="CheckBox")
@@ -66,6 +86,15 @@ with sync_playwright() as pw:
         assert all(im.getextrema()[1]-im.getextrema()[0]>40 for im in icons)
         assert ImageChops.difference(*icons).getbbox()
         reorder(tool("点批注"),tool("箭头"))
+        for _ in range(24):
+            if panel.top+65<tool("清除图形").rectangle().bottom<panel.bottom-80:break
+            mouse.scroll(coords=(panel.right-125,panel.bottom-150),wheel_dist=-3)
+            time.sleep(.05)
+        time.sleep(.16)
+        dlg.capture_as_image().save(work/"settings-tool-icons.png")
+        for name in ("画笔","角度","添加图片","移除图片","清除图形"):
+            icon=visible_icon(name)
+            assert icon.getextrema()[1]-icon.getextrema()[0]>40,name
         dlg.child_window(title="保存",control_type="Button").invoke()
         wait(p,"palette[0][1]==='#8ddcff' && $('annotationTools').firstElementChild.id==='arrow'")
         at(p,0)
@@ -84,6 +113,8 @@ with sync_playwright() as pw:
         assert p.locator("#markLanes [data-id]:visible").count()==1
         p.locator(".markCount").click()
         assert p.locator("#noteGroupMenu button").count()==3
+        gap=p.locator("#noteGroupMenu button").evaluate_all("(b)=>b[1].getBoundingClientRect().top-b[0].getBoundingClientRect().bottom")
+        assert 2<=gap<=4,gap
         p.locator("#noteGroupMenu button").first.click()
         assert p.evaluate("selected===doc.notes[0].id")
         right=p.evaluate("['noteOpacity','noteStart','noteDuration'].map(id=>$(id).getBoundingClientRect().right)")
@@ -120,15 +151,74 @@ with sync_playwright() as pw:
         first=next(n for n in notes(p) if n.get("voice"))
         assert first["voice"]["original"]["asset"]==hashlib.sha256(sound.read_bytes()).hexdigest()
         assert p.locator("#voiceClips .editClip").count()==1
-        # Chromium receives filesystem-backed files through its external drag entry point.
-        lane=p.locator("#voiceClips").bounding_box();x=lane["x"]+.48*lane["width"];y=lane["y"]+lane["height"]/2
-        cdp=p.context.new_cdp_session(p)
-        for kind in ["dragEnter","dragOver","drop"]:
-            cdp.send("Input.dispatchDragEvent",dict(type=kind,x=x,y=y,data=dict(items=[],files=[str(sound)],dragOperationsMask=1)))
+        # Only a Windows OLE drag exposes real file durations before the mouse is released.
+        children=[]
+        win32gui.EnumChildWindows(desk(proc).handle,lambda h,_:children.append(h) if win32gui.GetClassName(h)=="Chrome_RenderWidgetHostHWND" else None,None)
+        scale=p.evaluate("devicePixelRatio")
+        def screen(px,py):
+            return win32gui.ClientToScreen(children[0],(round(px*scale),round(py*scale)))
+        lane=p.locator("#voiceClips").bounding_box()
+        x=lane["x"]+.48*lane["width"];y=lane["y"]+lane["height"]/2
+        indicator=p.locator("#audioDropPreview")
+        for cancel in (True,False):
+            with hold_files([sound]):
+                mouse.move(coords=screen(x-40,y))
+                wait(p,"!dropPreview.hidden")
+                block=indicator.locator("span")
+                earlier=block.bounding_box()
+                assert abs(earlier["width"]-lane["width"]*350000/p.evaluate("doc.durationUs"))<1
+                mouse.move(coords=screen(x,y-35))
+                wait(p,"dropPreview.hidden")
+                mouse.move(coords=screen(x,y))
+                wait(p,"!dropPreview.hidden")
+                final=block.bounding_box()
+                assert abs(final["x"]-earlier["x"]-40)<2 and abs(final["width"]-earlier["width"])<1
+                assert abs(final["x"]-x)<2
+                expected_time=p.evaluate("Math.round(parseFloat(dropPreview.firstChild.style.left)*doc.durationUs/100)")
+                assert len([n for n in notes(p) if n.get("voice")])==1
+                if cancel:
+                    keyboard.send_keys("{ESC}")
+                    wait(p,"dropPreview.hidden")
+                else:
+                    p.locator("#trackDesk").screenshot(path=str(work/"drop-target.png"))
+                    desk_box=p.locator("#trackDesk").bounding_box()
+                    bounds=(*screen(desk_box["x"],desk_box["y"]),*screen(desk_box["x"]+desk_box["width"],desk_box["y"]+desk_box["height"]))
+                    desktop=ImageGrab.grab(bbox=bounds).convert("RGB")
+                    desktop.save(work/"windows-drop-target.png")
+                    def color(px):
+                        sx,sy=screen(px,y)
+                        return desktop.getpixel((sx-bounds[0],sy-bounds[1]))
+                    assert sum(color(final["x"]+final["width"]*.7))>sum(color(final["x"]+final["width"]+6))+40
+                    mouse.release(coords=screen(x,y))
         wait(p,"doc.notes.filter(n=>n.voice?.original).length===2 && !busy")
-        assert p.locator("#voiceClips .editClip").count()==2
+        wait(p,"Array.from($('voiceClips').querySelectorAll('use')).every(el=>document.querySelector(el.getAttribute('href'))?.getAttribute('d'))")
+        assert indicator.is_hidden() and p.locator("#voiceClips .editClip").count()==2
         times=[n["startUs"] for n in notes(p) if n.get("voice")]
-        assert abs(times[1]-.48*p.evaluate("doc.durationUs"))<40000,times
+        assert abs(times[1]-expected_time)<=1,(times,expected_time)
+        landed=p.locator("#voiceClips .editClip").last.bounding_box()
+        assert abs(landed["x"]-final["x"])<1 and abs(landed["width"]-final["width"])<1
+        p.locator("#trackDesk").screenshot(path=str(work/"landed-wave.png"))
+        clip=p.locator("#voiceClips .editClip").last
+        wave=clip.locator(".voiceClipWave")
+        assert wave.evaluate("""el=>{const path=document.querySelector(el.firstChild.getAttribute('href'));
+            return path.isPointInFill(new DOMPoint(65,12))&&!path.isPointInFill(new DOMPoint(290,12))}""")
+        handle=clip.locator(".clipHandle.left").bounding_box()
+        origin=handle["x"]+handle["width"]/2
+        p.mouse.move(origin,y);p.mouse.down();p.mouse.move(origin+landed["width"]*.6,y,steps=10)
+        try:
+            view=wave.evaluate("el=>[el.viewBox.baseVal.x,el.viewBox.baseVal.width]")
+            assert view[0]>150 and abs(sum(view)-350)<.01,view
+        finally:p.mouse.up()
+        assert wave.evaluate("el=>el.viewBox.baseVal.x")>150
+        p.keyboard.press("Control+z")
+        wait(p,"$('voiceClips').lastElementChild.querySelector('svg').viewBox.baseVal.x===0")
+        before=p.evaluate("structuredClone(doc.timeline.clips)")
+        assert p.evaluate("doc.timeline.linked")
+        p.locator("#voiceClips .editClip").first.click();p.keyboard.press("Delete")
+        wait(p,"$('voiceClips').children.length===1")
+        assert p.evaluate("doc.timeline.clips.filter(c=>c.track!=='voice')")==[c for c in before if c["track"]!="voice"]
+        p.keyboard.press("Control+z");wait(p,"$('voiceClips').children.length===2")
+        assert p.evaluate("doc.timeline.clips")==before
         p.locator("#save").click();package=exported_file(proc,work/"imports-only.framenote")
         with zipfile.ZipFile(package) as z:
             assert z.read("voice/"+first["voice"]["original"]["asset"]+".original")==sound.read_bytes()
@@ -148,11 +238,18 @@ with sync_playwright() as pw:
             file=work/("batch"+ext)
             subprocess.run(["ffmpeg","-v","error","-i",str(sound),str(file)],check=True)
             files.append(str(file))
-        for kind in ["dragEnter","dragOver","drop"]:
-            cdp.send("Input.dispatchDragEvent",dict(type=kind,x=x,y=y,data=dict(items=[],files=files,dragOperationsMask=1)))
+        p.mouse.move(x,y);p.keyboard.down("Control");p.mouse.wheel(0,-360);p.keyboard.up("Control")
+        wait(p,"$('scroll').scrollLeft>0 && $('ticks').clientWidth>$('scroll').clientWidth")
+        with hold_files(files):
+            mouse.move(coords=screen(x,y))
+            wait(p,"dropPreview.children.length===4 && !dropPreview.hidden")
+            batch_preview=p.evaluate("Array.from(dropPreview.children,b=>[parseFloat(b.style.left),parseFloat(b.style.width)].map(n=>Math.round(n*doc.durationUs/100)))")
+            assert abs(indicator.locator("span").first.bounding_box()["x"]-x)<2
+            mouse.release(coords=screen(x,y))
         wait(p,"count=>doc.notes.length===count && !busy",count+len(formats),timeout=20000)
         extra=notes(p)[-len(formats):]
         assert [n["voice"]["original"]["name"] for n in extra]==[Path(file).name for file in files]
+        assert all(abs(n["startUs"]-start)<=1 and abs(n["voice"]["durationUs"]-length)<=1 for n,(start,length) in zip(extra,batch_preview))
         assert all(a["endUs"]==b["startUs"] for a,b in zip(extra,extra[1:]))
         # Duplicating a trimmed clip must preserve its hidden notes in the saved review.
         p.evaluate("""()=>{const d=currentEditDoc(),clip=d.timeline.clips.find(c=>c.track==='video');
@@ -161,6 +258,7 @@ with sync_playwright() as pw:
         p.locator("#videoClips .editClip").first.click()
         p.keyboard.press("Control+d")
         wait(p,"doc.timeline.clips.filter(c=>c.track==='video').length===2")
+        wait(p,"Array.from($('voiceClips').children).every(b=>{const use=b.querySelector('use');return use && document.querySelector(use.getAttribute('href'))?.getAttribute('d')})")
         expected=p.evaluate("doc.timeline.trimmed.filter(part=>part.note).map(part=>part.note.number)")
         p.locator("#save").click();trimmed=exported_file(proc)
         with zipfile.ZipFile(trimmed) as z:
@@ -190,6 +288,7 @@ with sync_playwright() as pw:
     proc,p=launch(pw,mixed)
     try:
         assert p.locator("#voiceClips .editClip").count()==4
+        wait(p,"Array.from($('voiceClips').querySelectorAll('.voiceClipWave use')).filter(el=>document.querySelector(el.getAttribute('href'))?.getAttribute('d')).length===4")
         assert p.evaluate("palette[0][1]")=="#8ddcff"
         assert p.locator("#annotationTools > :first-child").get_attribute("id")=="arrow"
         p.locator("#exportExcel").click();book=exported_file(proc)

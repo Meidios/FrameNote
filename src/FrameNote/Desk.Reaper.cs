@@ -9,34 +9,25 @@ namespace FrameNote;
 
 public sealed partial class Desk
 {
-    const string ReaperAction="FrameNote - Import review.lua";
+    internal ReaperIntegration ReaperScripts=>new(root);
     [DllImport("user32.dll")] static extern nint WindowFromPoint(System.Drawing.Point point);
     [DllImport("user32.dll")] static extern nint GetAncestor(nint hwnd,uint flags);
 
-    static void SyncReaperFile(string path,byte[] bytes){
-        if(!File.Exists(path)||!File.ReadAllBytes(path).AsSpan().SequenceEqual(bytes))
-            Packages.Atomic(path,f=>f.Write(bytes));
-    }
-    async Task<string?> InstalledReceiver(string bundled){
-        var config=Path.Combine(root,"reaper-action.txt");
-        var installed=File.Exists(config)?(await File.ReadAllTextAsync(config)).Trim():"";
-        var first=!Path.IsPathFullyQualified(installed)||!string.Equals(Path.GetFileName(installed),ReaperAction,StringComparison.OrdinalIgnoreCase)||!Directory.Exists(Path.GetDirectoryName(installed));
-        if(first){
-            var folder=new OpenFolderDialog{Title=L.Text("选择 REAPER 脚本安装目录"),InitialDirectory=Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),"REAPER","Scripts")};
+    string? InstalledReceiver(){
+        var scripts=ReaperScripts;
+        if(scripts.Installed==null){
+            string suggested=scripts.TargetFolder;
+            var preference=scripts.CustomFolder;
+            var folder=new OpenFolderDialog{Title=L.Text("选择 REAPER 脚本安装目录"),InitialDirectory=suggested};
             if(folder.ShowDialog(this)!=true){Send(new{type="status",text=L.Text("已取消安装 REAPER 脚本。")});return null;}
-            installed=Path.Combine(folder.FolderName,ReaperAction);
-        }
-        SyncReaperFile(installed,await File.ReadAllBytesAsync(bundled));
-        SyncReaperFile(installed+".app",Encoding.UTF8.GetBytes(Environment.ProcessPath!));
-        if(first){
-            Packages.Atomic(config,f=>f.Write(Encoding.UTF8.GetBytes(installed)));
+            scripts.Install(folder.FolderName);
+            scripts.SetFolder(suggested.Equals(folder.FolderName,StringComparison.OrdinalIgnoreCase)?preference:folder.FolderName);
             Send(new{type="status",text=L.Text("REAPER 脚本已安装。打开目标工程后，点此按钮发送当前文件。")});return null;
         }
-        return installed;
+        return scripts.Install(Path.GetDirectoryName(scripts.Installed)!);
     }
     async Task SendReaper(Point? drop){
-        var bundled=Path.Combine(AppContext.BaseDirectory,"reaper",ReaperAction);
-        var installed=drop.HasValue?bundled:await InstalledReceiver(bundled);
+        var installed=drop.HasValue?ReaperIntegration.Bundled:InstalledReceiver();
         if(installed==null)return;
         if(media==null||doc==null||viewingImage)throw new InvalidOperationException(L.Text("请先打开视频或 .framenote 审阅包。"));
         var candidates=Process.GetProcessesByName("reaper");
@@ -53,31 +44,46 @@ public sealed partial class Desk
             }
             if(live.Length!=1)throw new InvalidOperationException(live.Length==0?L.Text("请先打开目标 REAPER 工程，再点击发送。"):L.Text("检测到多个 REAPER 实例，请拖放到目标工程或只保留一个实例。"));
             var target=live[0];
-            var job=Path.Combine(scratch,Guid.NewGuid().ToString("N"));Directory.CreateDirectory(job);
-            try{
-                var playable=await EditedMedia(lifetime.Token);
-                string Hex(string s)=>Convert.ToHexString(Encoding.UTF8.GetBytes(s));
-                var lines=new List<string>{Hex(installed),target.MainWindowHandle.ToInt64().ToString("X"),openedPackage?doc.Id.ToString():"-",Hex(playable),
-                    doc.DurationUs.ToString(),openedPackage||activeRecording!=null||doc.Timeline!=null?"copy":"link",Hex(doc.FileName),placement};
-                if(openedPackage)foreach(var n in doc.Notes)lines.Add(n.ReaperRow(true));
-                await File.WriteAllLinesAsync(Path.Combine(job,"request"),lines,new UTF8Encoding(false));
-                await File.WriteAllTextAsync(Path.Combine(job,"language"),L.Language);
-                var entry=Path.Combine(job,"send.lua");
-                File.Copy(Path.Combine(AppContext.BaseDirectory,"reaper","send.lua"),entry);
-                var start=new ProcessStartInfo(target.MainModule!.FileName){UseShellExecute=false};
-                start.ArgumentList.Add("-nonewinst");start.ArgumentList.Add(entry);
-                using var dispatch=Process.Start(start)??throw new IOException(L.Text("无法联系 REAPER。"));
-                Send(new{type="status",text=L.Text("正在发送到 REAPER…")});
-                var clock=Stopwatch.StartNew();var result=Path.Combine(job,"result");
-                while(!File.Exists(result)){
-                    if(target.HasExited)throw new IOException(L.Text("REAPER 已退出。"));
-                    if(clock.Elapsed.TotalSeconds>15 && !File.Exists(Path.Combine(job,"started")))throw new IOException(L.Text("REAPER 未响应，请关闭其模态对话框后再试。"));
-                    await Task.Delay(100);
-                }
-                var response=await File.ReadAllTextAsync(result);
-                if(response!="OK")throw new InvalidOperationException(response);
-                Send(new{type="status",text=openedPackage?L.Text("已发送到 REAPER：视频、Marker 和 Region 已插入。"):L.Text("视频已插入 REAPER。")});
-            }finally{try{Directory.Delete(job,true);}catch(IOException){}}
+            var review=doc;var source=media;
+            await WithExportProgress("REAPER",async token=>{
+                var job=Path.Combine(scratch,Guid.NewGuid().ToString("N"));Directory.CreateDirectory(job);
+                try{
+                    Send(new{type="status",text=L.Text("正在发送到 REAPER…")});
+                    var progress=new Progress<int>(p=>{
+                        if(exportDialog?.IsRunning(token)==true && p<85)ReportExport(L.Text("正在准备 REAPER 媒体…"),p);
+                    });
+                    var delivery=await ReaperDelivery.Prepare(review,source,ImageDirectory,Path.Combine(scratch,"reaper-media"),defaultRulerUnit,token,progress);
+                    var playable=delivery.Video;
+                    var lines=new List<string>{ReaperDelivery.Hex(installed),target.MainWindowHandle.ToInt64().ToString("X"),openedPackage?review.Id.ToString():"-",ReaperDelivery.Hex(playable),
+                        delivery.VideoDurationUs.ToString(),openedPackage||activeRecording!=null||playable!=source?"copy":"link",ReaperDelivery.Hex(review.FileName),placement};
+                    lines.AddRange(delivery.Rows);
+                    await File.WriteAllLinesAsync(Path.Combine(job,"request"),lines,new UTF8Encoding(false));
+                    await File.WriteAllTextAsync(Path.Combine(job,"language"),L.Language);
+                    var entry=Path.Combine(job,"send.lua");
+                    File.Copy(Path.Combine(AppContext.BaseDirectory,"reaper","send.lua"),entry);
+                    var start=new ProcessStartInfo(target.MainModule!.FileName){UseShellExecute=false};
+                    start.ArgumentList.Add("-nonewinst");start.ArgumentList.Add(entry);
+                    token.ThrowIfCancellationRequested();
+                    exportDialog?.BeginCommit();
+                    ReportExport(L.Text("正在插入 REAPER 工程…"),85);
+                    using var dispatch=Process.Start(start)??throw new IOException(L.Text("无法联系 REAPER。"));
+                    var clock=Stopwatch.StartNew();var result=Path.Combine(job,"result");
+                    while(!File.Exists(result)){
+                        if(target.HasExited)throw new IOException(L.Text("REAPER 已退出。"));
+                        if(clock.Elapsed.TotalSeconds>15 && !File.Exists(Path.Combine(job,"started")))throw new IOException(L.Text("REAPER 未响应，请关闭其模态对话框后再试。"));
+                        try{
+                            var status=Path.Combine(job,"progress");
+                            if(File.Exists(status) && int.TryParse(await File.ReadAllTextAsync(status),out var percent))
+                                ReportExport(L.Text("正在插入 REAPER 工程…"),percent);
+                        }catch(IOException){}
+                        await Task.Delay(100);
+                    }
+                    var response=await File.ReadAllTextAsync(result);
+                    if(response!="OK")throw new InvalidOperationException(response);
+                    Send(new{type="status",text=L.Text("已发送到 REAPER。")});
+                    return null;
+                }finally{try{Directory.Delete(job,true);}catch(IOException){}}
+            },closeOnSuccess:true);
         }finally{foreach(var p in candidates)p.Dispose();}
     }
 }

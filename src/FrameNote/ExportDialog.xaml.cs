@@ -15,13 +15,15 @@ internal partial class ExportDialog : Window
     readonly Func<CancellationToken,Task<FileSystemInfo?>> write;
     readonly CancellationToken lifetime;
     CancellationTokenSource? attempt;
-    bool starting=true,failed;
+    readonly bool closeOnSuccess;
+    bool starting=true,failed,committing;
     internal FileSystemInfo? Output { get; private set; }
     internal bool Cancelled { get; private set; }
     internal bool IsRunning(CancellationToken token)=>attempt?.Token==token && !token.IsCancellationRequested;
 
-    internal ExportDialog(Window owner,string format,Func<CancellationToken,Task<FileSystemInfo?>> write,CancellationToken lifetime,Shortcut[] cancelKeys){
+    internal ExportDialog(Window owner,string format,Func<CancellationToken,Task<FileSystemInfo?>> write,CancellationToken lifetime,Shortcut[] cancelKeys,bool closeOnSuccess=false){
         InitializeComponent();Owner=owner;this.format=format;this.write=write;this.lifetime=lifetime;
+        this.closeOnSuccess=closeOnSuccess;
         CopyExport.Content=L.Text("复制");
         DeskTheme.Dialog(this);
         ShowProgress();
@@ -51,17 +53,18 @@ internal partial class ExportDialog : Window
         Message.Text=text;Bar.Value=Math.Clamp(percent,(int)Bar.Value,99);Percent.Text=$"{Bar.Value:0}%";
     }
     internal void Cancel(){
-        if(attempt==null || attempt.IsCancellationRequested)return;
+        if(attempt==null || attempt.IsCancellationRequested || committing)return;
         Message.Text=L.Text("正在取消导出…");Dismiss.IsEnabled=false;attempt.Cancel();
     }
+    internal void BeginCommit(){committing=true;Dismiss.IsEnabled=false;}
     async Task RunAttempt(){
         using var cancel=CancellationTokenSource.CreateLinkedTokenSource(lifetime);
-        attempt=cancel;failed=false;Output=null;
+        attempt=cancel;failed=false;committing=false;Output=null;
         try{Output=await write(cancel.Token);}
         catch(OperationCanceledException) when(cancel.IsCancellationRequested){Cancelled=true;}
         catch(Exception e){failed=true;Message.Text=e.Message;Serilog.Log.Error(e,"Failed to export {Format}",format);}
         finally{attempt=null;}
-        if(Cancelled||lifetime.IsCancellationRequested){Close();return;}
+        if(Cancelled||lifetime.IsCancellationRequested||closeOnSuccess && !failed){Close();return;}
         Title=failed?L.Text("导出失败"):L.Text("导出完成");
         if(!failed){
             Bar.Value=100;Percent.Text="100%";

@@ -264,6 +264,7 @@ rect.inkHit{pointer-events:all}
 #overlay:not(.drawing) #ink .measurementLabel{pointer-events:bounding-box;cursor:move}
 #ink .lensConnector{pointer-events:none}
 .inkBadge{pointer-events:all}
+#overlay.hideCanvasNumbers .inkLabels{display:none}
 .inkBadge.inPreview{opacity:0}
 .inkBadge text{pointer-events:none}
 #overlay.drawing :is(#ink,#measurementPreview) *{pointer-events:none}
@@ -340,7 +341,7 @@ body.imageView .imageExport{display:flex;justify-content:flex-end;margin-inline:
 #reviewPanel .sideTitle{flex-wrap:wrap;flex:none;gap:4px 8px}
 #reviewPanel .sideTitle h2{font-weight:500;display:flex;align-items:baseline;gap:8px}
 #reviewPanel #count{font:12px var(--ui);font-variant-numeric:tabular-nums}
-#renumberNotes{padding:3px 8px}
+#noteActions button{padding:3px 8px}
 #reviewPanel #list{padding-block:6px;min-height:0;overscroll-behavior:contain}
 #reviewPanel .note{position:relative;min-height:58px;padding:6px 38px 6px 8px;margin:0 0 4px}
 #reviewPanel .stamp{margin:0 0 2px;font-size:12px;min-height:24px}
@@ -378,7 +379,7 @@ body.imageView .imageExport{display:flex;justify-content:flex-end;margin-inline:
  .editorFields textarea{max-height:clamp(48px,calc(100dvh - 452px),150px)}
  #voiceStatus{margin-bottom:4px}
 }
-:is(#linkTracks,#loop)[aria-pressed=true]:enabled{color:var(--accent,#8ddcff);border-color:currentColor}
+:is(#linkTracks,#loop,#toggleCanvasNumbers)[aria-pressed=true]:enabled{color:var(--accent,#8ddcff);border-color:currentColor}
 .clipLane{z-index:3;pointer-events:none;height:100%;container-type:inline-size}.editClip{pointer-events:auto;position:absolute;top:5px;height:calc(100% - 6px);min-width:3px;padding:0;border:1px solid #7ba6c9;border-radius:3px;color:#ecf5fa;text-align:left;overflow:hidden;white-space:nowrap;cursor:grab;touch-action:none;font-size:11px}
 #clipMarquee{position:absolute;z-index:5;pointer-events:none;border:1px solid var(--blue);background:color-mix(in srgb,var(--blue) 18%,transparent)}
 #videoClips .editClip{background:rgb(45 83 106 / 24%)}
@@ -443,12 +444,21 @@ body.busy:has(#mediaLoading:not([hidden])) main{opacity:1}
 #detailFields .opacityRow input{width:100%;min-width:0;max-width:none}
 #detailFields .opacityRow .rulerControls span{position:absolute;left:calc(100% + 5px)}
 
-.mediaTrack.dropAudio{outline:1px solid var(--blue);outline-offset:-1px;background:color-mix(in srgb,var(--blue) 16%,transparent)}
+.voiceFeedback{pointer-events:none;z-index:4}
+#voiceTake{position:absolute;inset-block:3px;min-width:2px;background:color-mix(in srgb,var(--danger) 23%,var(--panel));color:var(--ink);border:1px solid var(--danger);border-radius:3px;overflow:hidden}
+#voiceTake canvas{display:block;width:100%;height:100%}
+#audioDropPreview{position:absolute;inset:0;overflow:hidden}
+.audioDropGuides{pointer-events:none;overflow:hidden;z-index:1}
+.audioDropGuides>div{position:absolute;inset-block:0;border-inline:1px solid color-mix(in srgb,var(--blue) 48%,transparent)}
+.mediaTrack:has(#audioDropPreview:not([hidden])){box-shadow:inset 0 1px color-mix(in srgb,var(--blue) 40%,transparent),inset 0 -1px color-mix(in srgb,var(--blue) 40%,transparent)}
+#audioDropPreview span{position:absolute;top:5px;bottom:1px;min-width:3px;border:1px solid color-mix(in srgb,var(--ink) 55%,transparent);border-radius:3px;background:color-mix(in srgb,var(--ink) 28%,transparent)}
+.voiceClipWave{position:absolute;inset:0;width:100%;height:100%;pointer-events:none;fill:currentColor;color:color-mix(in srgb,#bb95da 70%,var(--ink));background:linear-gradient(currentColor,currentColor) center / 100% 1px no-repeat}
 
 #marks,#markLanes{height:26px;min-height:26px;max-height:26px}
 #marks{overflow:hidden}
 #marks .markCount{bottom:3px;z-index:3;padding:0 3px;font-size:11px;background:var(--panel)}
 #noteGroupMenu{position:fixed;inset:auto;margin:0;padding:4px;max-width:min(320px,90vw);max-height:200px;overflow:auto;border:1px solid var(--border);background:var(--panel);color:var(--ink);border-radius:var(--radius-card)}
+#noteGroupMenu button+button{margin-top:3px}
 #noteGroupMenu button{display:block;width:100%;text-align:left;overflow:hidden;text-overflow:ellipsis;border:0;border-inline-start:3px solid var(--mark)}
 
 #clipMenu{position:fixed;inset:auto;margin:0;padding:4px;background:var(--panel);border:1px solid var(--border);border-radius:var(--radius-card);color:var(--ink)}

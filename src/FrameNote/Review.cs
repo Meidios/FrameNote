@@ -171,9 +171,13 @@ public static class Packages
         string tmp = Path.Combine(dir, Guid.NewGuid().ToString("N") + ".part");
         try {
             string hash;
-            using (var stream = new FileStream(tmp, FileMode.CreateNew, FileAccess.ReadWrite, FileShare.None)) {
-                using var source = media.Open(); source.CopyTo(stream); stream.Position = 0;
-                hash = Convert.ToHexString(SHA256.HashData(stream)).ToLowerInvariant();
+            using (var stream = new FileStream(tmp, FileMode.CreateNew, FileAccess.Write, FileShare.None)) {
+                using var source=media.Open();
+                using var digest=IncrementalHash.CreateHash(HashAlgorithmName.SHA256);
+                var buffer=new byte[128*1024];
+                int count;
+                while((count=source.Read(buffer))>0){stream.Write(buffer,0,count);digest.AppendData(buffer,0,count);}
+                hash=Convert.ToHexString(digest.GetHashAndReset()).ToLowerInvariant();
             }
             var dest = Path.Combine(dir, hash + doc.Extension);
             if (File.Exists(dest)) {
@@ -184,17 +188,34 @@ public static class Packages
             return (doc,dest);
         } finally { File.Delete(tmp); }
     }
-    public static void PrepareReaper(string package, string dir, string output,bool colors=false)
+    public static void PrepareReaper(string package,string dir,string output,bool colors=false,bool items=false)
+        =>PrepareReaper(package,dir,output,items?"--items":colors?"--colors":null);
+    internal static void PrepareReaper(string package,string dir,string output,string? format)
     {
         var assets=Path.Combine(dir,"assets");
         var (doc, media) = Read(package, dir,assets);
-        if(doc.Timeline!=null){var edited=Path.Combine(dir,Guid.NewGuid()+".mp4");MediaEdits.Compose(media,doc,assets,edited,default).GetAwaiter().GetResult();media=edited;}
         if(doc.Version==2)throw new InvalidDataException(L.Text("图片审阅包不含视频时间线，无法导入 REAPER。"));
+        IEnumerable<string> rows=doc.Notes.Select(n=>n.ReaperRow(format!=null));
+        long duration=doc.DurationUs;
+        if(format is "--items" or "--layers"){
+            bool layers=format=="--layers";
+            var result=ReaperDelivery.Prepare(doc,media,assets,dir,RulerScale.DefaultUnit,default,nativePointLength:layers).GetAwaiter().GetResult();
+            media=result.Video;duration=result.VideoDurationUs;rows=result.Rows;
+            // Previously installed receivers only understand marker and media rows.
+            if(layers)rows=rows.Prepend("title\t"+Hex(doc.FileName));
+        }else if(doc.Timeline!=null){
+            // Older receivers accept a single flattened media item, including its audio tail.
+            var info=Probe.Inspect(media,default).GetAwaiter().GetResult();
+            var flat=MediaEdits.ForFlattenedExport(doc,info.Audio!="");
+            var edited=Path.Combine(dir,Guid.NewGuid()+".mp4");
+            MediaEdits.Compose(media,flat,assets,edited,default).GetAwaiter().GetResult();
+            media=edited;duration=flat.DurationUs;
+        }
         static string Hex(string s) => Convert.ToHexString(Encoding.UTF8.GetBytes(s));
         Atomic(output, s => {
             using var w = new StreamWriter(s,new UTF8Encoding(false),1024,true);
-            w.WriteLine(doc.Id); w.WriteLine(Hex(media)); w.WriteLine(doc.DurationUs);
-            foreach (var n in doc.Notes) w.WriteLine(n.ReaperRow(colors));
+            w.WriteLine(doc.Id); w.WriteLine(Hex(media)); w.WriteLine(duration);
+            foreach (var row in rows) w.WriteLine(row);
         });
     }
 }

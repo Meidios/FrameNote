@@ -32,6 +32,13 @@ public sealed partial class Desk
     string? preview;
     bool deskLoaded,needsPreview,reviewOnly;
 
+    async Task<bool> SupportsReviewAudio(Probe.Info info){
+        if(info.Audio!="flac")return true;
+        await EnsureReviewWeb();
+        // A playable video stream alone does not establish that the embedded audio will play.
+        return await web.ExecuteScriptAsync("""document.createElement('audio').canPlayType('audio/mp4; codecs="fLaC"') !== ''""")=="true";
+    }
+
     void ReportMediaLoad(string? stage,int? percent=null){
         if(native?.IsVisible==true){
             if(preparing!=null && !needsPreview && percent is int value)native.SetPreviewProgress(value);
@@ -96,6 +103,10 @@ public sealed partial class Desk
         bool generate=needsPreview && preview==null;
         native.Preparing(true,generate?L.Text("正在生成批注预览"):L.Text("正在打开逐帧审阅…"),true);
         try{
+            if(!deskLoaded && !needsPreview && playbackInfo!=null && !await SupportsReviewAudio(playbackInfo)){
+                needsPreview=true;
+                native.Preparing(true,L.Text("正在生成批注预览"),true);
+            }
             if(!deskLoaded || needsPreview && preview==null)await LoadReview(position,cancel.Token,playOnLoad:initialUs!=null);
             else Send(new{type="resumeReview",us=position});
             SetPreviewFullscreen(false);

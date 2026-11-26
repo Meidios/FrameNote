@@ -647,7 +647,7 @@ $('body').addEventListener('compositionend',()=>persistEdit('text'));
 $('body').addEventListener('blur',()=>{lastEditGroup=null});
 function leaveDetails(e){
  if(e.type==='focusin'&&e.target===$('stage'))return;
- if((editing||tool)&&!imagePending&&!e.target.closest('#editor,#annotationTools,#overlay,#notePreview,#canvasMenu,.noteCopy,#renumberNotes'))finishEdit();
+ if((editing||tool)&&!imagePending&&!e.target.closest('#editor,#annotationTools,#overlay,#notePreview,#canvasMenu,.noteCopy,#noteActions'))finishEdit();
 }
 document.addEventListener('pointerdown',leaveDetails,true);
 document.addEventListener('focusin',leaveDetails,true);
@@ -778,6 +778,7 @@ function deleteNote(id){
  finishEdit();
  commit(doc.notes.filter(n=>n.id!==id),selected===id?null:selected);
 }
+$('toggleCanvasNumbers').onclick=()=>send('toggleCanvasNumbers');
 $('renumberNotes').onclick=()=>{
  if(!canAnnotate()||geometryDrag||drag)return;
  const numbers=new Map(notesByTime(doc.notes).map((n,i)=>[n.id,i+1]));

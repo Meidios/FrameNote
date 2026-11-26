@@ -13,6 +13,7 @@ namespace FrameNote;
 internal partial class ShortcutDialog : Window
 {
     readonly ShortcutMap edited;
+    readonly EditorPreferences initialPreferences;
     readonly Action<EditorPreferences,bool,string,OutputSettings> save;
     readonly Desk desk;
     readonly Dictionary<string,Button> rows=new();
@@ -35,7 +36,7 @@ internal partial class ShortcutDialog : Window
         var icon=new IconBitmapDecoder(new Uri("pack://application:,,,/FrameNote;component/Assets/FrameNote.ico"),
             BitmapCreateOptions.None,BitmapCacheOption.OnLoad);
         AboutIcon.Source=icon.Frames.MaxBy(frame=>frame.PixelWidth);
-        Owner=desk=owner;this.save=save;edited=new(current.Bindings);
+        Owner=desk=owner;this.save=save;initialPreferences=current;edited=new(current.Bindings);
         DefaultRulerUnit.SelectedValue=current.RulerUnit;
         for(double zoom=1;zoom<=Drawing.MaxZoom;zoom+=.5)
             DefaultLensZoom.Items.Add(new ComboBoxItem{Tag=zoom,Content=zoom.ToString("0.#")+"×"});
@@ -87,6 +88,7 @@ internal partial class ShortcutDialog : Window
 
     void PageChanged(object sender,SelectionChangedEventArgs e){
         if(e.OriginalSource!=Pages||ResetButton==null)return;
+        if(ReaperTab.IsSelected)ReaperScriptAction(_=>{});
         ResetButton.Visibility=GeneralTab.IsSelected||AnnotationTab.IsSelected||ShortcutsTab.IsSelected||RecordingTab.IsSelected||ExcelTab.IsSelected?Visibility.Visible:Visibility.Collapsed;
         if(UpdatesTab.IsSelected && ReleaseVersions.ItemsSource==null){
             Desk.BindReleaseNotes(ReleaseVersions,ReleaseText,()=>{
@@ -101,6 +103,38 @@ internal partial class ShortcutDialog : Window
             Icon=(Geometry)FindResource("sc-"+section.Icon),section.Title,section.Topics
         }).ToArray();
     }
+
+    void ReaperScriptAction(Action<ReaperIntegration> action){
+        var scripts=desk.ReaperScripts;
+        try{
+            action(scripts);
+            var folder=scripts.TargetFolder;
+            var target=System.IO.Path.Combine(folder,ReaperIntegration.ActionName);
+            var path=scripts.Installed??target;
+            bool present=File.Exists(path)||File.Exists(path+".app");
+            bool current=present && scripts.Current(path);
+            ReaperStatus.Text=L.Text(current?"已安装，脚本为最新版本":present?"脚本需要更新或修复":"尚未安装脚本");
+            ReaperInstalledPath.Text=present?path:"";
+            ReaperInstalledPath.Visibility=present?Visibility.Visible:Visibility.Collapsed;
+            ReaperUninstall.IsEnabled=present;
+            bool same=string.Equals(target,path,StringComparison.OrdinalIgnoreCase);
+            ReaperInstall.Content=L.Text(!present?"安装脚本":!same?"迁移到所选目录":"更新或修复脚本");
+            ReaperFolder.Text=folder;
+            ReaperAuto.IsEnabled=scripts.CustomFolder!=null;
+            ReaperFolderMode.Text=L.Text(ReaperAuto.IsEnabled?"手动选择的目录":"自动识别的目录");
+            ReaperError.Text="";
+        }catch(Exception ex) when(ex is IOException or UnauthorizedAccessException or ArgumentException){
+            ReaperError.Text=ex.Message;
+        }
+    }
+    void ChooseReaperFolder(object sender,RoutedEventArgs e)=>ReaperScriptAction(scripts=>{
+        var picker=new Microsoft.Win32.OpenFolderDialog{Title=L.Text("选择 REAPER 脚本安装目录"),InitialDirectory=scripts.TargetFolder};
+        if(picker.ShowDialog(this)==true)scripts.SetFolder(picker.FolderName);
+    });
+    void AutoReaperFolder(object sender,RoutedEventArgs e)=>ReaperScriptAction(scripts=>scripts.SetFolder(null));
+    void InstallReaperScript(object sender,RoutedEventArgs e)=>ReaperScriptAction(scripts=>scripts.Install(scripts.TargetFolder));
+    void UninstallReaperScript(object sender,RoutedEventArgs e)=>ReaperScriptAction(scripts=>
+        scripts.Uninstall(scripts.Installed??System.IO.Path.Combine(scripts.TargetFolder,ReaperIntegration.ActionName)));
 
     Viewbox MakeIcon(string id,int size=16){
         var path=new System.Windows.Shapes.Path{Data=(Geometry)FindResource("sc-"+id),StrokeThickness=1.7,
@@ -279,31 +313,20 @@ internal partial class ShortcutDialog : Window
     }
     void EnableRowDrag<T>(DockPanel row,List<T> items,int index,Action refresh){
         Point? start=null;
-        string format="FrameNote.Settings."+typeof(T).Name;
-        row.Background=Brushes.Transparent;row.AllowDrop=true;
+        row.Background=Brushes.Transparent;
         var grip=new Border{Width=20,Cursor=Cursors.SizeNS,Background=Brushes.Transparent,Child=MakeIcon("grip",13),ToolTip=L.Text("拖动排序")};
         row.Children.Add(grip);
-        row.PreviewMouseLeftButtonDown+=(_,e)=>start=e.GetPosition(this);
+        row.PreviewMouseLeftButtonDown+=(_,e)=>{start=e.GetPosition(this);if(grip.IsMouseOver)grip.CaptureMouse();};
+        row.PreviewMouseLeftButtonUp+=(_,_)=>{start=null;if(grip.IsMouseCaptured)grip.ReleaseMouseCapture();};
         row.PreviewMouseMove+=(_,e)=>{
             if(e.LeftButton!=MouseButtonState.Pressed){start=null;return;}
             if(start is not {} from)return;
             var delta=e.GetPosition(this)-from;
             if(Math.Abs(delta.Y)<SystemParameters.MinimumVerticalDragDistance && Math.Abs(delta.X)<SystemParameters.MinimumHorizontalDragDistance)return;
             start=null;Mouse.Capture(null);e.Handled=true;
-            DragDrop.DoDragDrop(row,new DataObject(format,index),DragDropEffects.Move);
-        };
-        row.PreviewDragOver+=(_,e)=>{
-            if(!e.Data.GetDataPresent(format))return;
-            e.Effects=DragDropEffects.Move;e.Handled=true;row.SetResourceReference(Panel.BackgroundProperty,"card");row.BringIntoView();
-        };
-        row.DragLeave+=(_,_)=>row.Background=Brushes.Transparent;
-        row.PreviewDrop+=(_,e)=>{
-            if(e.Data.GetData(format) is not int source||source<0||source>=items.Count)return;
-            row.Background=Brushes.Transparent;e.Handled=true;
-            int dest=index+(e.GetPosition(row).Y>row.ActualHeight/2?1:0);
-            if(dest>source)dest--;
-            if(dest==source)return;
-            T item=items[source];items.RemoveAt(source);items.Insert(dest,item);refresh();
+            SettingsRowDrag.Run(row,index,e.GetPosition(row).Y-delta.Y,destination=>{
+                T item=items[index];items.RemoveAt(index);items.Insert(destination,item);refresh();
+            });
         };
     }
     void RefreshPresetRows(){
@@ -369,14 +392,13 @@ internal partial class ShortcutDialog : Window
         if(RecordingTab.IsSelected){SetRecordingFields(OutputSettings.Defaults);return;}
         if(ShortcutsTab.IsSelected){Reset(Shortcuts.Actions);return;}
         if(AnnotationTab.IsSelected){
+            DefaultRulerUnit.SelectedValue=RulerScale.DefaultUnit;
             DefaultLensZoom.SelectedValue=Drawing.DefaultZoom;DefaultOpacity.Text="80";
             presetColors.Clear();presetColors.AddRange(Note.DefaultColors);RefreshPresetRows();
             toolbar.Clear();toolbar.AddRange(ToolbarEntry.Defaults());RefreshToolbar();return;
         }
         if(GeneralTab.IsSelected){
             InterfaceLanguage.SelectedValue=L.DefaultLanguage;
-            DefaultRulerUnit.SelectedValue=RulerScale.DefaultUnit;
-
             ExportDirectory.Text=OutputSettings.Defaults.ExportDirectory;
             SetExportBar(ExportBarOptions.Defaults);
         }
@@ -412,7 +434,8 @@ internal partial class ShortcutDialog : Window
                 copy?OutputSettings.DirectoryPath(CopyDirectory.Text):CopyDirectory.Text,OutputSettings.DirectoryPath(ExportDirectory.Text),
                 new(ExportBarEnabled.IsChecked==true,(string)ExportBarBackground.Tag,(string)ExportBarFill.Tag),ReadExcelTemplate(),HideWhileRecording.IsChecked==true);
             if(!int.TryParse(DefaultOpacity.Text,out int opacity) || opacity is <0 or >100)throw new InvalidDataException(L.Text("不透明度须为 0 到 100 之间的整数。"));
-            save(new(edited,(string)DefaultRulerUnit.SelectedValue,(double)DefaultLensZoom.SelectedValue,[..presetColors],opacity,[..toolbar]),
+            save(initialPreferences with{Bindings=edited,RulerUnit=(string)DefaultRulerUnit.SelectedValue,LensZoom=(double)DefaultLensZoom.SelectedValue,
+                    PresetColors=[..presetColors],DefaultOpacity=opacity,Toolbar=[..toolbar]},
                 AutomaticUpdates.IsChecked==true,(string)InterfaceLanguage.SelectedValue,output);DialogResult=true;
         }catch(Exception ex) when(ex is IOException or InvalidDataException or UnauthorizedAccessException or InvalidOperationException or ArgumentException or NotSupportedException){Message(SaveError,ex.Message);}
     }

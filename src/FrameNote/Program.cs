@@ -19,7 +19,11 @@ public static class Program
         }
         L.Initialize();
         if (args.FirstOrDefault()=="--prepare-reaper") {
-            try { if(args.Length!=4 && !(args.Length==5 && args[4]=="--colors")) return 2; Packages.PrepareReaper(args[1],args[2],args[3],args.Length==5); return 0; }
+            try {
+                if(args.Length!=4 && !(args.Length==5 && args[4] is "--colors" or "--items" or "--layers"))return 2;
+                Packages.PrepareReaper(args[1],args[2],args[3],args.ElementAtOrDefault(4));
+                return 0;
+            }
             catch(Exception e) { if(args.Length>=4) File.WriteAllText(args[3]+".error",e.Message); return 1; }
         }
         var player=string.Equals(Path.GetFileName(Environment.ProcessPath),"FrameNote Player.exe",StringComparison.OrdinalIgnoreCase);
@@ -195,6 +199,7 @@ public sealed partial class Desk : Window
         next.Check();
         if(picture){await ShowImage(nextMedia,next.FileName,nextKey:nextKey,review:next,package:package);reviewOnly=mode==VideoOpenMode.Review;return;}
         var compatibility=!infoMedia!.Direct(nextMedia);
+        if(!compatibility && !playOriginal)compatibility=!await SupportsReviewAudio(infoMedia);
         long[]? directFrames=null;
         string? nextPreview=null;
 
@@ -226,6 +231,16 @@ public sealed partial class Desk : Window
         try{
             using var msg=JsonDocument.Parse(raw);var p=msg.RootElement; var op=p.GetProperty("type").GetString();
             if(op=="diagnostic"){RuntimeLog.WebMessage(p.GetProperty("message").GetString(),p.GetProperty("error").GetBoolean());return;}
+            if(op=="toggleCanvasNumbers"){ToggleCanvasNumbers();return;}
+            if(op=="watchAudioDrop"){WatchAudioDrop(p);return;}
+            if(op=="acceptAudioDrop"){
+                if(releasedAudioDrop is {} drop && drop.Id==p.GetProperty("id").GetGuid()){
+                    releasedAudioDrop=null;
+                    await ImportNoteAudio(drop.DocumentId,drop.At,null,drop.Files);
+                }
+                return;
+            }
+            if(op=="voiceWave"){await SendVoiceWave(p);return;}
             if(op=="pickAudio"){
                 if(pending||configuring||viewingImage||doc==null||voiceCapture!=null)return;
                 var picker=new Microsoft.Win32.OpenFileDialog{Title=L.Text("添加音频文件"),Multiselect=true,

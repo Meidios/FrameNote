@@ -42,6 +42,7 @@ internal static class ShortcutLabels{
 }
 
 internal sealed record EditorPreferences(ShortcutMap Bindings,string RulerUnit,double LensZoom,string[] PresetColors,int DefaultOpacity,ToolbarEntry[] Toolbar){
+    internal bool ShowCanvasNumbers {get;init;}=true;
     internal EditorPreferences(ShortcutMap bindings):this(bindings,RulerScale.DefaultUnit,Drawing.DefaultZoom,Note.DefaultColors,80,ToolbarEntry.Defaults()){}
     internal static bool ValidPalette(string[]? colors)=>colors is {Length:>=1 and <=10} &&
         colors.All(c=>c is {Length:7} && c[0]=='#' && c.Skip(1).All(Uri.IsHexDigit)) &&
@@ -147,7 +148,9 @@ internal sealed class Shortcuts(string root)
                 foreach(var a in Actions)map[a.Id]=savedKeys.TryGetValue(a.Id,out var keys)?keys:a.Defaults
                     .Where(key=>!Actions.Any(b=>savedKeys.TryGetValue(b.Id,out var other) && other.Any(k=>Overlap(a,key,b,k)))).ToArray();
             }
-            return new(map,RulerScale.SupportsUnit(unit)?unit!:RulerScale.DefaultUnit,zoom,EditorPreferences.ValidPalette(colors)?colors!:Note.DefaultColors,opacity,toolbar);
+            return new(map,RulerScale.SupportsUnit(unit)?unit!:RulerScale.DefaultUnit,zoom,EditorPreferences.ValidPalette(colors)?colors!:Note.DefaultColors,opacity,toolbar){
+                ShowCanvasNumbers=!saved.RootElement.TryGetProperty("showCanvasNumbers",out var show)||show.ValueKind!=JsonValueKind.False
+            };
         }catch(Exception e) when(e is IOException or JsonException or UnauthorizedAccessException){return new(Defaults());}
     }
     internal EditorPreferences Save(EditorPreferences original,EditorPreferences edited,Action<Shortcut[],Shortcut[]> register){
@@ -163,6 +166,7 @@ internal sealed class Shortcuts(string root)
             var colors=original.PresetColors.SequenceEqual(edited.PresetColors)?latest.PresetColors:edited.PresetColors;
             int opacity=original.DefaultOpacity==edited.DefaultOpacity?latest.DefaultOpacity:Math.Clamp(edited.DefaultOpacity,0,100);
             var toolbar=original.Toolbar.SequenceEqual(edited.Toolbar)?latest.Toolbar:ToolbarEntry.Normalize(edited.Toolbar);
+            bool showCanvasNumbers=original.ShowCanvasNumbers==edited.ShowCanvasNumbers?latest.ShowCanvasNumbers:edited.ShowCanvasNumbers;
             var next=latest.Bindings;
             var previousRecord=next["record"];
             foreach(var a in Actions)if(!original.Bindings[a.Id].SequenceEqual(edited.Bindings[a.Id]))next[a.Id]=edited.Bindings[a.Id];
@@ -176,10 +180,11 @@ internal sealed class Shortcuts(string root)
                 if(!colors.SequenceEqual(Note.DefaultColors))values["presetColors"]=colors;
                 if(opacity!=80)values["defaultOpacity"]=opacity;
                 if(!toolbar.SequenceEqual(ToolbarEntry.Defaults()))values["annotationToolbar"]=toolbar;
+                if(!showCanvasNumbers)values["showCanvasNumbers"]=false;
                 Packages.Atomic(FileName,s=>JsonSerializer.Serialize(s,values,Review.Json));
             }
             catch{if(changed)register(previousRecord,previousRecord);throw;}
-            return new(next,unit,zoom,colors,opacity,toolbar);
+            return new(next,unit,zoom,colors,opacity,toolbar){ShowCanvasNumbers=showCanvasNumbers};
         }finally{guard.ReleaseMutex();}
     }
     static readonly ShortcutMap DefaultsMap=Defaults();

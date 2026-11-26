@@ -112,14 +112,26 @@ try:
                 page.locator("#voiceRecord").click()
                 wait(page,"!!voiceRecording && !transport.paused")
                 assert panel.evaluate("el=>el.inert") and page.evaluate("v.volume===0")
+                wait(page,"!take.hidden && recordedUs>150000 && envelope.some(p=>p>.01)")
+                first_width=page.locator("#voiceTake").bounding_box()["width"]
+                first_us=page.evaluate("recordedUs")
+                wait(page,"first=>recordedUs>first+180000",first_us)
+                assert page.locator("#voiceTake").bounding_box()["width"]>first_width
+                assert page.evaluate("takeTime.textContent.includes(fmt(Math.min(recordedUs,doc.durationUs-voiceDraft.startUs)))")
+                assert page.evaluate("wave.getContext('2d').getImageData(0,0,wave.width,wave.height).data.some((v,i)=>i%4===3&&v>0)")
+                page.locator("#trackDesk").screenshot(path=str(work/"live-mic-waveform.png"))
                 current=mutes()
                 assert current and all(x.endswith(" True") for x in current),current
-                time.sleep(1.8)
+                wait(page,"recordedUs>=1850000")
                 page.locator("#voiceRecord").click()
                 wait(page,"!voicePending && !voiceRecording")
+                assert page.locator("#voiceTake").is_hidden()
                 assert mutes()==original_mutes
                 assert page.evaluate("v.volume===Number($('playbackVolume').value)/100")
                 assert page.evaluate("doc.notes.length")==count+1,page.locator("#status").inner_text()
+                wait(page,"""()=>{const id=doc.notes.at(-1).id,clip=Array.from($('voiceClips').children).find(b=>b.dataset.noteId===id);
+                    const ref=clip?.querySelector('.voiceClipWave use')?.getAttribute('href');
+                    return ref && document.querySelector(ref)?.getBBox().height>1}""")
                 uri=page.evaluate("imageBase+doc.notes.at(-1).voice.asset+'.mp3'")
                 sample=work/f"voice-mic-{count}.mp3"
                 shutil.copyfile(Path(url2pathname(urlsplit(uri).path)),sample)
@@ -131,6 +143,20 @@ try:
             quieter=voice()
             assert abs(quieter[0]-isolated[0]+6)<1 and quieter[1]<quieter[0]-45,(quieter,isolated)
             print("Microphone vs simultaneous system-only tone in MP3 (dB):",isolated,quieter,flush=True)
+            # Stop the virtual test tones during a take. Its live waveform should
+            # retain the voiced section and show silence in the new section.
+            count=page.evaluate("doc.notes.length")
+            page.evaluate("()=>{transport.pause();transport.currentTime=0}")
+            wait(page,"!v.seeking && transport.currentTime<.05")
+            page.locator("#voiceRecord").click()
+            wait(page,"recordedUs>450000 && envelope.some(p=>p>.01)")
+            tone.communicate("\n",timeout=5);tone=None
+            wait(page,"envelope.length>=40 && Math.max(...envelope.slice(-8))<.002")
+            page.locator("#trackDesk").screenshot(path=str(work/"voice-to-silence.png"))
+            page.keyboard.press("Escape")
+            wait(page,"!voicePending && !voiceRecording")
+            assert page.locator("#voiceTake").is_hidden() and page.evaluate("doc.notes.length")==count
+            assert mutes()==original_mutes
             mic_toggle.click()
             unmuted=rows.locator('.muteChannel[aria-pressed="false"]')
             while unmuted.count():unmuted.first.click()

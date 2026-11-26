@@ -27,19 +27,6 @@ public sealed partial class Desk
             return source with{Version=1,DurationUs=this.DurationUs,Notes=notes,Timeline=null};
         }
     }
-    static Review ExportReview(Review review,bool hasSourceAudio){
-        if(review.Timeline is not {} timeline)return review;
-        timeline=timeline with{Trimmed=null};
-        // A silent source can still have an editable original-audio lane.
-        if(!hasSourceAudio)timeline=timeline with{Clips=timeline.Clips.Where(c=>c.Track!="audio").ToList()};
-        long end=timeline.Clips.Select(c=>c.StartUs+c.DurationUs).DefaultIfEmpty().Max();
-        end=Math.Max(end,review.Notes.Max(n=>n.EndUs)??0);
-        // A Mark inside the cut stops at its end. A standalone Mark after the cut needs display time.
-        var lastMark=review.Notes.Where(n=>n.EndUs==null).MaxBy(n=>n.StartUs);
-        if(lastMark!=null && lastMark.StartUs>=end)end=VideoAnnotations.End(lastMark,review.DurationUs);
-        if(end==0)throw new InvalidDataException(L.Text("时间线上没有可导出的片段或批注。"));
-        return review with{DurationUs=end,Timeline=timeline};
-    }
     async Task ExportVideo(VideoOutput target,ExportTimeRange? range){
         if(doc==null || media==null || playbackInfo==null || viewingImage || voiceCapture!=null)return;
         var source=doc;
@@ -48,14 +35,15 @@ public sealed partial class Desk
         string format=gif?"GIF":"MP4",extension=gif?".gif":".mp4";
         string stem=Path.GetFileNameWithoutExtension(doc.FileName)+L.Text("_批注");
         await Work(()=>WithExportProgress(format,async token=>{
-            var review=range?.Slice(source)??ExportReview(source,hasSourceAudio);
+            var review=range?.Slice(source)??MediaEdits.ForFlattenedExport(source,hasSourceAudio);
             var mediaReview=range==null?review:source;
             var options=CurrentOutput();
             async Task Render(string output){
-                int prepared=mediaReview.Timeline==null?0:40;
+                bool original=MediaEdits.OriginalTracks(mediaReview,hasSourceAudio);
+                int prepared=original?0:40;
                 if(prepared>0)ReportExport(L.Text("正在准备剪辑后的画面与声音"),0);
-                var input=await EditedMedia(token,p=>ReportExport(L.Text("正在准备剪辑后的画面与声音"),p*prepared/100),mediaReview);
-                await RenderVideo(review,source,range,input,output,prepared,gif,options.ExportBar,token);
+                var input=original?media!:await EditedMedia(token,p=>ReportExport(L.Text("正在准备剪辑后的画面与声音"),p*prepared/100),mediaReview);
+                await RenderVideo(review,source,range,input,output,prepared,gif,options.ExportBar,original,token);
             }
             if(target!=VideoOutput.GifClipboard){
                 var path=await WriteOutput(options.ExportDirectory,stem+extension,Render,token);
@@ -71,7 +59,7 @@ public sealed partial class Desk
             }finally{File.Delete(output);}
         }));
     }
-    async Task RenderVideo(Review review,Review source,ExportTimeRange? range,string input,string output,int prepared,bool gif,ExportBarOptions bar,CancellationToken token){
+    async Task RenderVideo(Review review,Review source,ExportTimeRange? range,string input,string output,int prepared,bool gif,ExportBarOptions bar,bool original,CancellationToken token){
         review.Check();ReportExport(L.Text("正在准备视频与批注"),prepared);
         int renderStart=prepared+5;
         void RenderProgress(int percent)=>ReportExport(gif?L.Text("正在渲染 GIF"):L.Text("正在渲染 MP4"),renderStart+(100-renderStart)*percent/100);
@@ -83,15 +71,16 @@ public sealed partial class Desk
         string frameRate=gif?gifFps.ToString(CultureInfo.InvariantCulture):format.FrameRate;
         int barHeight=!gif && bar.Enabled?VideoProgressBar.Height(height):0;
         var renderer=new VideoAnnotations(review,width,height,format.Width,format.Height,ImageDirectory,defaultRulerUnit,footerBottomInset:barHeight);
-        string videoFilter=$"scale={width}:{height},setsar=1";
-        bool liveLens=review.Notes.Any(n=>n.Shape?.Kind=="magnifier");
+        string videoFilter;
+        var lenses=review.Notes.Where(n=>n.Shape?.Kind=="magnifier").OrderBy(n=>n.Number).ToArray();
+        bool liveLens=lenses.Length>4;
         string[] mediaInput=["-i",input];
         long audioLeadUs=0;
         if(range!=null){
             // A Region can start between frames. Decode the frame already on screen
             // and shift subsequent presentation times onto the exact selection clock.
             long frameStart;
-            if(source.Timeline!=null){
+            if(!original){
                 double frame=Math.Floor((range.StartUs+.5)*format.Fps/1e6);
                 frameStart=(long)Math.Round(frame*1e6/format.Fps);
             }else{
@@ -102,8 +91,9 @@ public sealed partial class Desk
             audioLeadUs=range.StartUs-seekUs;
             mediaInput=["-ss",Num(seekUs/1e6),"-t",Num((range.EndUs-seekUs)/1e6),"-i",input];
             long frameCount=gif?gifFrames:(long)Math.Ceiling(review.DurationUs*fps/1e6);
-            videoFilter+=$",settb=AVTB,setpts='max(0,PTS-{audioLeadUs})',tpad=stop_mode=clone:stop=-1,fps={frameRate}:start_time=0:round=up,trim=end_frame={frameCount}";
-        }else videoFilter+=$",fps={frameRate}"+(gif?$":round=up,tpad=stop_mode=clone:stop=-1,trim=end_frame={gifFrames}":"");
+            videoFilter=$"settb=AVTB,setpts='max(0,PTS-{audioLeadUs})',tpad=stop_mode=clone:stop=-1,fps={frameRate}:start_time=0:round=up,trim=end_frame={frameCount}";
+        }else videoFilter=$"fps={frameRate}"+(gif?$":round=up,tpad=stop_mode=clone:stop=-1,trim=end_frame={gifFrames}":"");
+        videoFilter+=$",scale={width}:{height},setsar=1";
         var encode=new List<string>{"-nostdin","-v","error"};
         encode.AddRange(mediaInput);
         var filters=new List<string>();
@@ -119,7 +109,18 @@ public sealed partial class Desk
                     p=>ReportExport(L.Text("正在准备视频与批注"),prepared+5*p/100));
                 encode.AddRange(["-f","concat","-safe","0","-i",timeline]);
                 filters.Add($"[0:v:0]{videoFilter},setpts=PTS-STARTPTS,pad={width}:{renderer.OutputHeight}[base]");
-                filters.Add("[base][1:v:0]overlay=eof_action=repeat[video]");
+                string background="[base]";
+                if(lenses.Length>0){
+                    filters.Add("[base]split="+(lenses.Length+1)+"[background]"+string.Concat(lenses.Select((_,i)=>$"[lens{i}]")));
+                    background="[background]";
+                    for(int i=0;i<lenses.Length;i++){
+                        var n=lenses[i];var (rect,crop)=VideoAnnotations.LensBounds(n.Shape!,width,height);
+                        filters.Add($"[lens{i}]crop={crop.Width}:{crop.Height}:{crop.X}:{crop.Y}:exact=1,scale={Math.Max(1,(int)rect.Width)}:{Math.Max(1,(int)rect.Height)},format=yuva444p,colorchannelmixer=aa={Num(n.Alpha)}[glass{i}]");
+                        filters.Add($"{background}[glass{i}]overlay={(int)rect.X}:{(int)rect.Y}:enable='gte(t,{Num(n.StartUs/1e6)})*lt(t,{Num(VideoAnnotations.End(n,review.DurationUs)/1e6)})'[zoom{i}]");
+                        background=$"[zoom{i}]";
+                    }
+                }
+                filters.Add(background+"[1:v:0]overlay=eof_action=repeat[video]");
             }else{
                 filters.Add($"[0:v:0]{videoFilter},setpts=PTS-STARTPTS[video]");
             }
@@ -128,12 +129,12 @@ public sealed partial class Desk
                 string scene=liveLens?"[1:v:0]":videoMap;
                 filters.Add(scene+"split[pixels][colors]");
                 filters.Add("[colors]palettegen=stats_mode=single[palette]");
-                filters.Add("[pixels][palette]paletteuse=new=1:dither=sierra2_4a[gif]");
+                filters.Add("[pixels][palette]paletteuse=new=1:"+ExportEncoding.GifDither+"[gif]");
                 videoMap="[gif]";
             }else{
-                var info=await Probe.Inspect(input,token);
+                var info=original?playbackInfo!:await Probe.Inspect(input,token);
                 int firstVoice=review.Notes.Count>0?2:1;
-                int voiceCount=AddExportAudio(encode,filters,source,range??new(0,review.DurationUs),info.Audio!="",firstVoice,audioLeadUs);
+                int voiceCount=AddExportAudio(encode,filters,source,range??new(0,review.DurationUs),info.Audio!="",firstVoice,audioLeadUs,original);
                 audio=info.Audio!=""||voiceCount>0;
                 if(barHeight>0){
                     overlayDirectory??=Directory.CreateTempSubdirectory("framenote-overlay-").FullName;
@@ -152,34 +153,31 @@ public sealed partial class Desk
                 encode.AddRange(["-frames:v",gifFrames.ToString(),"-an","-loop","0","-final_delay",lastDelay.ToString()]);
             }else{
                 if(audio)encode.AddRange(["-map","[audio]","-c:a","aac","-b:a","192k"]);
-                encode.AddRange(["-t",Num(review.DurationUs/1e6),"-c:v","libx264","-preset","medium","-crf","20","-pix_fmt","yuv420p","-movflags","+faststart"]);
+                encode.AddRange(["-t",Num(review.DurationUs/1e6),"-pix_fmt","yuv420p","-movflags","+faststart"]);
             }
             RenderProgress(0);
-            if(liveLens){
-                encode.Add(output);
-                await EncodeLiveLenses(mediaInput,videoFilter,renderer,width,height,fps,review.DurationUs,encode,RenderProgress,token);
-            }else{
-                encode.AddRange(["-abort_on","empty_output_stream",output]);
-                await Probe.EncodeWithProgress(encode,review.DurationUs,RenderProgress,token);
+            Task Write(string[] codec){
+                if(liveLens)return EncodeLiveLenses(mediaInput,videoFilter,renderer,width,height,fps,review.DurationUs,[..encode,..codec,output],RenderProgress,token);
+                return Probe.EncodeWithProgress([..encode,..codec,"-abort_on","empty_output_stream",output],review.DurationUs,RenderProgress,token);
             }
+            if(gif)await Write([]);
+            else await ExportEncoding.H264(width,renderer.OutputHeight,20,output,token,Write);
         }finally{if(overlayDirectory!=null)Directory.Delete(overlayDirectory,true);}
     }
-    int AddExportAudio(List<string> encode,List<string> filters,Review source,ExportTimeRange range,bool hasSourceAudio,int firstVoice,long audioLeadUs){
+    int AddExportAudio(List<string> encode,List<string> filters,Review source,ExportTimeRange range,bool hasSourceAudio,int firstVoice,long audioLeadUs,bool separateVoices=false){
         var mix=new List<string>();
         if(hasSourceAudio){
-            string trim=audioLeadUs>0?$"atrim=start={Num(audioLeadUs/1e6)},":"";
-            filters.Add($"[0:a:0]{trim}asetpts=PTS-STARTPTS[original]");mix.Add("[original]");
+            filters.Add($"[0:a:0]aresample=async=1:first_pts=0,atrim=start={Num(audioLeadUs/1e6)}:duration={Num(range.DurationUs/1e6)},asetpts=PTS-STARTPTS[original]");mix.Add("[original]");
         }
         int count=0;
         // Edited timelines already contain their mixed voice clips in the composed input.
-        if(source.Timeline==null)foreach(var note in source.Notes){
-            if(note.Voice is not {} voice)continue;
-            long start=Math.Max(range.StartUs,note.StartUs);
-            long end=Math.Min(range.EndUs,Math.Min(note.EndUs??long.MaxValue,note.StartUs+voice.DurationUs));
+        if(source.Timeline==null || separateVoices)foreach(var clip in MediaEdits.AudioNotes(source)){
+            long start=Math.Max(range.StartUs,clip.StartUs);
+            long end=Math.Min(range.EndUs,clip.StartUs+clip.DurationUs);
             if(start>=end)continue;
-            encode.AddRange(["-i",ReviewVoice.PathFor(ImageDirectory,voice.Asset,voice.Format)]);
+            encode.AddRange(["-ss",Num((clip.SourceUs+start-clip.StartUs)/1e6),"-t",Num((end-start)/1e6),"-i",ReviewVoice.PathFor(ImageDirectory,clip.Asset!,clip.Format)]);
             string label=$"[voice{count}]";
-            filters.Add($"[{firstVoice+count}:a:0]atrim=start={Num((start-note.StartUs)/1e6)}:duration={Num((end-start)/1e6)},asetpts=PTS-STARTPTS,adelay={Num((start-range.StartUs)/1000d)}:all=1{label}");
+            filters.Add($"[{firstVoice+count}:a:0]asetpts=PTS-STARTPTS,adelay={Num((start-range.StartUs)/1000d)}:all=1{label}");
             mix.Add(label);count++;
         }
         if(mix.Count>0)filters.Add(string.Concat(mix)+$"amix=inputs={mix.Count}:duration=longest:normalize=0,alimiter=limit=0.95:level=0:latency=1[audio]");
